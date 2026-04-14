@@ -3,6 +3,8 @@
 import streamlit as st
 import os
 import random
+import json
+from datetime import date
 
 # Import our custom modules
 from srs_engine import get_todays_quiz_batch, process_review
@@ -11,28 +13,69 @@ from audio_engine import create_audio_file
 from db_manager import flag_word_in_database, get_progress_stats
 
 # ==========================================
-# 1. APP CONFIGURATION & STATE MANAGEMENT
+# 1. CACHE MANAGEMENT
+# ==========================================
+CACHE_FILE = "session_cache.json"
+
+def load_cached_session():
+    """Loads the user's session if it was saved today."""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                cache = json.load(f)
+            # Only load the cache if it's from today (so tomorrow starts fresh)
+            if cache.get("date") == str(date.today()):
+                return cache
+        except Exception:
+            pass
+    return None
+
+def save_cached_session():
+    """Saves the exact UI state to a file so it survives a browser refresh."""
+    cache = {
+        "date": str(date.today()),
+        "words_due": st.session_state.words_due,
+        "current_index": st.session_state.current_index,
+        "current_exercise": st.session_state.current_exercise,
+        "audio_path": st.session_state.audio_path,
+        "stage": st.session_state.stage,
+        "shuffled_options": st.session_state.shuffled_options,
+        "user_pinyin": st.session_state.user_pinyin,
+        "mcq_correct": st.session_state.mcq_correct
+    }
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(cache, f)
+
+# ==========================================
+# 2. APP CONFIGURATION & STATE MANAGEMENT
 # ==========================================
 st.set_page_config(page_title="Pinyin Immersion", page_icon="🎧", layout="centered")
 
 # Initialize Session State variables
 if 'words_due' not in st.session_state:
-    st.session_state.words_due = get_todays_quiz_batch()
-    st.session_state.current_index = 0
-    st.session_state.current_exercise = None
-    st.session_state.audio_path = None
+    cached_state = load_cached_session()
     
-    # New Multi-Stage UI trackers
-    st.session_state.stage = 1 # Stage 1: Pinyin, Stage 2: MCQ, Stage 3: Grading
-    st.session_state.shuffled_options = []
-    st.session_state.user_pinyin = ""
-    st.session_state.mcq_correct = None # NEW: Tracks if they got the translation right
+    if cached_state:
+        # Restore everything from the cache
+        for key, value in cached_state.items():
+            if key != "date":
+                st.session_state[key] = value
+    else:
+        # Start a fresh session
+        st.session_state.words_due = get_todays_quiz_batch()
+        st.session_state.current_index = 0
+        st.session_state.current_exercise = None
+        st.session_state.audio_path = None
+        st.session_state.stage = 1
+        st.session_state.shuffled_options = []
+        st.session_state.user_pinyin = ""
+        st.session_state.mcq_correct = None
+        save_cached_session()
 
 # ==========================================
-# 2. HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS
 # ==========================================
 def grade_word_and_next(grade):
-    """Saves the score and completely resets the UI state for the next word."""
     current_word = st.session_state.words_due[st.session_state.current_index]
     
     process_review(
@@ -42,23 +85,25 @@ def grade_word_and_next(grade):
         grade=grade
     )
     
-    # Move to the next word and reset all trackers
     st.session_state.current_index += 1
     st.session_state.current_exercise = None
     st.session_state.audio_path = None
     st.session_state.stage = 1
     st.session_state.shuffled_options = []
     st.session_state.user_pinyin = ""
-    st.session_state.mcq_correct = None # NEW: Reset the MCQ tracker
+    st.session_state.mcq_correct = None
+    save_cached_session() # Save progress to disk!
 
 def advance_to_stage_2():
     st.session_state.stage = 2
+    save_cached_session()
 
 def advance_to_stage_3():
     st.session_state.stage = 3
+    save_cached_session()
 
 # ==========================================
-# 3. THE MAIN USER INTERFACE
+# 4. THE MAIN USER INTERFACE
 # ==========================================
 st.title("🎧 Pinyin Immersion Study")
 
@@ -69,7 +114,6 @@ if st.session_state.current_index >= len(st.session_state.words_due):
 
 current_word = st.session_state.words_due[st.session_state.current_index]
 
-# Display Progress
 total_words = len(st.session_state.words_due)
 st.progress((st.session_state.current_index) / total_words)
 st.caption(f"Reviewing word {st.session_state.current_index + 1} of {total_words}")
@@ -77,7 +121,7 @@ st.caption(f"Reviewing word {st.session_state.current_index + 1} of {total_words
 st.markdown("---")
 
 # ==========================================
-# 3.5 THE PROGRESS SIDEBAR
+# 4.5 THE PROGRESS SIDEBAR
 # ==========================================
 with st.sidebar:
     st.header("📊 Global Progress")
@@ -106,7 +150,7 @@ with st.sidebar:
         st.write("No vocabulary found. Please check your CSV.")
 
 # ==========================================
-# 4. GENERATING THE EXERCISE
+# 5. GENERATING THE EXERCISE
 # ==========================================
 if st.session_state.current_exercise is None:
     with st.spinner("Generating localized audio scenario..."):
@@ -119,16 +163,27 @@ if st.session_state.current_exercise is None:
             options = exercise_data['english_distractors'] + [exercise_data['english_correct']]
             random.shuffle(options)
             st.session_state.shuffled_options = options
+            
+            save_cached_session() # Save to disk as soon as it's generated!
         else:
             st.error("Failed to generate exercise. Check your API connection.")
             st.stop()
 
 # ==========================================
-# 5. STAGE 1: PINYIN DICTATION
+# 6. STAGE 1: PINYIN DICTATION
 # ==========================================
 st.subheader("Listen & Transcribe:")
+
+# --- NEW: Audio Fallback Logic ---
 if st.session_state.audio_path and os.path.exists(st.session_state.audio_path):
     st.audio(st.session_state.audio_path, format="audio/mp3")
+else:
+    st.warning("⚠️ The audio engine failed to generate the voice file.")
+    if st.button("🔄 Retry Audio", type="primary"):
+        with st.spinner("Retrying audio..."):
+            st.session_state.audio_path = create_audio_file(st.session_state.current_exercise['chinese'])
+            save_cached_session()
+            st.rerun()
 
 if st.session_state.stage == 1:
     st.text_input("Type the Pinyin you hear:", key="pinyin_input")
@@ -138,7 +193,7 @@ if st.session_state.stage == 1:
         st.rerun()
 
 # ==========================================
-# 6. STAGE 2: MULTIPLE CHOICE MEANING
+# 7. STAGE 2: MULTIPLE CHOICE MEANING
 # ==========================================
 if st.session_state.stage >= 2:
     st.success(f"**Your Pinyin:** {st.session_state.user_pinyin}")
@@ -150,7 +205,6 @@ if st.session_state.stage == 2:
     selected_meaning = st.radio("Choose translation:", st.session_state.shuffled_options, index=None, label_visibility="collapsed")
     
     if st.button("Submit Meaning", type="primary", use_container_width=True, disabled=(selected_meaning is None)):
-        # --- NEW: Grade the multiple choice answer instantly ---
         if selected_meaning == st.session_state.current_exercise['english_correct']:
             st.session_state.mcq_correct = True
         else:
@@ -160,13 +214,12 @@ if st.session_state.stage == 2:
         st.rerun()
 
 # ==========================================
-# 7. STAGE 3: THE REVIEW PHASE & DICTIONARY
+# 8. STAGE 3: THE REVIEW PHASE & DICTIONARY
 # ==========================================
 if st.session_state.stage == 3:
     st.markdown("---")
     st.markdown("### The Solution")
     
-    # --- NEW: Display the MCQ feedback ---
     if st.session_state.mcq_correct:
         st.success("✅ **Translation:** Correct!")
     else:
@@ -176,13 +229,11 @@ if st.session_state.stage == 3:
     st.info(f"**Correct English:** {st.session_state.current_exercise['english_correct']}")
     st.caption(f"*(Characters: {st.session_state.current_exercise['chinese']})*")
     
-    # --- Grammar Point ---
     gp = st.session_state.current_exercise.get('grammar_point')
     if gp and gp.get('structure'):
         st.markdown("#### 🧠 Grammar Point")
         st.warning(f"**{gp['structure']}**: {gp['explanation']}")
 
-    # --- Dictionary Breakdown ---
     st.markdown("#### 📖 Dictionary Breakdown")
     st.write("Click on any Pinyin word below to reveal its meaning and character.")
     

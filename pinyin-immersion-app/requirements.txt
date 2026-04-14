@@ -1,5 +1,0 @@
-streamlit
-pandas
-groq
-edge-tts
-python-dotenv

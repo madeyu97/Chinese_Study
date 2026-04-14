@@ -26,6 +26,7 @@ if 'words_due' not in st.session_state:
     st.session_state.stage = 1 # Stage 1: Pinyin, Stage 2: MCQ, Stage 3: Grading
     st.session_state.shuffled_options = []
     st.session_state.user_pinyin = ""
+    st.session_state.mcq_correct = None # NEW: Tracks if they got the translation right
 
 # ==========================================
 # 2. HELPER FUNCTIONS
@@ -48,6 +49,7 @@ def grade_word_and_next(grade):
     st.session_state.stage = 1
     st.session_state.shuffled_options = []
     st.session_state.user_pinyin = ""
+    st.session_state.mcq_correct = None # NEW: Reset the MCQ tracker
 
 def advance_to_stage_2():
     st.session_state.stage = 2
@@ -59,43 +61,6 @@ def advance_to_stage_3():
 # 3. THE MAIN USER INTERFACE
 # ==========================================
 st.title("🎧 Pinyin Immersion Study")
-
-# ==========================================
-# 3.5 THE PROGRESS SIDEBAR
-# ==========================================
-# ==========================================
-# 3.5 THE PROGRESS SIDEBAR
-# ==========================================
-with st.sidebar:
-    st.header("📊 Global Progress")
-    stats = get_progress_stats()
-    
-    if stats['total'] > 0:
-        # Calculate percentages
-        unseen_pct = int((stats['unseen'] / stats['total']) * 100)
-        learning_pct = int((stats['learning'] / stats['total']) * 100)
-        mastered_pct = int((stats['mastered'] / stats['total']) * 100)
-        
-        # Display the total prominently
-        st.metric("Total CSV Vocabulary", stats['total'])
-        st.markdown("---")
-        
-        # Unseen Tracker
-        st.write(f"**👀 Unseen:** {stats['unseen']} words ({unseen_pct}%)")
-        st.progress(stats['unseen'] / stats['total'])
-        
-        # Learning Tracker
-        st.write(f"**🧠 Learning:** {stats['learning']} words ({learning_pct}%)")
-        st.progress(stats['learning'] / stats['total'])
-        
-        # Mastered Tracker
-        st.write(f"**🏆 Mastered:** {stats['mastered']} words ({mastered_pct}%)")
-        st.progress(stats['mastered'] / stats['total'])
-        
-        st.markdown("---")
-        st.caption("Mastered = successfully pushed 21+ days into the future.")
-    else:
-        st.write("No vocabulary found. Please check your CSV.")
 
 if st.session_state.current_index >= len(st.session_state.words_due):
     st.success("🎉 You're all caught up for today! Great job.")
@@ -112,6 +77,35 @@ st.caption(f"Reviewing word {st.session_state.current_index + 1} of {total_words
 st.markdown("---")
 
 # ==========================================
+# 3.5 THE PROGRESS SIDEBAR
+# ==========================================
+with st.sidebar:
+    st.header("📊 Global Progress")
+    stats = get_progress_stats()
+    
+    if stats['total'] > 0:
+        unseen_pct = int((stats['unseen'] / stats['total']) * 100)
+        learning_pct = int((stats['learning'] / stats['total']) * 100)
+        mastered_pct = int((stats['mastered'] / stats['total']) * 100)
+        
+        st.metric("Total CSV Vocabulary", stats['total'])
+        st.markdown("---")
+        
+        st.write(f"**👀 Unseen:** {stats['unseen']} words ({unseen_pct}%)")
+        st.progress(stats['unseen'] / stats['total'])
+        
+        st.write(f"**🧠 Learning:** {stats['learning']} words ({learning_pct}%)")
+        st.progress(stats['learning'] / stats['total'])
+        
+        st.write(f"**🏆 Mastered:** {stats['mastered']} words ({mastered_pct}%)")
+        st.progress(stats['mastered'] / stats['total'])
+        
+        st.markdown("---")
+        st.caption("Mastered = successfully pushed 21+ days into the future.")
+    else:
+        st.write("No vocabulary found. Please check your CSV.")
+
+# ==========================================
 # 4. GENERATING THE EXERCISE
 # ==========================================
 if st.session_state.current_exercise is None:
@@ -122,7 +116,6 @@ if st.session_state.current_exercise is None:
             st.session_state.current_exercise = exercise_data
             st.session_state.audio_path = create_audio_file(exercise_data['chinese'])
             
-            # Combine the correct answer and distractors, then shuffle them
             options = exercise_data['english_distractors'] + [exercise_data['english_correct']]
             random.shuffle(options)
             st.session_state.shuffled_options = options
@@ -154,10 +147,15 @@ if st.session_state.stage == 2:
     st.markdown("### What does the sentence mean?")
     st.info("Select the most accurate, nuanced translation:")
     
-    # Render the 5 shuffled options as a radio button list
     selected_meaning = st.radio("Choose translation:", st.session_state.shuffled_options, index=None, label_visibility="collapsed")
     
     if st.button("Submit Meaning", type="primary", use_container_width=True, disabled=(selected_meaning is None)):
+        # --- NEW: Grade the multiple choice answer instantly ---
+        if selected_meaning == st.session_state.current_exercise['english_correct']:
+            st.session_state.mcq_correct = True
+        else:
+            st.session_state.mcq_correct = False
+            
         advance_to_stage_3()
         st.rerun()
 
@@ -168,7 +166,13 @@ if st.session_state.stage == 3:
     st.markdown("---")
     st.markdown("### The Solution")
     
-    st.success(f"**Correct Pinyin:** {st.session_state.current_exercise['pinyin']}")
+    # --- NEW: Display the MCQ feedback ---
+    if st.session_state.mcq_correct:
+        st.success("✅ **Translation:** Correct!")
+    else:
+        st.error("❌ **Translation:** Incorrect.")
+    
+    st.info(f"**Correct Pinyin:** {st.session_state.current_exercise['pinyin']}")
     st.info(f"**Correct English:** {st.session_state.current_exercise['english_correct']}")
     st.caption(f"*(Characters: {st.session_state.current_exercise['chinese']})*")
     
@@ -191,7 +195,6 @@ if st.session_state.stage == 3:
             if i + j < len(words):
                 word = words[i + j]
                 
-                # --- FIXED: Re-added the missing char variable and URL logic ---
                 char = word.get('chinese', word.get('hanzi', '?'))
                 pleco_url = f"plecoapi://x-callback-url/s?q={char}"
                 mdbg_url = f"https://www.mdbg.net/chinese/dictionary?page=worddict&wdrst=0&wdqb={char}"
@@ -201,7 +204,6 @@ if st.session_state.stage == 3:
                         st.write(f"**{word.get('english', '')}**")
                         st.caption(f"Char: {char}")
                         
-                        # --- The Flag Button ---
                         button_key = f"flag_btn_{i}_{j}_{char}"
                         if st.button("🚩 Needs Practice", key=button_key):
                             flag_word_in_database(char)

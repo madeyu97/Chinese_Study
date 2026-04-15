@@ -15,14 +15,21 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 def get_connection():
     """Establishes a connection to the Supabase PostgreSQL database."""
-    # This tries to get the URL from Streamlit Cloud Secrets first, then falls back to local .env
-    try:
+    db_url = None
+    
+    # 1. Safely check if Streamlit Secrets has the URL
+    if hasattr(st, "secrets") and "DATABASE_URL" in st.secrets:
         db_url = st.secrets["DATABASE_URL"]
-    except FileNotFoundError:
-        db_url = os.environ.get("DATABASE_URL")
         
-    return psycopg2.connect(db_url)
+    # 2. If not found in secrets, try looking at local environment variables (.env fallback)
+    elif "DATABASE_URL" in os.environ:
+        db_url = os.environ["DATABASE_URL"]
+        
+    # 3. If it's STILL missing, throw a clean, human-readable error
+    if not db_url:
+        raise ValueError("CRITICAL ERROR: DATABASE_URL is missing! Streamlit cannot find it in the Secrets menu.")
 
+    return psycopg2.connect(db_url)
 def init_db():
     """Creates the vocabulary progress table in Supabase if it doesn't exist."""
     conn = get_connection()

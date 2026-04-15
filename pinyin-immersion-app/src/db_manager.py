@@ -1,58 +1,57 @@
 # src/db_manager.py
 
-import sqlite3
+import os
 import pandas as pd
 from datetime import datetime, date
 import logging
+import psycopg2
+import psycopg2.extras
+import streamlit as st
 
 # Import the paths we set up in config.py
-from config import DB_PATH, VOCAB_CSV_PATH, MAX_REVIEWS_PER_DAY, NEW_WORDS_PER_DAY
+from config import VOCAB_CSV_PATH, MAX_REVIEWS_PER_DAY, NEW_WORDS_PER_DAY
 
-# Set up basic logging so we can see what the database is doing in the terminal
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 def get_connection():
-    """Establishes a connection to the SQLite database."""
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    """Establishes a connection to the Supabase PostgreSQL database."""
+    # This tries to get the URL from Streamlit Cloud Secrets first, then falls back to local .env
+    try:
+        db_url = st.secrets["DATABASE_URL"]
+    except FileNotFoundError:
+        db_url = os.environ.get("DATABASE_URL")
+        
+    return psycopg2.connect(db_url)
 
 def init_db():
-    """Creates the vocabulary progress table and applies updates if needed."""
+    """Creates the vocabulary progress table in Supabase if it doesn't exist."""
     conn = get_connection()
     cursor = conn.cursor()
     
-    # 1. Create the base table if this is a fresh install
+    # Notice: 'AUTOINCREMENT' is 'SERIAL' in PostgreSQL
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vocab_progress (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             chinese TEXT NOT NULL,
             pinyin TEXT NOT NULL,
             english TEXT NOT NULL,
             date_added TEXT NOT NULL,
-            
-            -- Spaced Repetition (SRS) Columns
             next_review_date TEXT NOT NULL,
             interval INTEGER DEFAULT 0,
             ease_factor REAL DEFAULT 2.5,
-            review_count INTEGER DEFAULT 0
+            review_count INTEGER DEFAULT 0,
+            priority_weight INTEGER DEFAULT 1
         )
     ''')
     
-    # 2. Add the Priority Weight column if it doesn't exist yet (Migration)
-    try:
-        cursor.execute("ALTER TABLE vocab_progress ADD COLUMN priority_weight INTEGER DEFAULT 1")
-        logging.info("Database migration: Added 'priority_weight' column.")
-    except sqlite3.OperationalError:
-        # The column already exists, which is fine!
-        pass
-    
     conn.commit()
     conn.close()
-    logging.info("Database initialized successfully.")
+    logging.info("Supabase database initialized successfully.")
 
 def import_vocab_from_csv():
-    """Reads vocab_export.csv and adds new words to the database."""
+    """Reads your local CSV and uploads it to Supabase."""
     if not VOCAB_CSV_PATH.exists():
-        logging.warning(f"CSV file not found at {VOCAB_CSV_PATH}. Skipping import.")
+        logging.warning("CSV file not found. Skipping import.")
         return
 
     df = pd.read_csv(VOCAB_CSV_PATH)
@@ -63,107 +62,97 @@ def import_vocab_from_csv():
     today_str = date.today().isoformat()
 
     for index, row in df.iterrows():
-        cursor.execute("SELECT id FROM vocab_progress WHERE pinyin = ?", (row['Pinyin'],))
+        # Notice: Postgres uses %s instead of ? for variables
+        cursor.execute("SELECT id FROM vocab_progress WHERE pinyin = %s", (row['Pinyin'],))
         exists = cursor.fetchone()
         
         if not exists:
             cursor.execute('''
                 INSERT INTO vocab_progress 
                 (chinese, pinyin, english, date_added, next_review_date)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
             ''', (row['Chinese'], row['Pinyin'], row['English'], today_str, today_str))
             new_words_added += 1
 
     conn.commit()
     conn.close()
-    logging.info(f"Import complete: {new_words_added} new words added to the database.")
+    if new_words_added > 0:
+        logging.info(f"Imported {new_words_added} new words to Supabase.")
 
-# ==========================================
-# NEW: PRIORITY FLAGGING SYSTEM
-# ==========================================
 def flag_word_in_database(chinese_char):
-    """Bumps a word to the front of the queue by massively increasing its priority weight."""
+    """Bumps a word to the front of the queue."""
     conn = get_connection()
     cursor = conn.cursor()
     
     cursor.execute('''
         UPDATE vocab_progress 
         SET priority_weight = priority_weight + 10 
-        WHERE chinese = ?
+        WHERE chinese = %s
     ''', (chinese_char,))
     
     conn.commit()
     conn.close()
-    logging.info(f"Priority boosted for word: {chinese_char}")
 
 def get_due_words():
-    """Fetches due words, aggressively prioritizing flagged words first."""
+    """Fetches due words directly from Supabase, prioritizing the newest CSV additions."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row 
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     today_str = date.today().isoformat()
     
-    # Sorted by Priority FIRST, then by urgency (review date)
+    # We changed the ORDER BY clause. 
+    # 1. priority_weight DESC: Keeps your "Flagged" words at the absolute front.
+    # 2. id DESC: Grabs the most recently added words from the bottom of your CSV.
+    # 3. next_review_date ASC: Falls back to normal SRS for older words.
     cursor.execute('''
         SELECT * FROM vocab_progress 
-        WHERE next_review_date <= ? 
-        ORDER BY priority_weight DESC, next_review_date ASC, review_count ASC
-        LIMIT ?
+        WHERE next_review_date <= %s 
+        ORDER BY priority_weight DESC, id DESC, next_review_date ASC
+        LIMIT %s
     ''', (today_str, MAX_REVIEWS_PER_DAY))
     
     due_words = cursor.fetchall()
     conn.close()
     return [dict(word) for word in due_words]
-
+    
 def update_word_progress(word_id, next_review_date, new_interval, new_ease):
-    """
-    Updates SRS stats and acts as a "cool down" for flagged words.
-    Every time you review it, the priority weight drops until it normalizes at 1.
-    """
+    """Updates SRS stats and applies the priority cool-down."""
     conn = get_connection()
     cursor = conn.cursor()
     
+    # Notice: Postgres uses GREATEST instead of MAX
     cursor.execute('''
         UPDATE vocab_progress
-        SET next_review_date = ?, 
-            interval = ?, 
-            ease_factor = ?, 
+        SET next_review_date = %s, 
+            interval = %s, 
+            ease_factor = %s, 
             review_count = review_count + 1,
-            priority_weight = MAX(1, priority_weight - 2)
-        WHERE id = ?
+            priority_weight = GREATEST(1, priority_weight - 2)
+        WHERE id = %s
     ''', (next_review_date, new_interval, new_ease, word_id))
     
     conn.commit()
     conn.close()
-    logging.info(f"Updated word ID {word_id}. Next review: {next_review_date}.")
 
-# ==========================================
-# NEW: PROGRESS TRACKING STATS
-# ==========================================
 def get_progress_stats():
-    """Calculates the percentage of words Unseen, Learning, and Mastered."""
+    """Calculates your learning stats directly from the cloud."""
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Total words imported from your CSV
     cursor.execute("SELECT COUNT(*) FROM vocab_progress")
     total_words = cursor.fetchone()[0]
     
     if total_words == 0:
+        conn.close()
         return {"unseen": 0, "learning": 0, "mastered": 0, "total": 0}
 
-    # Unseen: Never reviewed
     cursor.execute("SELECT COUNT(*) FROM vocab_progress WHERE review_count = 0")
     unseen = cursor.fetchone()[0]
 
-    # Mastered: Interval pushed out 21 days or more (Standard SRS 'Mature' card)
     cursor.execute("SELECT COUNT(*) FROM vocab_progress WHERE interval >= 21")
     mastered = cursor.fetchone()[0]
 
-    # Learning: Everything in between
     learning = total_words - unseen - mastered
-    
     conn.close()
     
     return {

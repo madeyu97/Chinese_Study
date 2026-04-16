@@ -18,12 +18,10 @@ from db_manager import flag_word_in_database, get_progress_stats
 CACHE_FILE = "session_cache.json"
 
 def load_cached_session():
-    """Loads the user's session if it was saved today."""
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
                 cache = json.load(f)
-            # Only load the cache if it's from today (so tomorrow starts fresh)
             if cache.get("date") == str(date.today()):
                 return cache
         except Exception:
@@ -31,7 +29,6 @@ def load_cached_session():
     return None
 
 def save_cached_session():
-    """Saves the exact UI state to a file so it survives a browser refresh."""
     cache = {
         "date": str(date.today()),
         "words_due": st.session_state.words_due,
@@ -51,17 +48,14 @@ def save_cached_session():
 # ==========================================
 st.set_page_config(page_title="Pinyin Immersion", page_icon="🎧", layout="centered")
 
-# Initialize Session State variables
 if 'words_due' not in st.session_state:
     cached_state = load_cached_session()
     
     if cached_state:
-        # Restore everything from the cache
         for key, value in cached_state.items():
             if key != "date":
                 st.session_state[key] = value
     else:
-        # Start a fresh session
         st.session_state.words_due = get_todays_quiz_batch()
         st.session_state.current_index = 0
         st.session_state.current_exercise = None
@@ -77,14 +71,12 @@ if 'words_due' not in st.session_state:
 # ==========================================
 def grade_word_and_next(grade):
     current_word = st.session_state.words_due[st.session_state.current_index]
-    
     process_review(
         word_id=current_word['id'],
         current_interval=current_word['interval'],
         current_ease=current_word['ease_factor'],
         grade=grade
     )
-    
     st.session_state.current_index += 1
     st.session_state.current_exercise = None
     st.session_state.audio_path = None
@@ -92,7 +84,7 @@ def grade_word_and_next(grade):
     st.session_state.shuffled_options = []
     st.session_state.user_pinyin = ""
     st.session_state.mcq_correct = None
-    save_cached_session() # Save progress to disk!
+    save_cached_session()
 
 def advance_to_stage_2():
     st.session_state.stage = 2
@@ -100,6 +92,16 @@ def advance_to_stage_2():
 
 def advance_to_stage_3():
     st.session_state.stage = 3
+    save_cached_session()
+
+# --- NEW: BACK BUTTON HELPERS ---
+def go_back_to_stage_1():
+    st.session_state.stage = 1
+    save_cached_session()
+
+def go_back_to_stage_2():
+    st.session_state.stage = 2
+    st.session_state.mcq_correct = None
     save_cached_session()
 
 # ==========================================
@@ -134,16 +136,12 @@ with st.sidebar:
         
         st.metric("Total CSV Vocabulary", stats['total'])
         st.markdown("---")
-        
         st.write(f"**👀 Unseen:** {stats['unseen']} words ({unseen_pct}%)")
         st.progress(stats['unseen'] / stats['total'])
-        
         st.write(f"**🧠 Learning:** {stats['learning']} words ({learning_pct}%)")
         st.progress(stats['learning'] / stats['total'])
-        
         st.write(f"**🏆 Mastered:** {stats['mastered']} words ({mastered_pct}%)")
         st.progress(stats['mastered'] / stats['total'])
-        
         st.markdown("---")
         st.caption("Mastered = successfully pushed 21+ days into the future.")
     else:
@@ -155,16 +153,13 @@ with st.sidebar:
 if st.session_state.current_exercise is None:
     with st.spinner("Generating localized audio scenario..."):
         exercise_data = generate_dictation_exercise(current_word)
-        
         if exercise_data:
             st.session_state.current_exercise = exercise_data
             st.session_state.audio_path = create_audio_file(exercise_data['chinese'])
-            
             options = exercise_data['english_distractors'] + [exercise_data['english_correct']]
             random.shuffle(options)
             st.session_state.shuffled_options = options
-            
-            save_cached_session() # Save to disk as soon as it's generated!
+            save_cached_session()
         else:
             st.error("Failed to generate exercise. Check your API connection.")
             st.stop()
@@ -174,7 +169,6 @@ if st.session_state.current_exercise is None:
 # ==========================================
 st.subheader("Listen & Transcribe:")
 
-# --- NEW: Audio Fallback Logic ---
 if st.session_state.audio_path and os.path.exists(st.session_state.audio_path):
     st.audio(st.session_state.audio_path, format="audio/mp3")
 else:
@@ -186,7 +180,7 @@ else:
             st.rerun()
 
 if st.session_state.stage == 1:
-    st.text_input("Type the Pinyin you hear:", key="pinyin_input")
+    st.text_input("Type the Pinyin you hear:", key="pinyin_input", value=st.session_state.user_pinyin)
     if st.button("Submit Pinyin", type="primary", use_container_width=True):
         st.session_state.user_pinyin = st.session_state.pinyin_input
         advance_to_stage_2()
@@ -202,34 +196,43 @@ if st.session_state.stage == 2:
     st.markdown("### What does the sentence mean?")
     st.info("Select the most accurate, nuanced translation:")
     
-    # --- NEW: SELF-HEALING FAIL-SAFE ---
     if not st.session_state.shuffled_options or len(st.session_state.shuffled_options) < 2:
         st.error("⚠️ The AI failed to generate the multiple-choice options properly.")
         if st.button("🔄 Regenerate This Word", type="primary"):
-            # Wipe the broken exercise and push the user back to Stage 1
             st.session_state.current_exercise = None
             st.session_state.audio_path = None
             st.session_state.stage = 1
             save_cached_session()
             st.rerun()
     else:
-        # Normal MCQ behavior
         selected_meaning = st.radio("Choose translation:", st.session_state.shuffled_options, index=None, label_visibility="collapsed")
         
-        if st.button("Submit Meaning", type="primary", use_container_width=True, disabled=(selected_meaning is None)):
-            if selected_meaning == st.session_state.current_exercise['english_correct']:
-                st.session_state.mcq_correct = True
-            else:
-                st.session_state.mcq_correct = False
-                
-            advance_to_stage_3()
-            st.rerun()
+        # --- NEW: SIDE-BY-SIDE BACK & SUBMIT BUTTONS ---
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if st.button("🔙 Edit Pinyin", use_container_width=True):
+                go_back_to_stage_1()
+                st.rerun()
+        with col2:
+            if st.button("Submit Meaning", type="primary", use_container_width=True, disabled=(selected_meaning is None)):
+                if selected_meaning == st.session_state.current_exercise['english_correct']:
+                    st.session_state.mcq_correct = True
+                else:
+                    st.session_state.mcq_correct = False
+                advance_to_stage_3()
+                st.rerun()
 
 # ==========================================
 # 8. STAGE 3: THE REVIEW PHASE & DICTIONARY
 # ==========================================
 if st.session_state.stage == 3:
     st.markdown("---")
+    
+    # --- NEW: BACK BUTTON FOR MCQ ---
+    if st.button("🔙 Change Translation", use_container_width=False):
+        go_back_to_stage_2()
+        st.rerun()
+
     st.markdown("### The Solution")
     
     if st.session_state.mcq_correct:
@@ -244,40 +247,32 @@ if st.session_state.stage == 3:
     gp = st.session_state.current_exercise.get('grammar_point')
     if gp and gp.get('structure'):
         st.markdown("#### 🧠 Grammar Point")
-        st.warning(f"**{gp['structure']}**: {gp['explanation']}")
+        st.info(f"**{gp['structure']}**: {gp['explanation']}")
 
-    # --- NEW: Particle Note ---
     pn = st.session_state.current_exercise.get('particle_note')
     if pn and pn.get('particle'):
         st.markdown("#### 🗣️ Local Particle")
         st.warning(f"**{pn['particle']}**: {pn['explanation']}")
 
     st.markdown("#### 📖 Dictionary Breakdown")
-    st.write("Click on any Pinyin word below to reveal its meaning and character.")
-    
     words = st.session_state.current_exercise.get('word_breakdown', [])
-    
     cols_per_row = 3
     for i in range(0, len(words), cols_per_row):
         cols = st.columns(cols_per_row)
         for j, col in enumerate(cols):
             if i + j < len(words):
                 word = words[i + j]
-                
                 char = word.get('chinese', word.get('hanzi', '?'))
                 pleco_url = f"plecoapi://x-callback-url/s?q={char}"
                 mdbg_url = f"https://www.mdbg.net/chinese/dictionary?page=worddict&wdrst=0&wdqb={char}"
-                
                 with col:
                     with st.expander(f"{word.get('pinyin', '')}"):
                         st.write(f"**{word.get('english', '')}**")
                         st.caption(f"Char: {char}")
-                        
                         button_key = f"flag_btn_{i}_{j}_{char}"
                         if st.button("🚩 Needs Practice", key=button_key):
                             flag_word_in_database(char)
                             st.toast(f"Flagged '{char}' for more practice!")
-                        
                         st.markdown("---")
                         st.markdown(f"📱 [Open in Pleco]({pleco_url})")
                         st.markdown(f"💻 [Open in Web]({mdbg_url})")

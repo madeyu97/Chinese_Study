@@ -46,18 +46,25 @@ def create_audio_file(chinese_text: str, voice: str = None):
         logging.warning("Filter stripped all text! Falling back to raw text.")
         clean_text = chinese_text.strip()
 
+    # ==========================================
+    # THE MALAYSIAN PRONUNCIATION HACK
+    # ==========================================
+    # We swap "了" for "料" behind the scenes. 
+    # The user sees "了" on screen, but the TTS reads the punchy local "liào" 
+    tts_text = clean_text.replace("了", "料")
+
     selected_voice = voice if voice else random.choice(VOICE_CAST)
-    logging.info(f"Attempting audio for: '{clean_text}' using {selected_voice}")
+    logging.info(f"Attempting audio for: '{tts_text}' using {selected_voice}")
 
     try:
-        asyncio.run(_generate_audio_async(clean_text, selected_voice, str(AUDIO_PATH)))
+        asyncio.run(_generate_audio_async(tts_text, selected_voice, str(AUDIO_PATH)))
         return str(AUDIO_PATH)
         
     except Exception as e:
         logging.warning(f"Voice {selected_voice} failed. Trying fallback...")
         try:
             # Fallback to the most reliable standard voice if the API glitches
-            asyncio.run(_generate_audio_async(clean_text, "zh-CN-XiaoxiaoNeural", str(AUDIO_PATH)))
+            asyncio.run(_generate_audio_async(tts_text, "zh-CN-XiaoxiaoNeural", str(AUDIO_PATH)))
             return str(AUDIO_PATH)
         except Exception as e_final:
             logging.error(f"Total Audio Failure: {e_final}")

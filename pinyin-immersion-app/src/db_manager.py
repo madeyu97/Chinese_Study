@@ -169,6 +169,24 @@ def get_progress_stats():
         "total": total_words
     }
 
+def undo_word_progress(word_id, old_next_review_date, old_interval, old_ease, old_review_count, old_priority):
+    """Reverts a word's progress back to its exact state before the user graded it."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE vocab_progress
+        SET next_review_date = %s, 
+            interval = %s, 
+            ease_factor = %s, 
+            review_count = %s,
+            priority_weight = %s
+        WHERE id = %s
+    ''', (old_next_review_date, old_interval, old_ease, old_review_count, old_priority, word_id))
+    
+    conn.commit()
+    conn.close()
+
 # --- Initialization Block ---
 init_db()
 import_vocab_from_csv()

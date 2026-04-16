@@ -46,11 +46,12 @@ def generate_dictation_exercise(target_word_dict):
     GENERAL INSTRUCTIONS:
     1. STRICT SYNCHRONIZATION: The Chinese characters (Hanzi) and the Pinyin MUST perfectly match. 
     2. You MUST write actual Chinese Characters (Hanzi) in all "hanzi" fields. DO NOT leave them empty.
+    3. NO HALLUCINATED CONTEXT (CRITICAL): Your English translations (both correct and distractors) MUST strictly translate ONLY the words present in the Chinese sentence. Do NOT invent random names (e.g., "David", "Tom"), places, or extra backstory that are not explicitly written in the Hanzi. If the Chinese sentence omits the subject, use generic pronouns in English (it, he, she, someone).
     
     GRAMMAR AND PARTICLES (CRITICAL):
     You must provide TWO distinct teaching notes:
     1. 'grammar_point': Focus ONLY on the structural syntax of the sentence (e.g., '是...的' emphasis, '把' structure, measure words, verb complements). 
-    2. 'particle_note': Malaysian Chinese relies heavily on discourse particles. You MUST try to naturally include a Malaysian particle from the list below in the sentence. Then, use this field to explain exactly what emotion or tone that particle adds to this specific scenario. If absolutely no particle fits, return null.
+    2. 'particle_note': Malaysian Chinese relies heavily on discourse particles. You MUST try to naturally include a Malaysian particle from the list below in the sentence. Then, explain what emotion or tone it adds. If absolutely no particle fits, return null.
     
     REFERENCE LIBRARY - MALAYSIAN PARTICLES:
     - lah (啦): emphasis, softening tone, friendliness
@@ -63,7 +64,6 @@ def generate_dictation_exercise(target_word_dict):
     - aiyo / aiyah (哎哟 / 哎呀): frustration or complaint
     - liao (了): written as 了 but pronounced "liào" locally. Indicates completion or change of state.
     - Combo particles: lah lor, meh lah, lor lah, etc.
-    *(Note: Use the proper Chinese characters for these particles in the Hanzi string).*
     
     Output a raw JSON object EXACTLY like this example format:
     {{

@@ -202,16 +202,28 @@ if st.session_state.stage == 2:
     st.markdown("### What does the sentence mean?")
     st.info("Select the most accurate, nuanced translation:")
     
-    selected_meaning = st.radio("Choose translation:", st.session_state.shuffled_options, index=None, label_visibility="collapsed")
-    
-    if st.button("Submit Meaning", type="primary", use_container_width=True, disabled=(selected_meaning is None)):
-        if selected_meaning == st.session_state.current_exercise['english_correct']:
-            st.session_state.mcq_correct = True
-        else:
-            st.session_state.mcq_correct = False
-            
-        advance_to_stage_3()
-        st.rerun()
+    # --- NEW: SELF-HEALING FAIL-SAFE ---
+    if not st.session_state.shuffled_options or len(st.session_state.shuffled_options) < 2:
+        st.error("⚠️ The AI failed to generate the multiple-choice options properly.")
+        if st.button("🔄 Regenerate This Word", type="primary"):
+            # Wipe the broken exercise and push the user back to Stage 1
+            st.session_state.current_exercise = None
+            st.session_state.audio_path = None
+            st.session_state.stage = 1
+            save_cached_session()
+            st.rerun()
+    else:
+        # Normal MCQ behavior
+        selected_meaning = st.radio("Choose translation:", st.session_state.shuffled_options, index=None, label_visibility="collapsed")
+        
+        if st.button("Submit Meaning", type="primary", use_container_width=True, disabled=(selected_meaning is None)):
+            if selected_meaning == st.session_state.current_exercise['english_correct']:
+                st.session_state.mcq_correct = True
+            else:
+                st.session_state.mcq_correct = False
+                
+            advance_to_stage_3()
+            st.rerun()
 
 # ==========================================
 # 8. STAGE 3: THE REVIEW PHASE & DICTIONARY
@@ -233,6 +245,12 @@ if st.session_state.stage == 3:
     if gp and gp.get('structure'):
         st.markdown("#### 🧠 Grammar Point")
         st.warning(f"**{gp['structure']}**: {gp['explanation']}")
+
+    # --- NEW: Particle Note ---
+    pn = st.session_state.current_exercise.get('particle_note')
+    if pn and pn.get('particle'):
+        st.markdown("#### 🗣️ Local Particle")
+        st.warning(f"**{pn['particle']}**: {pn['explanation']}")
 
     st.markdown("#### 📖 Dictionary Breakdown")
     st.write("Click on any Pinyin word below to reveal its meaning and character.")

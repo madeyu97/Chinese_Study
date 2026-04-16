@@ -17,25 +17,26 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 def generate_dictation_exercise(target_word_dict):
     pinyin = target_word_dict.get('pinyin', '')
     english = target_word_dict.get('english', '')
-    
-    # Try to grab the actual Chinese characters from your CSV dictionary
     chinese_chars = target_word_dict.get('chinese', target_word_dict.get('hanzi', target_word_dict.get('characters', '')))
     
-    # ==========================================
-    # THE SMART SWITCH
-    # ==========================================
-    if len(chinese_chars) > 3:
-        # If it's a long phrase/sentence, force the AI to use it verbatim
+    is_locked_phrase = len(chinese_chars) > 3
+    
+    if is_locked_phrase:
         behavior_prompt = f"""
-        The user has provided a complete phrase/sentence: '{chinese_chars}' ({pinyin} - {english}).
-        CRITICAL: DO NOT invent a new scenario. You MUST use EXACTLY '{chinese_chars}' as the main "hanzi" field. 
-        Your job is ONLY to generate the distractors, dictionary breakdown, and grammar point for this exact sentence.
+        LOCKED SENTENCE: '{chinese_chars}' 
+        Meaning: '{english}'
+        
+        CRITICAL RULES FOR THIS SENTENCE: 
+        1. DO NOT alter the Chinese characters. Analyze EXACTLY '{chinese_chars}' and NOTHING ELSE.
+        2. PINYIN ACCURACY: You MUST generate Pinyin that perfectly matches these characters. Do NOT hallucinate Pinyin for words that aren't there (e.g., ensure 杯子 is 'bēi zi').
+        3. THE "了" RULE: If this sentence contains the character '了', you MUST transcribe its pinyin as 'liǎo' (NOT 'le') to force the Malaysian pronunciation.
+        4. DICTIONARY BREAKDOWN: Break the sentence down into logical 1-to-2 character chunks. Do NOT group large 4-character chunks together.
         """
     else:
-        # If it's a short word (or empty), tell it to be creative
         display_word = chinese_chars if chinese_chars else pinyin
         behavior_prompt = f"""
         Create a FULL 1-sentence scenario (between 5 and 10 words long) using the target word '{display_word}' ({pinyin} - {english}).
+        If you use '了', transcribe its pinyin as 'liǎo'.
         """
 
     prompt = f"""
@@ -44,26 +45,13 @@ def generate_dictation_exercise(target_word_dict):
     {behavior_prompt}
     
     GENERAL INSTRUCTIONS:
-    1. STRICT SYNCHRONIZATION: The Chinese characters (Hanzi) and the Pinyin MUST perfectly match. 
-    2. You MUST write actual Chinese Characters (Hanzi) in all "hanzi" fields. DO NOT leave them empty.
-    3. NO HALLUCINATED CONTEXT (CRITICAL): Your English translations (both correct and distractors) MUST strictly translate ONLY the words present in the Chinese sentence. Do NOT invent random names (e.g., "David", "Tom"), places, or extra backstory that are not explicitly written in the Hanzi. If the Chinese sentence omits the subject, use generic pronouns in English (it, he, she, someone).
+    1. STRICT SYNCHRONIZATION: The Chinese characters (Hanzi) and the Pinyin MUST perfectly match.
+    2. NO HALLUCINATED CONTEXT: Do NOT invent random names (e.g., "David"). Use generic pronouns if a subject is missing.
     
     GRAMMAR AND PARTICLES (CRITICAL):
     You must provide TWO distinct teaching notes:
-    1. 'grammar_point': Focus ONLY on the structural syntax of the sentence (e.g., '是...的' emphasis, '把' structure, measure words). 
+    1. 'grammar_point': Focus ONLY on the structural syntax of the sentence. 
     2. 'particle_note': SCAN the Chinese sentence. If it contains ANY Malaysian particle (e.g., 啦, 咯, 咩, 咧, 啊, 嘛, 喎, 哎哟, 哎呀, 了), you ABSOLUTELY MUST fill out this field explaining the specific emotional tone it adds. Do NOT skip this if a particle is present. ONLY return null if the sentence is 100% free of discourse particles.
-    
-    REFERENCE LIBRARY - MALAYSIAN PARTICLES:
-    - lah (啦): emphasis, softening tone, friendliness
-    - lor / loh (咯): resignation, "obviously", casual conclusion
-    - meh (咩): doubt, questioning tone, disbelief
-    - leh (咧): mild contradiction or suggestion
-    - ah (啊): question marker or soft emphasis
-    - ma (嘛): obviousness / "as you know"
-    - wor (喎): surprise or new information
-    - aiyo / aiyah (哎哟 / 哎呀): frustration or complaint
-    - liao (了): written as 了 but pronounced "liào" locally. Indicates completion or change of state.
-    - Combo particles: lah lor, meh lah, lor lah, etc.
     
     Output a raw JSON object EXACTLY like this example format:
     {{
@@ -79,11 +67,11 @@ def generate_dictation_exercise(target_word_dict):
         ],
         "grammar_point": {{
             "structure": "Subject + 没有 + Verb",
-            "explanation": "Used to negate past actions. Unlike '不' which negates present/future or habits, '没有' specifically states that an action did not happen."
+            "explanation": "Used to negate past actions."
         }},
         "particle_note": {{
             "particle": "咩 (meh)",
-            "explanation": "Placed at the end of the sentence to express mild surprise or skepticism. It turns a standard statement into a question of disbelief."
+            "explanation": "Expresses mild surprise or skepticism."
         }}
     }}
     """
@@ -96,40 +84,18 @@ def generate_dictation_exercise(target_word_dict):
         )
         
         raw_json_str = response.choices[0].message.content
-        logging.info(f"Raw Groq Output:\n{raw_json_str}")
-        
-        raw_data = json.loads(raw_json_str)
-        
-        final_chinese_text = raw_data.get("hanzi", raw_data.get("chinese", ""))
-        
-        if not final_chinese_text or final_chinese_text.strip() == "":
-            raise ValueError("Groq returned an empty Chinese string.")
-
-        word_breakdown = []
-        for item in raw_data.get("word_breakdown", []):
-            word_breakdown.append({
-                "chinese": item.get("hanzi", item.get("chinese", "")),
-                "pinyin": item.get("pinyin", ""),
-                "english": item.get("english", "")
-            })
-
-        # Parse the JSON from Groq
         raw_data = json.loads(raw_json_str)
         
         # --- THE SURGICAL LOCK ---
-        # If the sentence came from your CSV (>3 characters), we force the app to 
-        # use your exact CSV data, effectively overriding any AI hallucinations.
-        if len(chinese_chars) > 3:
+        if is_locked_phrase:
             final_chinese = chinese_chars
             final_pinyin = pinyin if pinyin else raw_data.get("pinyin", "")
             final_english = english if english else raw_data.get("english_correct", "")
         else:
-            # If it's a short word, we trust the AI's generated scenario
             final_chinese = raw_data.get("hanzi", raw_data.get("chinese", ""))
             final_pinyin = raw_data.get("pinyin", "")
             final_english = raw_data.get("english_correct", "")
 
-        # Build the breakdown dictionary
         word_breakdown = []
         for item in raw_data.get("word_breakdown", []):
             word_breakdown.append({
@@ -138,7 +104,6 @@ def generate_dictation_exercise(target_word_dict):
                 "english": item.get("english", "")
             })
 
-        # Assemble the final flashcard
         exercise_data = {
             "chinese": final_chinese,
             "pinyin": final_pinyin,

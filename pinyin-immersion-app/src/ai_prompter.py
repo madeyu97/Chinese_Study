@@ -50,8 +50,8 @@ def generate_dictation_exercise(target_word_dict):
     
     GRAMMAR AND PARTICLES (CRITICAL):
     You must provide TWO distinct teaching notes:
-    1. 'grammar_point': Focus ONLY on the structural syntax of the sentence (e.g., '是...的' emphasis, '把' structure, measure words, verb complements). 
-    2. 'particle_note': Malaysian Chinese relies heavily on discourse particles. You MUST try to naturally include a Malaysian particle from the list below in the sentence. Then, explain what emotion or tone it adds. If absolutely no particle fits, return null.
+    1. 'grammar_point': Focus ONLY on the structural syntax of the sentence (e.g., '是...的' emphasis, '把' structure, measure words). 
+    2. 'particle_note': SCAN the Chinese sentence. If it contains ANY Malaysian particle (e.g., 啦, 咯, 咩, 咧, 啊, 嘛, 喎, 哎哟, 哎呀, 了), you ABSOLUTELY MUST fill out this field explaining the specific emotional tone it adds. Do NOT skip this if a particle is present. ONLY return null if the sentence is 100% free of discourse particles.
     
     REFERENCE LIBRARY - MALAYSIAN PARTICLES:
     - lah (啦): emphasis, softening tone, friendliness

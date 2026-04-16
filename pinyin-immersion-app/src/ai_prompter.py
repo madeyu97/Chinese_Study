@@ -44,25 +44,46 @@ def generate_dictation_exercise(target_word_dict):
     {behavior_prompt}
     
     GENERAL INSTRUCTIONS:
-    1. STRICT SYNCHRONIZATION: The Chinese characters (Hanzi) and the Pinyin MUST perfectly match. If you use a local word in Pinyin (e.g., 'lǐ bài'), you MUST write the exact local characters ('礼拜').
+    1. STRICT SYNCHRONIZATION: The Chinese characters (Hanzi) and the Pinyin MUST perfectly match. 
     2. You MUST write actual Chinese Characters (Hanzi) in all "hanzi" fields. DO NOT leave them empty.
-    3. Use local Malaysian phrasing, and provide standard Pinyin with tone marks.
+    
+    GRAMMAR AND PARTICLES (CRITICAL):
+    You must provide TWO distinct teaching notes:
+    1. 'grammar_point': Focus ONLY on the structural syntax of the sentence (e.g., '是...的' emphasis, '把' structure, measure words, verb complements). 
+    2. 'particle_note': Malaysian Chinese relies heavily on discourse particles. You MUST try to naturally include a Malaysian particle from the list below in the sentence. Then, use this field to explain exactly what emotion or tone that particle adds to this specific scenario. If absolutely no particle fits, return null.
+    
+    REFERENCE LIBRARY - MALAYSIAN PARTICLES:
+    - lah (啦): emphasis, softening tone, friendliness
+    - lor / loh (咯): resignation, "obviously", casual conclusion
+    - meh (咩): doubt, questioning tone, disbelief
+    - leh (咧): mild contradiction or suggestion
+    - ah (啊): question marker or soft emphasis
+    - ma (嘛): obviousness / "as you know"
+    - wor (喎): surprise or new information
+    - aiyo / aiyah (哎哟 / 哎呀): frustration or complaint
+    - liao (了): written as 了 but pronounced "liào" locally. Indicates completion or change of state.
+    - Combo particles: lah lor, meh lah, lor lah, etc.
+    *(Note: Use the proper Chinese characters for these particles in the Hanzi string).*
     
     Output a raw JSON object EXACTLY like this example format:
     {{
-        "hanzi": "本地人喜欢吃椰浆饭。",
-        "pinyin": "běn dì rén xǐ huan chī yē jiāng fàn.",
-        "english_correct": "Local people like to eat Nasi Lemak.",
-        "english_distractors": ["Local people like to eat chicken rice.", "Foreigners like to eat Nasi Lemak.", "Tourists like to eat spicy food.", "My friend likes to eat noodles."],
+        "hanzi": "他没有来咩？",
+        "pinyin": "tā méi yǒu lái mē?",
+        "english_correct": "He didn't come?",
+        "english_distractors": ["Did he come?", "Why didn't he come?", "He is coming.", "I didn't come."],
         "word_breakdown": [
-            {{"hanzi": "本地人", "pinyin": "běn dì rén", "english": "local people"}},
-            {{"hanzi": "喜欢", "pinyin": "xǐ huan", "english": "like"}},
-            {{"hanzi": "吃", "pinyin": "chī", "english": "eat"}},
-            {{"hanzi": "椰浆饭", "pinyin": "yē jiāng fàn", "english": "Nasi Lemak"}}
+            {{"hanzi": "他", "pinyin": "tā", "english": "he"}},
+            {{"hanzi": "没有", "pinyin": "méi yǒu", "english": "did not"}},
+            {{"hanzi": "来", "pinyin": "lái", "english": "come"}},
+            {{"hanzi": "咩", "pinyin": "mē", "english": "(particle)"}}
         ],
         "grammar_point": {{
-            "structure": "Subject + 喜欢 (xǐ huan) + Verb",
-            "explanation": "Used to express that someone likes doing a specific action."
+            "structure": "Subject + 没有 + Verb",
+            "explanation": "Used to negate past actions. Unlike '不' which negates present/future or habits, '没有' specifically states that an action did not happen."
+        }},
+        "particle_note": {{
+            "particle": "咩 (meh)",
+            "explanation": "Placed at the end of the sentence to express mild surprise or skepticism. It turns a standard statement into a question of disbelief."
         }}
     }}
     """

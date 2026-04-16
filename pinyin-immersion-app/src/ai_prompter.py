@@ -113,17 +113,43 @@ def generate_dictation_exercise(target_word_dict):
                 "english": item.get("english", "")
             })
 
+        # Parse the JSON from Groq
+        raw_data = json.loads(raw_json_str)
+        
+        # --- THE SURGICAL LOCK ---
+        # If the sentence came from your CSV (>3 characters), we force the app to 
+        # use your exact CSV data, effectively overriding any AI hallucinations.
+        if len(chinese_chars) > 3:
+            final_chinese = chinese_chars
+            final_pinyin = pinyin if pinyin else raw_data.get("pinyin", "")
+            final_english = english if english else raw_data.get("english_correct", "")
+        else:
+            # If it's a short word, we trust the AI's generated scenario
+            final_chinese = raw_data.get("hanzi", raw_data.get("chinese", ""))
+            final_pinyin = raw_data.get("pinyin", "")
+            final_english = raw_data.get("english_correct", "")
+
+        # Build the breakdown dictionary
+        word_breakdown = []
+        for item in raw_data.get("word_breakdown", []):
+            word_breakdown.append({
+                "chinese": item.get("hanzi", item.get("chinese", "")),
+                "pinyin": item.get("pinyin", ""),
+                "english": item.get("english", "")
+            })
+
+        # Assemble the final flashcard
         exercise_data = {
-            "chinese": final_chinese_text,
-            "pinyin": raw_data.get("pinyin", ""),
-            "english_correct": raw_data.get("english_correct", ""),
+            "chinese": final_chinese,
+            "pinyin": final_pinyin,
+            "english_correct": final_english,
             "english_distractors": raw_data.get("english_distractors", []),
             "target_pinyin": pinyin,
             "word_breakdown": word_breakdown,
-            "grammar_point": raw_data.get("grammar_point", {"structure": "Syntax", "explanation": "Standard phrasing."})
+            "grammar_point": raw_data.get("grammar_point", {}),
+            "particle_note": raw_data.get("particle_note", {})
         }
         
-        logging.info(f"Successfully generated exercise via Groq for: {pinyin}")
         return exercise_data
         
     except Exception as e:

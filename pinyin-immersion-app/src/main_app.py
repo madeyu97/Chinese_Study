@@ -50,14 +50,24 @@ def save_cached_session():
 # ==========================================
 st.set_page_config(page_title="Pinyin Immersion", page_icon="🎧", layout="centered")
 
+# --- NEW: THE MIDNIGHT RESET ---
+# If the tab was left open overnight, wipe the memory so it grabs a fresh daily batch
+if 'session_date' in st.session_state and st.session_state.session_date != str(date.today()):
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+        
+# Initialize Session State variables
 if 'words_due' not in st.session_state:
     cached_state = load_cached_session()
     
     if cached_state:
+        # Restore everything from the cache
         for key, value in cached_state.items():
             if key != "date":
                 st.session_state[key] = value
+        st.session_state.session_date = str(date.today())
     else:
+        # Start a fresh session
         st.session_state.words_due = get_todays_quiz_batch()
         st.session_state.current_index = 0
         st.session_state.current_exercise = None
@@ -66,10 +76,10 @@ if 'words_due' not in st.session_state:
         st.session_state.shuffled_options = []
         st.session_state.user_pinyin = ""
         st.session_state.mcq_correct = None
-        st.session_state.exercise_history = {} # NEW: Dict to hold old exercises
-        st.session_state.audio_history = {}    # NEW: Dict to hold old audio paths
+        st.session_state.exercise_history = {} 
+        st.session_state.audio_history = {}    
+        st.session_state.session_date = str(date.today()) # Stamp today's date!
         save_cached_session()
-
 # ==========================================
 # 3. HELPER FUNCTIONS
 # ==========================================

@@ -101,26 +101,35 @@ def flag_word_in_database(chinese_char):
     conn.close()
 
 def get_due_words():
-    """Fetches due words directly from Supabase, prioritizing the newest CSV additions."""
+    """Fetches a proper mix of due reviews and new words."""
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
     today_str = date.today().isoformat()
     
-    # We changed the ORDER BY clause. 
-    # 1. priority_weight DESC: Keeps your "Flagged" words at the absolute front.
-    # 2. id DESC: Grabs the most recently added words from the bottom of your CSV.
-    # 3. next_review_date ASC: Falls back to normal SRS for older words.
+    # 1. Fetch Due Reviews (Words you've seen before that are scheduled for today)
     cursor.execute('''
         SELECT * FROM vocab_progress 
-        WHERE next_review_date <= %s 
-        ORDER BY priority_weight DESC, id DESC, next_review_date ASC
-        LIMIT %s
-    ''', (today_str, MAX_REVIEWS_PER_DAY))
+        WHERE review_count > 0 AND next_review_date <= %s 
+        ORDER BY priority_weight DESC, next_review_date ASC
+    ''', (today_str,))
+    due_reviews = [dict(row) for row in cursor.fetchall()]
     
-    due_words = cursor.fetchall()
+    # 2. Fetch New Words (Words you've never seen)
+    cursor.execute('''
+        SELECT * FROM vocab_progress 
+        WHERE review_count = 0 
+        ORDER BY priority_weight DESC, id ASC
+        LIMIT %s
+    ''', (NEW_WORDS_PER_DAY,))
+    new_words = [dict(row) for row in cursor.fetchall()]
+    
     conn.close()
-    return [dict(word) for word in due_words]
+    
+    # Combine them (Prioritize reviews first, then backfill with new words)
+    final_batch = due_reviews + new_words
+    
+    # Cap the total list at your daily maximum just in case you have a huge backlog
+    return final_batch[:MAX_REVIEWS_PER_DAY]
     
 def update_word_progress(word_id, next_review_date, new_interval, new_ease):
     """Updates SRS stats and applies the priority cool-down."""

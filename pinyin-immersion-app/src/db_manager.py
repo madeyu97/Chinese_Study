@@ -62,6 +62,10 @@ def import_vocab_from_csv():
         return
 
     df = pd.read_csv(VOCAB_CSV_PATH)
+    
+    # Drop completely empty rows from the CSV just in case
+    df = df.dropna(subset=['Chinese', 'Pinyin']) 
+    
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -69,8 +73,12 @@ def import_vocab_from_csv():
     today_str = date.today().isoformat()
 
     for index, row in df.iterrows():
-        # FIXED: Check for duplicates using the actual Chinese characters, not Pinyin!
-        cursor.execute("SELECT id FROM vocab_progress WHERE chinese = %s", (row['Chinese'],))
+        # FIXED: Require BOTH the Chinese and the Pinyin to match to be considered a duplicate.
+        cursor.execute('''
+            SELECT id FROM vocab_progress 
+            WHERE chinese = %s AND pinyin = %s
+        ''', (row['Chinese'], row['Pinyin']))
+        
         exists = cursor.fetchone()
         
         if not exists:
@@ -85,20 +93,6 @@ def import_vocab_from_csv():
     conn.close()
     if new_words_added > 0:
         logging.info(f"Imported {new_words_added} new words to Supabase.")
-
-def flag_word_in_database(chinese_char):
-    """Bumps a word to the front of the queue."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        UPDATE vocab_progress 
-        SET priority_weight = priority_weight + 10 
-        WHERE chinese = %s
-    ''', (chinese_char,))
-    
-    conn.commit()
-    conn.close()
 
 def get_due_words():
     """Fetches a proper mix of due reviews and new words to hit the daily max."""

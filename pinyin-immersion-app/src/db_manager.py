@@ -56,24 +56,29 @@ def init_db():
     logging.info("Supabase database initialized successfully.")
 
 def import_vocab_from_csv():
-    """Reads your local CSV and uploads it to Supabase."""
+    """Reads your local CSV, scrubs invisible errors, and uploads to Supabase."""
     if not VOCAB_CSV_PATH.exists():
         logging.warning("CSV file not found. Skipping import.")
         return
 
     df = pd.read_csv(VOCAB_CSV_PATH)
     
-    # Drop completely empty rows from the CSV just in case
-    df = df.dropna(subset=['Chinese', 'Pinyin']) 
+    # --- 1. AGGRESSIVE DATA SCRUBBING ---
+    # Convert to string and strip invisible spaces from the edges
+    df['Chinese'] = df['Chinese'].astype(str).str.strip()
+    df['Pinyin'] = df['Pinyin'].astype(str).str.strip()
+    
+    # Nuke any rows that are just empty strings or completely blank "ghost rows"
+    df = df.replace('', pd.NA).replace('nan', pd.NA).dropna(subset=['Chinese', 'Pinyin'])
     
     conn = get_connection()
     cursor = conn.cursor()
     
     new_words_added = 0
+    skipped_words = [] # This will keep a list of exactly what gets bounced
     today_str = date.today().isoformat()
 
     for index, row in df.iterrows():
-        # FIXED: Require BOTH the Chinese and the Pinyin to match to be considered a duplicate.
         cursor.execute('''
             SELECT id FROM vocab_progress 
             WHERE chinese = %s AND pinyin = %s
@@ -88,11 +93,19 @@ def import_vocab_from_csv():
                 VALUES (%s, %s, %s, %s, %s)
             ''', (row['Chinese'], row['Pinyin'], row['English'], today_str, today_str))
             new_words_added += 1
+        else:
+            # If it skipped it, add it to the Burn Book
+            skipped_words.append(row['Chinese'])
 
     conn.commit()
     conn.close()
+    
     if new_words_added > 0:
-        logging.info(f"Imported {new_words_added} new words to Supabase.")
+        logging.info(f"✅ Imported {new_words_added} new words to Supabase.")
+        
+    if skipped_words:
+        logging.info(f"🚫 Skipped {len(skipped_words)} exact duplicate rows.")
+        logging.info(f"🔍 Here are a few it skipped: {skipped_words[:10]}")
 def flag_word_in_database(chinese_char):
     """Bumps a word to the front of the queue."""
     conn = get_connection()

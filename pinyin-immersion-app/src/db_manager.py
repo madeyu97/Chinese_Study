@@ -69,8 +69,8 @@ def import_vocab_from_csv():
     today_str = date.today().isoformat()
 
     for index, row in df.iterrows():
-        # Notice: Postgres uses %s instead of ? for variables
-        cursor.execute("SELECT id FROM vocab_progress WHERE pinyin = %s", (row['Pinyin'],))
+        # FIXED: Check for duplicates using the actual Chinese characters, not Pinyin!
+        cursor.execute("SELECT id FROM vocab_progress WHERE chinese = %s", (row['Chinese'],))
         exists = cursor.fetchone()
         
         if not exists:
@@ -101,7 +101,7 @@ def flag_word_in_database(chinese_char):
     conn.close()
 
 def get_due_words():
-    """Fetches a proper mix of due reviews and new words."""
+    """Fetches a proper mix of due reviews and new words to hit the daily max."""
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     today_str = date.today().isoformat()
@@ -114,21 +114,25 @@ def get_due_words():
     ''', (today_str,))
     due_reviews = [dict(row) for row in cursor.fetchall()]
     
-    # 2. Fetch New Words (Words you've never seen)
-    cursor.execute('''
-        SELECT * FROM vocab_progress 
-        WHERE review_count = 0 
-        ORDER BY priority_weight DESC, id ASC
-        LIMIT %s
-    ''', (NEW_WORDS_PER_DAY,))
-    new_words = [dict(row) for row in cursor.fetchall()]
+    # 2. FIXED: Dynamically calculate how many new words we need to hit the max
+    needed_new_words = MAX_REVIEWS_PER_DAY - len(due_reviews)
+    
+    if needed_new_words > 0:
+        cursor.execute('''
+            SELECT * FROM vocab_progress 
+            WHERE review_count = 0 
+            ORDER BY priority_weight DESC, id ASC
+            LIMIT %s
+        ''', (needed_new_words,))
+        new_words = [dict(row) for row in cursor.fetchall()]
+    else:
+        new_words = []
     
     conn.close()
     
-    # Combine them (Prioritize reviews first, then backfill with new words)
+    # Combine them
     final_batch = due_reviews + new_words
     
-    # Cap the total list at your daily maximum just in case you have a huge backlog
     return final_batch[:MAX_REVIEWS_PER_DAY]
     
 def update_word_progress(word_id, next_review_date, new_interval, new_ease):

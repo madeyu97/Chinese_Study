@@ -93,7 +93,19 @@ def import_vocab_from_csv():
     conn.close()
     if new_words_added > 0:
         logging.info(f"Imported {new_words_added} new words to Supabase.")
-
+def flag_word_in_database(chinese_char):
+    """Bumps a word to the front of the queue."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE vocab_progress 
+        SET priority_weight = priority_weight + 10 
+        WHERE chinese = %s
+    ''', (chinese_char,))
+    
+    conn.commit()
+    conn.close()
 def get_due_words():
     """Fetches a proper mix of due reviews and new words to hit the daily max."""
     conn = get_connection()

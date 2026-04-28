@@ -133,14 +133,14 @@ def get_due_words():
     ''', (today_str,))
     due_reviews = [dict(row) for row in cursor.fetchall()]
     
-    # 2. FIXED: Dynamically calculate how many new words we need to hit the max
+        # 2. Fetch New Words (Words you've never seen)
     needed_new_words = MAX_REVIEWS_PER_DAY - len(due_reviews)
     
     if needed_new_words > 0:
         cursor.execute('''
             SELECT * FROM vocab_progress 
             WHERE review_count = 0 
-            ORDER BY priority_weight DESC, id ASC
+            ORDER BY priority_weight DESC, id DESC  # <--- CHANGED TO DESC
             LIMIT %s
         ''', (needed_new_words,))
         new_words = [dict(row) for row in cursor.fetchall()]

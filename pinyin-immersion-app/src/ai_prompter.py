@@ -47,6 +47,7 @@ def generate_dictation_exercise(target_word_dict):
     GENERAL INSTRUCTIONS:
     1. STRICT SYNCHRONIZATION: The Chinese characters (Hanzi) and the Pinyin MUST perfectly match.
     2. NO HALLUCINATED CONTEXT: Do NOT invent random names (e.g., "David"). Use generic pronouns if a subject is missing.
+    3. NUMERAL CONVERSION (CRITICAL): If the target word contains Arabic numerals (e.g., '50'), you MUST write them out as actual Chinese characters (e.g., '五十') in the 'hanzi' string and provide the correct Pinyin. NEVER leave Arabic numerals in the generated Chinese sentence.
     
     GRAMMAR AND PARTICLES (CRITICAL):
     You must provide TWO distinct teaching notes:

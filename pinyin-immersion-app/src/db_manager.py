@@ -219,6 +219,46 @@ def undo_word_progress(word_id, old_next_review_date, old_interval, old_ease, ol
     conn.commit()
     conn.close()
 
+
+def get_more_words(exclude_ids, amount=5):
+    """Fetches extra words, ensuring we don't pull ones we already studied this session."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    today_str = date.today().isoformat()
+
+    # Create a safe fallback if the exclude list is somehow empty
+    if not exclude_ids:
+        exclude_ids = [-1]
+
+    # Create the dynamic SQL for the "NOT IN" clause
+    placeholders = ','.join(['%s'] * len(exclude_ids))
+
+    # 1. Fetch Due Reviews, excluding what we've already seen
+    cursor.execute(f'''
+        SELECT * FROM vocab_progress 
+        WHERE review_count > 0 AND next_review_date <= %s AND id NOT IN ({placeholders})
+        ORDER BY priority_weight DESC, next_review_date ASC
+    ''', [today_str] + exclude_ids)
+    due_reviews = [dict(row) for row in cursor.fetchall()]
+
+    # 2. Fetch New Words, excluding what we've already seen
+    needed_new_words = amount - len(due_reviews)
+    
+    if needed_new_words > 0:
+        cursor.execute(f'''
+            SELECT * FROM vocab_progress 
+            WHERE review_count = 0 AND id NOT IN ({placeholders})
+            ORDER BY priority_weight DESC, id DESC
+            LIMIT %s
+        ''', exclude_ids + [needed_new_words])
+        new_words = [dict(row) for row in cursor.fetchall()]
+    else:
+        new_words = []
+
+    conn.close()
+    
+    final_batch = due_reviews + new_words
+    return final_batch[:amount]
 # --- Initialization Block ---
 init_db()
 import_vocab_from_csv()

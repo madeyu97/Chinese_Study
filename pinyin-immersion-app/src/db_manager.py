@@ -30,6 +30,7 @@ def get_connection():
         raise ValueError("CRITICAL ERROR: DATABASE_URL is missing! Streamlit cannot find it in the Secrets menu.")
 
     return psycopg2.connect(db_url)
+
 def init_db():
     """Creates the vocabulary progress table in Supabase if it doesn't exist."""
     conn = get_connection()
@@ -106,6 +107,7 @@ def import_vocab_from_csv():
     if skipped_words:
         logging.info(f"🚫 Skipped {len(skipped_words)} exact duplicate rows.")
         logging.info(f"🔍 Here are a few it skipped: {skipped_words[:10]}")
+
 def flag_word_in_database(chinese_char):
     """Bumps a word to the front of the queue."""
     conn = get_connection()
@@ -119,6 +121,7 @@ def flag_word_in_database(chinese_char):
     
     conn.commit()
     conn.close()
+
 def get_due_words():
     """Fetches a proper mix of due reviews and new words to hit the daily max."""
     conn = get_connection()
@@ -133,7 +136,7 @@ def get_due_words():
     ''', (today_str,))
     due_reviews = [dict(row) for row in cursor.fetchall()]
     
-        # 2. Fetch New Words (Words you've never seen)
+    # 2. Fetch New Words (Words you've never seen)
     needed_new_words = MAX_REVIEWS_PER_DAY - len(due_reviews)
     
     if needed_new_words > 0:
@@ -219,7 +222,6 @@ def undo_word_progress(word_id, old_next_review_date, old_interval, old_ease, ol
     conn.commit()
     conn.close()
 
-
 def get_more_words(exclude_ids, amount=5):
     """Fetches extra words, ensuring we don't pull ones we already studied this session."""
     conn = get_connection()
@@ -259,6 +261,7 @@ def get_more_words(exclude_ids, amount=5):
     
     final_batch = due_reviews + new_words
     return final_batch[:amount]
+    
 # --- Initialization Block ---
 init_db()
 import_vocab_from_csv()

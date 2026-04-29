@@ -6,11 +6,12 @@ import random
 import json
 from datetime import date
 
+
 # Import our custom modules
 from srs_engine import get_todays_quiz_batch, process_review
 from ai_prompter import generate_dictation_exercise
 from audio_engine import create_audio_file
-from db_manager import flag_word_in_database, get_progress_stats, undo_word_progress # NEW IMPORT
+from db_manager import flag_word_in_database, get_progress_stats, undo_word_progress, get_more_words
 
 # ==========================================
 # 1. CACHE MANAGEMENT
@@ -140,11 +141,31 @@ def advance_to_stage_3():
 # ==========================================
 # 4. THE MAIN USER INTERFACE
 # ==========================================
+# ==========================================
+# 4. THE MAIN USER INTERFACE
+# ==========================================
 st.title("🎧 Pinyin Immersion Study")
 
 if st.session_state.current_index >= len(st.session_state.words_due):
     st.success("🎉 You're all caught up for today! Great job.")
     st.balloons()
+    
+    # --- NEW: The "Do 5 More" Overtime Button ---
+    if st.button("➕ Do 5 More Words", type="primary", use_container_width=True):
+        with st.spinner("Fetching more words..."):
+            # Gather the IDs of everything we've already studied today
+            exclude_ids = [word['id'] for word in st.session_state.words_due]
+            
+            # Ask the database for 5 more
+            extra_words = get_more_words(exclude_ids, amount=5)
+            
+            if extra_words:
+                st.session_state.words_due.extend(extra_words)
+                save_cached_session()
+                st.rerun() # Instantly restart the UI loop!
+            else:
+                st.warning("You've completely exhausted your database! Add more words to your CSV.")
+    
     st.stop()
 
 current_word = st.session_state.words_due[st.session_state.current_index]

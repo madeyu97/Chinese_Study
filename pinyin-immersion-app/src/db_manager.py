@@ -140,7 +140,7 @@ def get_due_words():
         cursor.execute('''
             SELECT * FROM vocab_progress 
             WHERE review_count = 0 
-            ORDER BY priority_weight DESC, id DESC  # <--- CHANGED TO DESC
+            ORDER BY priority_weight DESC, id DESC
             LIMIT %s
         ''', (needed_new_words,))
         new_words = [dict(row) for row in cursor.fetchall()]

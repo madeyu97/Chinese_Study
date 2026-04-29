@@ -6,12 +6,11 @@ import random
 import json
 from datetime import date
 
-
 # Import our custom modules
 from srs_engine import get_todays_quiz_batch, process_review
 from ai_prompter import generate_dictation_exercise
 from audio_engine import create_audio_file
-from db_manager import flag_word_in_database, get_progress_stats, undo_word_progress, get_more_words
+from db_manager import flag_word_in_database, get_progress_stats, undo_word_progress, get_more_words, delete_word_from_db, update_word_in_db
 
 # ==========================================
 # 1. CACHE MANAGEMENT
@@ -40,8 +39,8 @@ def save_cached_session():
         "shuffled_options": st.session_state.shuffled_options,
         "user_pinyin": st.session_state.user_pinyin,
         "mcq_correct": st.session_state.mcq_correct,
-        "exercise_history": st.session_state.exercise_history, # NEW: Save history
-        "audio_history": st.session_state.audio_history        # NEW: Save history
+        "exercise_history": st.session_state.exercise_history,
+        "audio_history": st.session_state.audio_history
     }
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(cache, f)
@@ -51,8 +50,7 @@ def save_cached_session():
 # ==========================================
 st.set_page_config(page_title="Pinyin Immersion", page_icon="🎧", layout="centered")
 
-# --- NEW: THE MIDNIGHT RESET ---
-# If the tab was left open overnight, wipe the memory so it grabs a fresh daily batch
+# --- THE MIDNIGHT RESET ---
 if 'session_date' in st.session_state and st.session_state.session_date != str(date.today()):
     for key in list(st.session_state.keys()):
         del st.session_state[key]
@@ -62,13 +60,11 @@ if 'words_due' not in st.session_state:
     cached_state = load_cached_session()
     
     if cached_state:
-        # Restore everything from the cache
         for key, value in cached_state.items():
             if key != "date":
                 st.session_state[key] = value
         st.session_state.session_date = str(date.today())
     else:
-        # Start a fresh session
         st.session_state.words_due = get_todays_quiz_batch()
         st.session_state.current_index = 0
         st.session_state.current_exercise = None
@@ -79,8 +75,9 @@ if 'words_due' not in st.session_state:
         st.session_state.mcq_correct = None
         st.session_state.exercise_history = {} 
         st.session_state.audio_history = {}    
-        st.session_state.session_date = str(date.today()) # Stamp today's date!
+        st.session_state.session_date = str(date.today())
         save_cached_session()
+
 # ==========================================
 # 3. HELPER FUNCTIONS
 # ==========================================
@@ -104,12 +101,10 @@ def grade_word_and_next(grade):
     save_cached_session()
 
 def undo_last_grade():
-    """Restores the database and UI to the previous word."""
     if st.session_state.current_index > 0:
         prev_index = st.session_state.current_index - 1
         original_word = st.session_state.words_due[prev_index]
         
-        # 1. Fix the Database
         undo_word_progress(
             word_id=original_word['id'],
             old_next_review_date=original_word['next_review_date'],
@@ -119,15 +114,11 @@ def undo_last_grade():
             old_priority=original_word.get('priority_weight', 1)
         )
         
-        # 2. Fix the UI state (jump straight to the grading stage)
         st.session_state.current_index = prev_index
-        
-        # JSON converts int keys to strings, so we cast to string to retrieve safely
         idx_str = str(prev_index) 
         st.session_state.current_exercise = st.session_state.exercise_history.get(idx_str)
         st.session_state.audio_path = st.session_state.audio_history.get(idx_str)
-        
-        st.session_state.stage = 3 # Put them right back at the 4 buttons
+        st.session_state.stage = 3 
         save_cached_session()
 
 def advance_to_stage_2():
@@ -141,28 +132,21 @@ def advance_to_stage_3():
 # ==========================================
 # 4. THE MAIN USER INTERFACE
 # ==========================================
-# ==========================================
-# 4. THE MAIN USER INTERFACE
-# ==========================================
 st.title("🎧 Pinyin Immersion Study")
 
 if st.session_state.current_index >= len(st.session_state.words_due):
     st.success("🎉 You're all caught up for today! Great job.")
     st.balloons()
     
-    # --- NEW: The "Do 5 More" Overtime Button ---
     if st.button("➕ Do 5 More Words", type="primary", use_container_width=True):
         with st.spinner("Fetching more words..."):
-            # Gather the IDs of everything we've already studied today
             exclude_ids = [word['id'] for word in st.session_state.words_due]
-            
-            # Ask the database for 5 more
             extra_words = get_more_words(exclude_ids, amount=5)
             
             if extra_words:
                 st.session_state.words_due.extend(extra_words)
                 save_cached_session()
-                st.rerun() # Instantly restart the UI loop!
+                st.rerun() 
             else:
                 st.warning("You've completely exhausted your database! Add more words to your CSV.")
     
@@ -170,7 +154,7 @@ if st.session_state.current_index >= len(st.session_state.words_due):
 
 current_word = st.session_state.words_due[st.session_state.current_index]
 
-# --- NEW: Progress Bar with Undo Button Layout ---
+# Progress Bar with Undo Button Layout
 total_words = len(st.session_state.words_due)
 col1, col2 = st.columns([4, 1])
 
@@ -224,9 +208,13 @@ if st.session_state.current_exercise is None:
         
         if exercise_data:
             st.session_state.current_exercise = exercise_data
-            st.session_state.audio_path = create_audio_file(exercise_data['chinese'])
             
-            # --- NEW: Save to history dictionaries ---
+            # --- THE AUDIO SPOOFER ---
+            audio_script = exercise_data['chinese']
+            audio_script = audio_script.replace("咩", " meh ")
+            
+            st.session_state.audio_path = create_audio_file(audio_script)
+            
             idx_str = str(st.session_state.current_index)
             st.session_state.exercise_history[idx_str] = exercise_data
             st.session_state.audio_history[idx_str] = st.session_state.audio_path
@@ -251,7 +239,11 @@ else:
     st.warning("⚠️ The audio engine failed to generate the voice file.")
     if st.button("🔄 Retry Audio", type="primary"):
         with st.spinner("Retrying audio..."):
-            st.session_state.audio_path = create_audio_file(st.session_state.current_exercise['chinese'])
+            # Ensure the spoofer is active on retry!
+            audio_script = st.session_state.current_exercise['chinese']
+            audio_script = audio_script.replace("咩", " meh ")
+            
+            st.session_state.audio_path = create_audio_file(audio_script)
             st.session_state.audio_history[str(st.session_state.current_index)] = st.session_state.audio_path
             save_cached_session()
             st.rerun()
@@ -350,6 +342,48 @@ if st.session_state.stage == 3:
                         st.markdown(f"📱 [Open in Pleco]({pleco_url})")
                         st.markdown(f"💻 [Open in Web]({mdbg_url})")
 
+    # --- Quick Edit & Delete Controls ---
+    st.markdown("---")
+    with st.expander("⚙️ Card Settings (Edit or Delete)"):
+        st.caption("Tweak this word's context to guide the AI, or remove it entirely.")
+        
+        edit_col1, edit_col2, edit_col3 = st.columns(3)
+        with edit_col1:
+            edit_hanzi = st.text_input("Hanzi", current_word.get('chinese', ''))
+        with edit_col2:
+            edit_pinyin = st.text_input("Pinyin", current_word.get('pinyin', ''))
+        with edit_col3:
+            edit_english = st.text_input("Meaning (AI Prompt Hint)", current_word.get('english', ''))
+            
+        btn_col1, btn_col2 = st.columns([1, 1])
+        with btn_col1:
+            if st.button("💾 Save & Regenerate Card", use_container_width=True):
+                # 1. Update the cloud database
+                update_word_in_db(current_word['id'], edit_hanzi, edit_pinyin, edit_english)
+                
+                # 2. Update the local memory so it doesn't revert
+                st.session_state.words_due[st.session_state.current_index]['chinese'] = edit_hanzi
+                st.session_state.words_due[st.session_state.current_index]['pinyin'] = edit_pinyin
+                st.session_state.words_due[st.session_state.current_index]['english'] = edit_english
+                
+                # 3. Wipe the current exercise to force the AI to make a new one
+                st.session_state.current_exercise = None
+                st.session_state.audio_path = None
+                st.session_state.stage = 1
+                save_cached_session()
+                st.rerun()
+                
+        with btn_col2:
+            if st.button("🗑️ Delete Word Permanently", type="secondary", use_container_width=True):
+                delete_word_from_db(current_word['id'])
+                # Remove it from today's queue and instantly jump to the next word
+                st.session_state.words_due.pop(st.session_state.current_index)
+                st.session_state.current_exercise = None
+                st.session_state.audio_path = None
+                st.session_state.stage = 1
+                save_cached_session()
+                st.rerun()
+                
     st.markdown("---")
     st.markdown("#### Grade yourself (Be honest!):")
     

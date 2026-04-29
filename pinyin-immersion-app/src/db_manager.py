@@ -261,6 +261,26 @@ def get_more_words(exclude_ids, amount=5):
     
     final_batch = due_reviews + new_words
     return final_batch[:amount]
+
+def delete_word_from_db(word_id):
+    """Permanently deletes a word from the Supabase database."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM vocab_progress WHERE id = %s", (word_id,))
+    conn.commit()
+    conn.close()
+
+def update_word_in_db(word_id, new_chinese, new_pinyin, new_english):
+    """Updates the database, allowing you to tweak a word's meaning or characters."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE vocab_progress 
+        SET chinese = %s, pinyin = %s, english = %s 
+        WHERE id = %s
+    ''', (new_chinese, new_pinyin, new_english, word_id))
+    conn.commit()
+    conn.close()
     
 # --- Initialization Block ---
 init_db()

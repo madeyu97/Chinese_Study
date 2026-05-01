@@ -211,7 +211,7 @@ if st.session_state.current_exercise is None:
             
             # --- THE AUDIO SPOOFER ---
             audio_script = exercise_data['chinese']
-            audio_script = audio_script.replace("咩", " meh ")
+            audio_script = audio_script.replace("咩", "么")
             
             st.session_state.audio_path = create_audio_file(audio_script)
             
@@ -241,7 +241,7 @@ else:
         with st.spinner("Retrying audio..."):
             # Ensure the spoofer is active on retry!
             audio_script = st.session_state.current_exercise['chinese']
-            audio_script = audio_script.replace("咩", " meh ")
+            audio_script = audio_script.replace("咩", "么")
             
             st.session_state.audio_path = create_audio_file(audio_script)
             st.session_state.audio_history[str(st.session_state.current_index)] = st.session_state.audio_path

@@ -391,7 +391,7 @@
 "哎呀，很可惜，我没见到她。","Āi yā, hěn kě xī, wǒ méi jiàn dào tā.","Ah, what a pity, I didn't get to see her."
 "你有钱吗？","Nǐ yǒu qián ma?","Do you have money?"
 "糟糕……我没带钱包！","Zāo gāo... wǒ méi dài qián bāo!","Oh no… I didn’t bring my wallet!"
-"惨了咯，怎么办？","Cǎn liao lo, zěn me bàn?","We’re in trouble / Oh no, what should we do?"
+"惨了lo，怎么办？","Cǎn liao lo, zěn me bàn?","We’re in trouble / Oh no, what should we do?"
 "我两天不在家，家里做么乱七八糟的？","Wǒ liǎng tiān bù zài jiā, jiā lǐ zomok luàn qī bā zāo de?","I wasn't home for two days, why is the house in such a mess?"
 "乱七八糟","luàn qī bā zāo","messy / in a complete mess"
 "你是不是出差忘记关窗？昨天的风很大。","Nǐ shì bù shì chū chāi wàng jì guān chuāng? Zuó tiān de fēng hěn dà.","Did you forget to close the window when you went on your business trip? The wind was very strong yesterday."
@@ -415,8 +415,7 @@
 "糟糕，我的电话没有电了。","Zāo gāo, wǒ de diàn huà méi yǒu diàn le.","Oh no, my phone is out of battery."
 "糟糕，我忘记带我的锁匙了。","Zāo gāo, wǒ wàng jì dài wǒ de suǒ shi le.","Oh no, I forgot to bring my keys."
 "锁匙","suǒ shi","key"
-"惨了咯，我们迟到了！","Cǎn liao lo, wǒ men chí dào le!","Oh no, we are late!"
-Chinese,Pinyin,English
+"惨了lo，我们迟到了！","Cǎn liao lo, wǒ men chí dào le!","Oh no, we are late!"
 突然,tū rán,sudden / unexpected
 急事,jí shì,urgent matter / emergency
 这么巧,zhème qiǎo,what a coincidence
@@ -431,12 +430,12 @@ Chinese,Pinyin,English
 糟糕,zāo gāo,oh no / terrible / bad situation
 你有钱吗？,Nǐ yǒu qián ma?,Do you have money?
 糟糕……我没带钱包！,Zāo gāo... wǒ méi dài qián bāo!,Oh no… I didn’t bring my wallet!
-惨了咯，怎么办？,Cǎn le lo; zěn me bàn?,We’re in trouble; what should we do?
+惨了lo，怎么办？,Cǎn le lo; zěn me bàn?,We’re in trouble; what should we do?
 糟糕，我们迟到了！,Zāo gāo; wǒ men chí dào le!,Oh no; we are late!
 糟糕，我的电话没有电了。,Zāo gāo; wǒ de diàn huà méi yǒu diàn le.,Oh no; my phone is out of battery
 锁匙,suǒ shi,key
 糟糕，我忘记带我的锁匙了。,Zāo gāo; wǒ wàng jì dài wǒ de suǒ shi le.,Oh no; I forgot my keys
-惨了咯，我们迟到了！,Cǎn le lo; wǒ men chí dào le!,We’re in trouble; we’re late!
+惨了lo，我们迟到了！,Cǎn le lo; wǒ men chí dào le!,We’re in trouble; we’re late!
 乱七八糟,luàn qī bā zāo,messy / in a complete mess
 出差,chū chāi,to go on a business trip
 跌,diē,to fall
@@ -490,12 +489,11 @@ Chinese,Pinyin,English
 你会做咩？,nǐ huì zuò meh?,You can do it meh?
 他很厉害咩？,tā hěn lì hai meh?,He’s that skilled meh?
 有酱难咩？,yǒu jiàng nán meh?,Is it that difficult meh?
-我会煮很好吃的kidney pie！,wǒ huì zhǔ hěn hǎo chī de Kidney Pie!,I can cook very delicious kidney pie!
 你会咩？,nǐ huì meh?,You can meh?
 会啦！！,huì la!!,Can lah!!
 真的咩？,zhēn de meh?,Really meh?
 真的啦,zhēn de la,Really lah
-我昨天跑了50公里。,wǒ zuó tiān pǎo le 50 gōng lǐ,I ran 50 km yesterday
+我昨天跑了五十公里。,wǒ zuó tiān pǎo le 50 gōng lǐ,I ran 50 km yesterday
 真的咩？,zhēn de meh?,Really meh?
 漂亮,piào liang,pretty
 好看,hǎo kàn,good-looking
@@ -504,8 +502,8 @@ Chinese,Pinyin,English
 厉害,lì hai,skilled / capable
 帅,shuài,handsome
 酷,kù,cool
-靓仔,leng zai,handsome guy (Cantonese slang)
-靓女,leng lui,pretty girl (Cantonese slang)
+leng zai,leng zai,handsome guy (Cantonese slang)
+leng lui,leng lui,pretty girl (Cantonese slang)
 聪明,cōng míng,smart / intelligent
 好笑,hǎo xiào,funny
 善良,shàn liáng,kind-hearted

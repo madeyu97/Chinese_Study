@@ -396,10 +396,7 @@ elif current_mode == 'recall':
     st.markdown(
         f"**Say this in Chinese:** _{st.session_state.current_exercise['english_correct']}_"
     )
-    st.caption(
-        f"Target word: **{current_word.get('chinese', '')}** "
-        f"({current_word.get('pinyin', '')}) — {current_word.get('english', '')}"
-    )
+    st.caption(f"Target word meaning: _{current_word.get('english', '')}_")
 
     if st.session_state.stage == 1:
         st.info("Tap to record, speak the sentence, then submit.")

@@ -1,18 +1,6 @@
 # src/speech_engine.py
 """
-Handles the recall side of the app: take the user's microphone recording,
-transcribe it with Whisper, and ask an LLM to grade vocab / grammar /
-pronunciation against the expected sentence.
-
-Honest caveat on "pronunciation grading":
-    Whisper transcribes what it *thinks* you said. If it transcribes the
-    expected characters cleanly, your pronunciation was at least intelligible
-    to a model trained on millions of hours of speech. If it produces garbage
-    or different characters, something's off — but Whisper cannot tell you
-    "your 3rd tone on 好 sagged too late." For real phoneme/tone scoring,
-    you'd need Azure Speech Pronunciation Assessment, Google Speech, or a
-    specialised provider like ELSA / Speechace. The grade returned here is
-    a useful proxy, not phonetic truth.
+Handles the recall side of the app: transcribe with Whisper, grade with LLM.
 """
 
 import os
@@ -29,10 +17,9 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
-def transcribe_audio(audio_bytes: bytes, filename: str = "speech.webm") -> dict | None:
+def transcribe_audio(audio_bytes, filename="speech.webm"):
     """
-    Send recorded audio to Groq's Whisper and return the transcription.
-
+    Send recorded audio to Groq's Whisper.
     Returns: {"text": str, "language": str, "duration": float} or None on failure.
     """
     if not audio_bytes:
@@ -56,14 +43,9 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "speech.webm") -> dict 
         return None
 
 
-def grade_speech(expected_chinese: str,
-                 expected_pinyin: str,
-                 expected_english: str,
-                 transcribed_text: str) -> dict | None:
+def grade_speech(expected_chinese, expected_pinyin, expected_english, transcribed_text):
     """
     Ask the LLM to grade vocab, grammar, and (proxy) pronunciation.
-    Returns a dict with integer scores, an overall suggested SRS grade, and
-    free-text feedback.
     """
     prompt = f"""
 You are a strict but encouraging Mandarin Chinese tutor grading a student's
@@ -77,23 +59,23 @@ EXPECTED SENTENCE
   Meaning:    {expected_english}
 
 WHISPER TRANSCRIPTION OF STUDENT'S SPEECH
-  {transcribed_text or "(empty — Whisper heard nothing intelligible)"}
+  {transcribed_text or "(empty - Whisper heard nothing intelligible)"}
 
-Grade three criteria on a 0–10 integer scale:
+Grade three criteria on a 0-10 integer scale:
 
-1. VOCAB — did they produce the right characters / words?
+1. VOCAB - did they produce the right characters / words?
    Be a little generous with near-homophone substitutions Whisper sometimes
    makes (e.g. 在 vs 再). If the meaning is preserved, that's fine.
 
-2. GRAMMAR — is the sentence structurally well-formed AND equivalent in
+2. GRAMMAR - is the sentence structurally well-formed AND equivalent in
    meaning to the expected sentence? A grammatical but different sentence
    should score lower here.
 
-3. PRONUNCIATION (proxy) — inferred from Whisper transcription fidelity:
-     9–10: Whisper transcribed the expected characters exactly or near-exactly
-     6–8 : Most characters right, a few errors
-     3–5 : Whisper produced a partly-different sentence
-     0–2 : Whisper produced garbled / empty output
+3. PRONUNCIATION (proxy) - inferred from Whisper transcription fidelity:
+     9-10: Whisper transcribed the expected characters exactly or near-exactly
+     6-8 : Most characters right, a few errors
+     3-5 : Whisper produced a partly-different sentence
+     0-2 : Whisper produced garbled / empty output
    Mention explicitly in feedback that this score is indirect and cannot
    assess tone accuracy.
 
@@ -121,7 +103,6 @@ Return ONLY a JSON object, no prose around it:
             temperature=0.2,
         )
         data = json.loads(resp.choices[0].message.content)
-        # Light validation
         for k in ("vocab_score", "grammar_score", "pronunciation_score"):
             data[k] = max(0, min(10, int(data.get(k, 0))))
         if data.get("overall_grade") not in ("again", "hard", "good", "easy"):
@@ -138,5 +119,4 @@ Return ONLY a JSON object, no prose around it:
         return None
 
 
-# Map LLM verdict → SRS integer grade used by srs_engine.process_review
 GRADE_MAP = {"again": 0, "hard": 1, "good": 2, "easy": 3}

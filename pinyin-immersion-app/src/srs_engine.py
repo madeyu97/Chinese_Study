@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 import logging
 
-from config import EASY_MULTIPLIER, GOOD_MULTIPLIER, HARD_MULTIPLIER
+from config import EASY_MULTIPLIER, GOOD_MULTIPLIER, HARD_MULTIPLIER, MAX_REVIEWS_PER_DAY
 from db_manager import update_word_progress, get_session_words
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -16,8 +16,7 @@ GRADE_EASY = 3
 def process_review(word_id, current_interval, current_ease, grade):
     """
     Per-word SRS state is still maintained, even though the session-selection
-    layer no longer uses next_review_date. This way, if you decide to flip back
-    to a strict SRS schedule later, the data is intact.
+    layer no longer uses next_review_date.
     """
     if grade == GRADE_AGAIN:
         new_ease = max(1.3, current_ease - 0.20)
@@ -49,14 +48,13 @@ def process_review(word_id, current_interval, current_ease, grade):
     logging.info(f"Word {word_id} graded {grade}. New interval: {new_interval} days.")
     return next_review_date
 
-def get_todays_quiz_batch():
+def get_todays_quiz_batch(session_size=MAX_REVIEWS_PER_DAY):
     """
-    Now uses the 50/50 random+latest composition instead of strict SRS due.
-    See db_manager.get_session_words() for the rationale.
+    Uses 50/50 random+latest composition with a user-chosen session size.
     """
-    batch = get_session_words()
+    batch = get_session_words(total=session_size)
     if not batch:
-        logging.info("No words available — is your CSV imported?")
+        logging.info("No words available - is your CSV imported?")
     else:
         logging.info(f"Loaded {len(batch)} words for today's session.")
     return batch

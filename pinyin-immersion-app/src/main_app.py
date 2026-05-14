@@ -14,7 +14,7 @@ from db_manager import (
     get_more_words, delete_word_from_db, update_word_in_db,
 )
 from speech_engine import transcribe_audio, grade_speech, GRADE_MAP
-from config import LISTENING_PCT
+from config import LISTENING_PCT, MAX_REVIEWS_PER_DAY
 
 # ==========================================
 # 1. CACHE MANAGEMENT
@@ -52,13 +52,21 @@ def save_cached_session():
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(cache, f)
 
+def clear_cached_session():
+    """Delete the on-disk cache so the next run starts from setup."""
+    if os.path.exists(CACHE_FILE):
+        try:
+            os.remove(CACHE_FILE)
+        except Exception:
+            pass
+
 # ==========================================
-# 2. APP CONFIGURATION & STATE MANAGEMENT
+# 2. APP CONFIGURATION
 # ==========================================
 st.set_page_config(page_title="Pinyin Immersion", page_icon="🎧", layout="centered")
 
 def assign_modes(words):
-    """Assign each card a mode using LISTENING_PCT / RECALL_PCT, then shuffle."""
+    """Assign each card 'listen' or 'recall', then shuffle."""
     n = len(words)
     listening_count = round(n * LISTENING_PCT)
     modes = ['listen'] * listening_count + ['recall'] * (n - listening_count)
@@ -70,14 +78,16 @@ if 'session_date' in st.session_state and st.session_state.session_date != str(d
     for key in list(st.session_state.keys()):
         del st.session_state[key]
 
-# Init session state
+# ==========================================
+# 3. SESSION INITIALISATION — restore from cache OR show setup screen
+# ==========================================
 if 'words_due' not in st.session_state:
     cached_state = load_cached_session()
     if cached_state:
+        # Resume an in-progress session
         for key, value in cached_state.items():
             if key != "date":
                 st.session_state[key] = value
-        # Backward compat: derive modes if missing from older cache
         if 'modes' not in st.session_state or not st.session_state.modes:
             st.session_state.modes = assign_modes(st.session_state.words_due)
         if 'recall_result' not in st.session_state:
@@ -86,27 +96,55 @@ if 'words_due' not in st.session_state:
             st.session_state.recall_history = {}
         st.session_state.session_date = str(date.today())
     else:
-        st.session_state.words_due = get_todays_quiz_batch()
-        st.session_state.modes = assign_modes(st.session_state.words_due)
-        st.session_state.current_index = 0
-        st.session_state.current_exercise = None
-        st.session_state.audio_path = None
-        st.session_state.stage = 1
-        st.session_state.shuffled_options = []
-        st.session_state.user_pinyin = ""
-        st.session_state.mcq_correct = None
-        st.session_state.exercise_history = {}
-        st.session_state.audio_history = {}
-        st.session_state.recall_result = None
-        st.session_state.recall_history = {}
-        st.session_state.session_date = str(date.today())
-        save_cached_session()
+        # No cache — show the setup screen
+        st.title("🎧 Pinyin Immersion Study")
+        stats = get_progress_stats()
+        st.markdown(f"You have **{stats['total']}** words in your vocabulary database.")
+        st.markdown("### How long should today's session be?")
+
+        with st.form("session_setup"):
+            session_size = st.number_input(
+                "Number of questions",
+                min_value=1,
+                max_value=max(1, stats['total']) if stats['total'] > 0 else 100,
+                value=min(MAX_REVIEWS_PER_DAY, stats['total']) if stats['total'] > 0 else MAX_REVIEWS_PER_DAY,
+                step=1,
+                help=f"Pick anywhere from 1 to {stats['total']} (your full vocabulary).",
+            )
+            listen_count = round(session_size * LISTENING_PCT)
+            recall_count = session_size - listen_count
+            st.caption(
+                f"That's roughly **🎧 {listen_count} listening + 🎤 {recall_count} recall** "
+                f"based on your {int(LISTENING_PCT*100)}/{int((1-LISTENING_PCT)*100)} mix."
+            )
+            start = st.form_submit_button("▶️ Start Session", type="primary", use_container_width=True)
+
+        if not start:
+            st.stop()
+
+        # User clicked Start — build the session
+        with st.spinner("Building your session..."):
+            st.session_state.words_due = get_todays_quiz_batch(session_size=int(session_size))
+            st.session_state.modes = assign_modes(st.session_state.words_due)
+            st.session_state.current_index = 0
+            st.session_state.current_exercise = None
+            st.session_state.audio_path = None
+            st.session_state.stage = 1
+            st.session_state.shuffled_options = []
+            st.session_state.user_pinyin = ""
+            st.session_state.mcq_correct = None
+            st.session_state.exercise_history = {}
+            st.session_state.audio_history = {}
+            st.session_state.recall_result = None
+            st.session_state.recall_history = {}
+            st.session_state.session_date = str(date.today())
+            save_cached_session()
+        st.rerun()
 
 # ==========================================
-# 3. HELPER FUNCTIONS
+# 4. HELPERS
 # ==========================================
 def reset_card_state():
-    """Wipe per-card state so the next card starts fresh."""
     st.session_state.current_exercise = None
     st.session_state.audio_path = None
     st.session_state.stage = 1
@@ -143,43 +181,56 @@ def undo_last_grade():
         idx_str = str(prev_index)
         st.session_state.current_exercise = st.session_state.exercise_history.get(idx_str)
         st.session_state.audio_path = st.session_state.audio_history.get(idx_str)
-        # Restore mode-specific result
         if st.session_state.modes[prev_index] == 'recall':
             st.session_state.recall_result = st.session_state.recall_history.get(idx_str)
-            st.session_state.stage = 2  # recall result view
+            st.session_state.stage = 2
         else:
-            st.session_state.stage = 3  # listen review view
+            st.session_state.stage = 3
         save_cached_session()
 
 def advance_to_stage(n):
     st.session_state.stage = n
     save_cached_session()
 
+def start_new_session():
+    """Wipe everything so the user gets the setup screen again."""
+    clear_cached_session()
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+
 # ==========================================
-# 4. MAIN UI — SHARED HEADER
+# 5. MAIN UI — SHARED HEADER
 # ==========================================
 st.title("🎧 Pinyin Immersion Study")
 
+# Session-complete screen
 if st.session_state.current_index >= len(st.session_state.words_due):
     st.success("🎉 You're all caught up for today! Great job.")
     st.balloons()
-    if st.button("➕ Do 5 More Words", type="primary", use_container_width=True):
-        with st.spinner("Fetching more words..."):
-            exclude_ids = [w['id'] for w in st.session_state.words_due]
-            extra_words = get_more_words(exclude_ids, amount=5)
-            if extra_words:
-                st.session_state.words_due.extend(extra_words)
-                st.session_state.modes.extend(assign_modes(extra_words))
-                save_cached_session()
-                st.rerun()
-            else:
-                st.warning("You've completely exhausted your database! Add more words to your CSV.")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("➕ Do 5 More Words", type="secondary", use_container_width=True):
+            with st.spinner("Fetching more words..."):
+                exclude_ids = [w['id'] for w in st.session_state.words_due]
+                extra_words = get_more_words(exclude_ids, amount=5)
+                if extra_words:
+                    st.session_state.words_due.extend(extra_words)
+                    st.session_state.modes.extend(assign_modes(extra_words))
+                    save_cached_session()
+                    st.rerun()
+                else:
+                    st.warning("You've completely exhausted your database!")
+    with col_b:
+        if st.button("🔄 Start New Session", type="primary", use_container_width=True):
+            start_new_session()
+            st.rerun()
     st.stop()
 
 current_word = st.session_state.words_due[st.session_state.current_index]
 current_mode = st.session_state.modes[st.session_state.current_index]
 
-# Progress bar + undo + mode badge
+# Header row: progress / mode / undo
 total_words = len(st.session_state.words_due)
 col1, col2, col3 = st.columns([3, 1, 1])
 with col1:
@@ -197,7 +248,7 @@ with col3:
 st.markdown("---")
 
 # ==========================================
-# 4.5 SIDEBAR
+# 5.5 SIDEBAR
 # ==========================================
 with st.sidebar:
     st.header("📊 Global Progress")
@@ -215,7 +266,7 @@ with st.sidebar:
         st.write(f"**🏆 Mastered:** {stats['mastered']} words ({mastered_pct}%)")
         st.progress(stats['mastered'] / stats['total'])
         st.markdown("---")
-        st.caption("Mastered = successfully pushed 21+ days into the future.")
+        st.caption("Mastered = pushed 21+ days into the future.")
 
         st.markdown("---")
         listen_left = sum(1 for i, m in enumerate(st.session_state.modes)
@@ -223,11 +274,16 @@ with st.sidebar:
         recall_left = sum(1 for i, m in enumerate(st.session_state.modes)
                           if i >= st.session_state.current_index and m == 'recall')
         st.caption(f"This session: 🎧 {listen_left} listening · 🎤 {recall_left} recall")
+
+        st.markdown("---")
+        if st.button("🔄 End & Start New Session", use_container_width=True):
+            start_new_session()
+            st.rerun()
     else:
         st.write("No vocabulary found. Please check your CSV.")
 
 # ==========================================
-# 5. EXERCISE GENERATION (shared by both modes)
+# 6. EXERCISE GENERATION (shared by both modes)
 # ==========================================
 if st.session_state.current_exercise is None:
     with st.spinner("Generating localized scenario..."):
@@ -250,7 +306,7 @@ if st.session_state.current_exercise is None:
             st.stop()
 
 # ==========================================
-# Reusable: dictionary / grammar / particle breakdown
+# Reusable renderers
 # ==========================================
 def render_breakdown():
     ex = st.session_state.current_exercise
@@ -316,7 +372,6 @@ def render_card_settings():
                 st.rerun()
 
 def render_grade_buttons(suggested_grade=None):
-    """suggested_grade is 0–3 if you want a button visually pre-highlighted."""
     st.markdown("---")
     st.markdown("#### Grade yourself (Be honest!):")
     labels = ["Again (0)\nFailed", "Hard (1)\nStruggled", "Good (2)\nSolid", "Easy (3)\nInstant"]
@@ -330,7 +385,7 @@ def render_grade_buttons(suggested_grade=None):
 
 
 # ==========================================
-# 6A. LISTENING FLOW (60%) — unchanged 3-stage logic
+# 7A. LISTENING FLOW
 # ==========================================
 if current_mode == 'listen':
     st.subheader("Listen & Transcribe:")
@@ -389,7 +444,7 @@ if current_mode == 'listen':
 
 
 # ==========================================
-# 6B. RECALL FLOW (40%) — new
+# 7B. RECALL FLOW
 # ==========================================
 elif current_mode == 'recall':
     st.subheader("🎤 Speak the Chinese:")
@@ -428,7 +483,6 @@ elif current_mode == 'recall':
                 advance_to_stage(2)
                 st.rerun()
 
-        # Escape hatch — let user skip recording (e.g. quiet environment)
         with st.expander("Can't record right now?"):
             if st.button("⏭️ Skip recording and self-grade"):
                 st.session_state.recall_result = None
@@ -440,17 +494,14 @@ elif current_mode == 'recall':
         st.markdown("---")
         st.markdown("### The Solution")
 
-        # Correct answer
         st.info(f"**Correct Chinese:** {st.session_state.current_exercise['chinese']}")
         st.info(f"**Correct Pinyin:** {st.session_state.current_exercise['pinyin']}")
         st.caption(f"*(Meaning: {st.session_state.current_exercise['english_correct']})*")
 
-        # Play the canonical pronunciation
         if st.session_state.audio_path and os.path.exists(st.session_state.audio_path):
             st.caption("How it should sound:")
             st.audio(st.session_state.audio_path, format="audio/mp3")
 
-        # Scoring
         if result is not None:
             grading = result['grading']
             transcription = result['transcription']

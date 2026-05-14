@@ -6,35 +6,148 @@ import logging
 from groq import Groq
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
-
-# Initialize the Groq client
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
+# ----------------------------------------------------------------------
+# Malaysian Mandarin colloquialisms the standard LLM gets wrong by default.
+# Add entries as you find more. Format: hanzi -> (standard meaning, what
+# Malaysians actually use it as).
+# ----------------------------------------------------------------------
+MALAYSIAN_SLANG = {
+    "酱": ("sauce (literal)", "colloquial contraction of 这样 — 'like this / so / that'. e.g. 酱贵 = 这样贵 = 'so expensive'"),
+    "啊那": ("(none)", "contraction of 那个 — 'that one / um'"),
+    "烧": ("to burn (literal)", "used for 'hot' (temperature of food/drink) instead of 热"),
+    "怕输": ("(literal: afraid of losing)", "kiasu — fear of missing out / being one-upped. Cultural staple."),
+    "做工": ("to do work (literal)", "to work / go to work — used where mainland speakers would say 上班"),
+    "讲": ("to speak (literal)", "preferred over 说 for 'to say' in casual speech"),
+    "要": ("to want (literal)", "often used for future tense 'going to' where mainland uses 会"),
+    "几时": ("(uncommon in PRC)", "Malaysian for 'when' — used instead of 什么时候"),
+    "罢了": ("(literary)", "casual 'only / just' — like 而已. Often paired with 啦"),
+    "巴刹": ("(none)", "from Malay 'pasar' — wet market"),
+    "甘榜": ("(none)", "from Malay 'kampung' — village"),
+}
+
+# ----------------------------------------------------------------------
 # Homophones the listener cannot disambiguate by ear alone.
-# If any of these appear in the Chinese sentence, the MCQ correct-answer must
-# accept either reading and distractors must NOT vary on the homophone alone.
+# ----------------------------------------------------------------------
 HOMOPHONE_GROUPS = [
-    ("他", "她", "它"),         # tā — he / she / it
-    ("在", "再"),               # zài — at / again
-    ("是", "事"),               # shì — to be / matter
-    ("做", "作"),               # zuò — to do / to make
-    ("到", "道"),               # dào — to arrive / way
-    ("以", "已"),               # yǐ — by means of / already
-    ("买", "卖"),               # mǎi/mài — different tone, but new learners often confuse
-    ("会", "回"),               # huì/huí — different tone, often confused
+    ("他", "她", "它"),
+    ("在", "再"),
+    ("是", "事"),
+    ("做", "作"),
+    ("到", "道"),
+    ("以", "已"),
+    ("买", "卖"),
+    ("会", "回"),
 ]
 
+# ----------------------------------------------------------------------
+# Target-word category detection — drives what kind of distractors to make.
+# ----------------------------------------------------------------------
+MALAYSIAN_PARTICLES = {"啦", "咯", "咩", "咧", "啊", "嘛", "喎", "罢了", "了", "吗", "呢", "吧"}
+TIME_WORDS = {"今天", "昨天", "明天", "现在", "刚才", "以前", "以后", "早上", "晚上", "下午", "中午", "上个", "下个"}
+NEGATIONS = {"不", "没", "没有", "别", "甭"}
+QUANTIFIERS = {"一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万", "几", "多", "少", "些", "都"}
+
+def _classify_target(chinese_chars: str, english: str) -> str:
+    """
+    Best-effort categorisation of the target word so the AI can build
+    distractors that attack the right learning axis.
+    """
+    if not chinese_chars:
+        return "general"
+    for p in MALAYSIAN_PARTICLES:
+        if p == chinese_chars or (len(chinese_chars) <= 2 and p in chinese_chars):
+            return "particle"
+    if chinese_chars in TIME_WORDS:
+        return "time"
+    if chinese_chars in NEGATIONS:
+        return "negation"
+    if chinese_chars in QUANTIFIERS or any(c in QUANTIFIERS for c in chinese_chars):
+        return "quantifier"
+    # crude heuristic: single chars in this list-ish range tend to be verbs/adjectives
+    return "content_word"
+
+
+def _find_relevant_slang(chinese_text: str):
+    """Return slang entries present in the sentence, for prompt context."""
+    return {k: v for k, v in MALAYSIAN_SLANG.items() if k in chinese_text}
+
+
 def _detect_homophones(chinese_text: str):
-    """Return a list of homophone groups present in the sentence, for prompt injection."""
     present = []
     for group in HOMOPHONE_GROUPS:
         if any(ch in chinese_text for ch in group):
             present.append(group)
     return present
+
+
+# ----------------------------------------------------------------------
+# Per-category distractor rules — INJECTED into the prompt based on
+# what kind of target word you're being tested on.
+# ----------------------------------------------------------------------
+DISTRACTOR_PLAYBOOKS = {
+    "particle": """
+    TARGET CATEGORY: PARTICLE — this card exists to train ear for particle nuance.
+
+    Distractors MUST vary the SENTENCE TYPE / EMOTIONAL FORCE that different
+    particles produce. The propositional content of all four options should be
+    nearly identical; what changes is the speech act / mood.
+
+    Required distractor axes (use 3 of these, one per distractor):
+      - Statement (no particle / 了 finality) vs question (吗/咩) — was the
+        sentence asking or telling?
+      - Exclamation/surprise (啊/喔) vs confirmation-seeking (吧/咩) vs
+        casual assertion (啦/罢了)
+      - Mild surprise/skepticism (咩) vs assertive (啦) vs reluctant (咯)
+      - Polite/softening (吧, 嘛) vs blunt (no particle)
+
+    Example structure for sentence 有酱好吃咩？("Is it really that delicious?"):
+      Correct:     "Is it really that delicious?" (咩 = skeptical question)
+      Distractor:  "It is really that delicious!" (statement, no particle)
+      Distractor:  "Is it that delicious?" (neutral 吗 question, no skepticism)
+      Distractor:  "It's so delicious!" (啦 — casual exclamation)
+
+    DO NOT make distractors that change the content nouns (don't swap food
+    items, places, or sauce-for-water). The particle is what's being tested.
+    """,
+
+    "time": """
+    TARGET CATEGORY: TIME WORD — distractors should vary the time reference.
+    Each distractor changes the time word to a phonetically/semantically
+    nearby alternative (yesterday/today/tomorrow, morning/evening, before/after,
+    last week/next week). Keep everything else identical. Do NOT change verbs
+    or nouns.
+    """,
+
+    "negation": """
+    TARGET CATEGORY: NEGATION — distractors should vary on negation presence
+    and type. Options should include: the affirmative version, a 不 version
+    where 没 was correct (or vice versa), and a different scope of negation.
+    Do not change other content words.
+    """,
+
+    "quantifier": """
+    TARGET CATEGORY: QUANTIFIER/NUMBER — distractors should change ONLY the
+    number or quantifier (three vs thirteen vs thirty, a few vs many vs all,
+    some vs none). Keep everything else identical.
+    """,
+
+    "content_word": """
+    TARGET CATEGORY: CONTENT WORD (noun/verb/adjective) — distractors should
+    swap the TARGET word for a phonetically similar OR semantically adjacent
+    alternative (buy/sell, tea/water, cold/hot, walk/run). Change one other
+    feature on the remaining two distractors (negation, time, or quantifier).
+    """,
+
+    "general": """
+    TARGET CATEGORY: general — vary one specific feature per distractor: the
+    aspect/tense marker, negation, a single key noun/verb, or the quantifier.
+    """,
+}
 
 
 def generate_dictation_exercise(target_word_dict):
@@ -44,6 +157,10 @@ def generate_dictation_exercise(target_word_dict):
 
     is_locked_phrase = len(chinese_chars) > 3
 
+    # Identify the learning target & what playbook applies
+    target_category = _classify_target(chinese_chars, english)
+    playbook = DISTRACTOR_PLAYBOOKS[target_category]
+
     if is_locked_phrase:
         behavior_prompt = f"""
         LOCKED SENTENCE: '{chinese_chars}'
@@ -51,126 +168,119 @@ def generate_dictation_exercise(target_word_dict):
 
         CRITICAL RULES FOR THIS SENTENCE:
         1. DO NOT alter the Chinese characters. Analyze EXACTLY '{chinese_chars}' and NOTHING ELSE.
-        2. PINYIN ACCURACY: You MUST generate Pinyin that perfectly matches these characters. Do NOT hallucinate Pinyin for words that aren't there (e.g., ensure 杯子 is 'bēi zi').
-        3. THE "了" RULE: If this sentence contains the character '了', you MUST transcribe its pinyin as 'liǎo' (NOT 'le') to force the Malaysian pronunciation.
-        4. DICTIONARY BREAKDOWN: Break the sentence down into logical 1-to-2 character chunks. Do NOT group large 4-character chunks together.
+        2. PINYIN ACCURACY: You MUST generate Pinyin that perfectly matches these characters.
+        3. THE "了" RULE: If this sentence contains '了', transcribe its pinyin as 'liǎo' (NOT 'le').
+        4. DICTIONARY BREAKDOWN: Break the sentence into logical 1-to-2 character chunks.
         """
+        # For locked phrases, detect slang in the locked Chinese now so we can
+        # warn the model
+        slang_in_play = _find_relevant_slang(chinese_chars)
     else:
         display_word = chinese_chars if chinese_chars else pinyin
         behavior_prompt = f"""
         Create a FULL 1-sentence scenario (between 5 and 10 words long) using the target word '{display_word}' ({pinyin} - {english}).
         If you use '了', transcribe its pinyin as 'liǎo'.
         """
+        slang_in_play = _find_relevant_slang(chinese_chars)  # may be empty until generation
 
-    # ----------------------------------------------------------------------
-    # NEW: distractor-quality + homophone rules
-    # ----------------------------------------------------------------------
-    distractor_rules = """
-    DISTRACTOR QUALITY RULES (CRITICAL — this is a LISTENING exercise):
-
-    The four English options (1 correct + 3 distractors) will be shown after the
-    learner hears the Chinese audio. Distractors must train the ear, not be
-    obvious throwaways. Apply ALL of the following:
-
-    1. SINGLE-FEATURE DIFFERENCE: Each distractor must differ from the correct
-       English by EXACTLY ONE specific feature the listener could plausibly
-       mishear. Pick a different feature for each distractor. Allowed features:
-         (a) The aspect/tense marker (了 was/wasn't heard, 过 vs no 过, 在 vs no 在)
-         (b) Negation (没/不 was/wasn't heard)
-         (c) A single particle's emotional force (e.g. 啊 surprise vs 吗 question vs 啦 casual)
-         (d) ONE specific noun or verb swapped for a phonetically similar /
-             semantically adjacent word (e.g. "buy" vs "sell", "tea" vs "water",
-             "yesterday" vs "tomorrow")
-         (e) The quantifier or number (e.g. "three" vs "a few", "all" vs "some")
-
-    2. NO TRIVIAL DISTRACTORS — BANNED:
-       - Sentences with opposite polarity to the correct answer (e.g. correct
-         "He came" + distractor "He didn't come"). Too easy to eliminate.
-       - Sentences that are grammatically impossible or semantically absurd in
-         the context.
-       - Sentences using vocabulary far outside the register of the original
-         (don't put formal/literary terms in a casual sentence's distractors).
-       - Sentences that differ only in English word order without meaning change
-         (e.g. "I gave him the book" vs "I gave the book to him").
-       - Sentences whose only difference is synonym substitution that preserves
-         meaning (e.g. "purchase" vs "buy"). The learner gains nothing.
-
-    3. ALL FOUR OPTIONS MUST BE GRAMMATICAL ENGLISH and roughly the same length
-       (within 3 words of each other). No 4-word stub next to a 12-word essay.
-
-    4. PLAUSIBILITY TEST: Before finalising each distractor, ask: "Could a
-       learner who heard ~80% of the audio correctly genuinely pick this?" If
-       no, rewrite it.
-
-    HOMOPHONE HANDLING (CRITICAL):
-
-    Chinese has many same-pinyin / same-tone characters the listener CANNOT
-    disambiguate by ear. The most common is 他/她/它 — all pronounced 'tā'.
-    Others include 在/再 (zài), 是/事 (shì), 做/作 (zuò), 到/道 (dào), 以/已 (yǐ).
-
-    Rules:
-    (a) If the Chinese sentence contains a homophone, the CORRECT English
-        answer must reflect the ambiguity. For 他/她/它, write "He/She" or
-        "He/She/It" depending on context plausibility. Do NOT commit to one
-        gender or thing-vs-person if the audio doesn't.
-    (b) Distractors must NOT differ from the correct answer ONLY on a
-        homophone (e.g. don't make "He went home" the correct and "She went
-        home" a distractor — they sound identical and both are correct).
-    (c) Pronoun confusion is fine ONLY if it pairs with another single-feature
-        difference (e.g. correct "He/She went home" vs distractor "We went
-        home" — different pronoun number, audibly different).
+    # Build slang context if relevant
+    slang_section = ""
+    if slang_in_play:
+        slang_lines = "\n".join(
+            f"   - {char}: {meaning[1]}" for char, meaning in slang_in_play.items()
+        )
+        slang_section = f"""
+    MALAYSIAN COLLOQUIAL CONTEXT (CRITICAL — the standard reading is WRONG here):
+    The following characters in this sentence are Malaysian colloquial usage,
+    NOT standard Mandarin. Translate accordingly:
+{slang_lines}
     """
+
+    # Also always include the full slang reference so the AI knows these terms
+    # exist if it's generating a new sentence
+    full_slang_reference = "MALAYSIAN COLLOQUIAL GLOSSARY (for reference when generating sentences):\n"
+    for char, (literal, malaysian) in MALAYSIAN_SLANG.items():
+        full_slang_reference += f"   {char}: literal = {literal}; Malaysian usage = {malaysian}\n"
 
     prompt = f"""
     You are an expert Malaysian Mandarin tutor designing a LISTENING
-    comprehension multiple-choice question.
+    comprehension multiple-choice question. The learner already speaks some
+    Mandarin; this app is specifically training their ear for Malaysian
+    colloquial speech and particle nuance.
 
     {behavior_prompt}
 
+    {slang_section}
+
+    {full_slang_reference}
+
     GENERAL INSTRUCTIONS:
-    1. STRICT SYNCHRONIZATION: The Chinese characters (Hanzi) and the Pinyin MUST perfectly match.
-    2. NO HALLUCINATED CONTEXT: Do NOT invent random names (e.g., "David"). Use generic pronouns if a subject is missing.
-    3. NUMERAL CONVERSION (CRITICAL): If the target word contains Arabic numerals (e.g., '50'), you MUST write them out as actual Chinese characters (e.g., '五十') in the 'hanzi' string and provide the correct Pinyin. NEVER leave Arabic numerals in the generated Chinese sentence.
-    4. MALAYSIAN PRONUNCIATION (CRITICAL):
-       - If the sentence contains the particle '了', you MUST transcribe its pinyin as 'liǎo' (NOT 'le').
-       - If the sentence contains the particle '咩', you MUST transcribe its pinyin as 'meh' (NOT 'miē').
+    1. STRICT SYNCHRONIZATION: Chinese characters and Pinyin MUST perfectly match.
+    2. NO HALLUCINATED CONTEXT: Don't invent random names. Use generic pronouns if subject is missing.
+    3. NUMERAL CONVERSION: If the target contains Arabic numerals, write them as Chinese characters.
+    4. MALAYSIAN PRONUNCIATION:
+       - '了' → pinyin 'liǎo' (not 'le')
+       - '咩' → pinyin 'meh' (not 'miē')
 
-    {distractor_rules}
+    ═══════════════════════════════════════════════════════════════════
+    TARGET-AWARE DISTRACTOR DESIGN (THIS IS THE MOST IMPORTANT SECTION)
+    ═══════════════════════════════════════════════════════════════════
 
-    GRAMMAR AND PARTICLES (CRITICAL):
-    You must provide TWO distinct teaching notes:
-    1. 'grammar_point': Focus ONLY on the structural syntax of the sentence.
-    2. 'particle_note': SCAN the Chinese sentence. If it contains ANY Malaysian particle (e.g., 啦, 咯, 咩, 咧, 啊, 嘛, 喎, 哎哟, 哎呀, 了), you ABSOLUTELY MUST fill out this field explaining the specific emotional tone it adds. Do NOT skip this if a particle is present. ONLY return null if the sentence is 100% free of discourse particles.
+    This card was scheduled to teach the target word: '{chinese_chars}' ({pinyin}, "{english}")
+    Target category detected: {target_category.upper()}
 
-    Output a raw JSON object EXACTLY like this example format. Note how the
-    correct answer hedges on 他 vs 她, and how each distractor changes ONE
-    specific audibly-distinguishable feature:
+    {playbook}
+
+    UNIVERSAL DISTRACTOR RULES (apply on top of the category playbook above):
+
+    1. ALL distractors must attack the TARGET word's learning axis, not random
+       other words in the sentence. If the target is a particle, vary mood. If
+       it's a time word, vary time. If it's a noun, vary that noun.
+
+    2. NO TRIVIAL DISTRACTORS — BANNED:
+       - Sentences with directly opposite polarity (e.g. "He came" vs "He didn't come")
+       - Sentences that are grammatically impossible or absurd
+       - Synonym-only substitutions ("purchase" vs "buy")
+       - Word-order-only differences ("gave him the book" vs "gave the book to him")
+
+    3. ALL four options must be grammatical English of roughly equal length
+       (within 3 words of each other).
+
+    4. PLAUSIBILITY TEST: Could a learner who heard ~80% of the audio correctly
+       genuinely pick this distractor? If no, rewrite it.
+
+    HOMOPHONE HANDLING:
+
+    If the Chinese sentence contains 他/她/它 (tā), 在/再 (zài), 是/事 (shì),
+    做/作 (zuò), 到/道 (dào), or 以/已 (yǐ): the correct answer must reflect
+    the ambiguity (write "He/She" not "He"), and distractors must NOT differ
+    from the correct answer ONLY on a homophone.
+
+    GRAMMAR AND PARTICLES:
+    Provide TWO teaching notes:
+    1. 'grammar_point': Structural syntax only.
+    2. 'particle_note': If the sentence contains ANY Malaysian particle
+       (啦, 咯, 咩, 咧, 啊, 嘛, 喎, 哎哟, 哎呀, 了), explain the specific
+       emotional tone. Return null ONLY if no discourse particles present.
+
+    Output a raw JSON object EXACTLY in this format:
     {{
-        "hanzi": "他昨天没买茶。",
-        "pinyin": "tā zuó tiān méi mǎi chá.",
-        "english_correct": "He/She didn't buy tea yesterday.",
-        "english_distractors": [
-            "He/She didn't buy tea today.",
-            "He/She didn't buy water yesterday.",
-            "He/She bought tea yesterday."
-        ],
+        "hanzi": "<the sentence>",
+        "pinyin": "<matching pinyin>",
+        "english_correct": "<accurate translation, hedging on homophones where needed>",
+        "english_distractors": ["<dist1>", "<dist2>", "<dist3>"],
         "word_breakdown": [
-            {{"hanzi": "他", "pinyin": "tā", "english": "he/she"}},
-            {{"hanzi": "昨天", "pinyin": "zuó tiān", "english": "yesterday"}},
-            {{"hanzi": "没", "pinyin": "méi", "english": "did not"}},
-            {{"hanzi": "买", "pinyin": "mǎi", "english": "buy"}},
-            {{"hanzi": "茶", "pinyin": "chá", "english": "tea"}}
+            {{"hanzi": "字", "pinyin": "zì", "english": "meaning"}}
         ],
         "grammar_point": {{
-            "structure": "Subject + Time + 没 + Verb + Object",
-            "explanation": "Past-tense negation using 没."
+            "structure": "<syntax pattern>",
+            "explanation": "<short explanation>"
         }},
-        "particle_note": null
+        "particle_note": {{
+            "particle": "<particle (pinyin)>",
+            "explanation": "<emotional/pragmatic force>"
+        }}
     }}
-
-    In that example: distractor 1 changes time word, distractor 2 changes the
-    object noun, distractor 3 removes the negation. Each is one feature, each
-    is plausibly mis-heard, and the correct answer doesn't gender-commit.
     """
 
     try:
@@ -183,7 +293,7 @@ def generate_dictation_exercise(target_word_dict):
         raw_json_str = response.choices[0].message.content
         raw_data = json.loads(raw_json_str)
 
-        # --- THE SURGICAL LOCK ---
+        # --- SURGICAL LOCK for >3-char phrases ---
         if is_locked_phrase:
             final_chinese = chinese_chars
             final_pinyin = pinyin if pinyin else raw_data.get("pinyin", "")
@@ -201,21 +311,12 @@ def generate_dictation_exercise(target_word_dict):
                 "english": item.get("english", "")
             })
 
-        # ------------------------------------------------------------------
-        # NEW: post-hoc safety net — if the AI ignored the homophone rule and
-        # the correct answer commits to "He" or "She" while the sentence uses
-        # the ambiguous 他/她/它, soft-rewrite it to "He/She".
-        # This is belt-and-braces; the prompt should handle it, but LLMs slip.
-        # ------------------------------------------------------------------
+        # --- Homophone post-processing safety net ---
         present_homophones = _detect_homophones(final_chinese)
         english_correct = raw_data.get("english_correct", "")
         english_distractors = raw_data.get("english_distractors", [])
 
-        # Handle 他/她/它 — the pronoun case
-        if any(set(g) <= {"他", "她", "它"} or "他" in g for g in present_homophones):
-            # Only hedge if the sentence does NOT make gender unambiguous via
-            # other context. We can't be perfectly sure, so hedge unless the
-            # AI already did.
+        if any("他" in g for g in present_homophones):
             if "/" not in english_correct:
                 for word in (" He ", " She ", " he ", " she "):
                     if word in f" {english_correct} ":
@@ -230,8 +331,6 @@ def generate_dictation_exercise(target_word_dict):
                             english_correct = "He/She " + english_correct.split(" ", 1)[1]
                         break
 
-            # Drop any distractor that differs from the correct answer ONLY on
-            # the pronoun — those are not valid distractors for listening.
             def _strip_pronoun(s):
                 return (s.replace("He/She", "X").replace("He", "X").replace("She", "X")
                          .replace("he/she", "x").replace("he", "x").replace("she", "x"))
@@ -249,14 +348,13 @@ def generate_dictation_exercise(target_word_dict):
             "target_pinyin": pinyin,
             "word_breakdown": word_breakdown,
             "grammar_point": raw_data.get("grammar_point", {}),
-            "particle_note": raw_data.get("particle_note", {})
+            "particle_note": raw_data.get("particle_note", {}),
+            "target_category": target_category,  # exposed for debugging in UI
         }
 
-        # Sanity check: if we ended up with < 3 distractors, log it so it shows
-        # up in your Streamlit logs.
         if len(exercise_data["english_distractors"]) < 3:
             logging.warning(
-                f"Only {len(exercise_data['english_distractors'])} distractors after homophone filtering "
+                f"Only {len(exercise_data['english_distractors'])} distractors after filtering "
                 f"for sentence: {final_chinese}"
             )
 

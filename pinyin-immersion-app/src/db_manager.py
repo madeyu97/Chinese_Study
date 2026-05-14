@@ -29,7 +29,6 @@ def get_connection():
     return psycopg2.connect(db_url)
 
 def init_db():
-    """Creates the vocabulary progress table in Supabase if it doesn't exist."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -51,7 +50,6 @@ def init_db():
     logging.info("Supabase database initialized successfully.")
 
 def import_vocab_from_csv():
-    """Reads your local CSV, scrubs invisible errors, and uploads to Supabase."""
     if not VOCAB_CSV_PATH.exists():
         logging.warning("CSV file not found. Skipping import.")
         return
@@ -87,9 +85,9 @@ def import_vocab_from_csv():
     conn.close()
 
     if new_words_added > 0:
-        logging.info(f"✅ Imported {new_words_added} new words to Supabase.")
+        logging.info(f"Imported {new_words_added} new words to Supabase.")
     if skipped_words:
-        logging.info(f"🚫 Skipped {len(skipped_words)} exact duplicate rows.")
+        logging.info(f"Skipped {len(skipped_words)} exact duplicate rows.")
 
 def flag_word_in_database(chinese_char):
     conn = get_connection()
@@ -101,26 +99,14 @@ def flag_word_in_database(chinese_char):
     conn.close()
 
 
-# ==========================================
-# NEW: Session composition — 50% random + 50% latest
-# ==========================================
 def get_session_words(total=MAX_REVIEWS_PER_DAY, random_pct=RANDOM_BREADTH_PCT):
     """
-    Build a daily session composed of:
-      - `random_pct` of `total` drawn at random across the whole vocabulary
-        (for breadth of revision)
-      - the remainder drawn from the most recently added entries
-        (bottom-up, by id DESC)
-
-    The two pools are deduplicated and the final list is shuffled so the user
-    doesn't perceive a "random block then latest block" pattern.
-
-    Note: this intentionally sets aside the SRS `next_review_date` for SESSION
-    SELECTION purposes. Per-word SRS state is still updated when you grade,
-    so individual word intervals still grow correctly — you just no longer
-    *only* see words flagged due today. That's the breadth trade-off you asked for.
+    Build a session of `total` cards composed of:
+      - `random_pct` random across the whole vocabulary (breadth)
+      - the rest from the most recently added entries (bottom-up)
+    Deduplicated and shuffled.
     """
-    import random as _random  # local import to avoid shadowing
+    import random as _random
 
     random_count = int(round(total * random_pct))
     latest_count = total - random_count
@@ -128,41 +114,31 @@ def get_session_words(total=MAX_REVIEWS_PER_DAY, random_pct=RANDOM_BREADTH_PCT):
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    # 1) Latest additions
     cursor.execute('''
-        SELECT * FROM vocab_progress
-        ORDER BY id DESC
-        LIMIT %s
+        SELECT * FROM vocab_progress ORDER BY id DESC LIMIT %s
     ''', (latest_count,))
     latest_rows = [dict(r) for r in cursor.fetchall()]
     latest_ids = [r['id'] for r in latest_rows]
 
-    # 2) Random sample across the rest of the CSV
     if latest_ids:
         placeholders = ','.join(['%s'] * len(latest_ids))
         cursor.execute(f'''
             SELECT * FROM vocab_progress
             WHERE id NOT IN ({placeholders})
-            ORDER BY RANDOM()
-            LIMIT %s
+            ORDER BY RANDOM() LIMIT %s
         ''', latest_ids + [random_count])
     else:
-        cursor.execute('''
-            SELECT * FROM vocab_progress
-            ORDER BY RANDOM()
-            LIMIT %s
-        ''', (random_count,))
+        cursor.execute('SELECT * FROM vocab_progress ORDER BY RANDOM() LIMIT %s', (random_count,))
     random_rows = [dict(r) for r in cursor.fetchall()]
 
     conn.close()
-
     session = latest_rows + random_rows
     _random.shuffle(session)
     return session
 
 
 def get_due_words():
-    """Legacy SRS-based fetcher. Kept so srs_engine still works if you revert."""
+    """Legacy SRS-based fetcher. Kept for fallback."""
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     today_str = date.today().isoformat()
@@ -177,15 +153,13 @@ def get_due_words():
         cursor.execute('''
             SELECT * FROM vocab_progress
             WHERE review_count = 0
-            ORDER BY priority_weight DESC, id DESC
-            LIMIT %s
+            ORDER BY priority_weight DESC, id DESC LIMIT %s
         ''', (needed_new_words,))
         new_words = [dict(row) for row in cursor.fetchall()]
     else:
         new_words = []
     conn.close()
-    final_batch = due_reviews + new_words
-    return final_batch[:MAX_REVIEWS_PER_DAY]
+    return (due_reviews + new_words)[:MAX_REVIEWS_PER_DAY]
 
 
 def update_word_progress(word_id, next_review_date, new_interval, new_ease):
@@ -193,9 +167,7 @@ def update_word_progress(word_id, next_review_date, new_interval, new_ease):
     cursor = conn.cursor()
     cursor.execute('''
         UPDATE vocab_progress
-        SET next_review_date = %s,
-            interval = %s,
-            ease_factor = %s,
+        SET next_review_date = %s, interval = %s, ease_factor = %s,
             review_count = review_count + 1,
             priority_weight = GREATEST(1, priority_weight - 2)
         WHERE id = %s
@@ -224,23 +196,16 @@ def undo_word_progress(word_id, old_next_review_date, old_interval, old_ease, ol
     cursor = conn.cursor()
     cursor.execute('''
         UPDATE vocab_progress
-        SET next_review_date = %s,
-            interval = %s,
-            ease_factor = %s,
-            review_count = %s,
-            priority_weight = %s
+        SET next_review_date = %s, interval = %s, ease_factor = %s,
+            review_count = %s, priority_weight = %s
         WHERE id = %s
     ''', (old_next_review_date, old_interval, old_ease, old_review_count, old_priority, word_id))
     conn.commit()
     conn.close()
 
 def get_more_words(exclude_ids, amount=5):
-    """
-    Fetches extra words using the same 50/50 random+latest composition,
-    excluding anything we've already studied in this session.
-    """
+    """Same 50/50 composition, excluding what's already been seen this session."""
     import random as _random
-
     if not exclude_ids:
         exclude_ids = [-1]
 
@@ -251,23 +216,19 @@ def get_more_words(exclude_ids, amount=5):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     exclude_placeholders = ','.join(['%s'] * len(exclude_ids))
-
     cursor.execute(f'''
         SELECT * FROM vocab_progress
         WHERE id NOT IN ({exclude_placeholders})
-        ORDER BY id DESC
-        LIMIT %s
+        ORDER BY id DESC LIMIT %s
     ''', exclude_ids + [latest_count])
     latest_rows = [dict(r) for r in cursor.fetchall()]
 
     all_excluded = exclude_ids + [r['id'] for r in latest_rows]
     all_placeholders = ','.join(['%s'] * len(all_excluded))
-
     cursor.execute(f'''
         SELECT * FROM vocab_progress
         WHERE id NOT IN ({all_placeholders})
-        ORDER BY RANDOM()
-        LIMIT %s
+        ORDER BY RANDOM() LIMIT %s
     ''', all_excluded + [random_count])
     random_rows = [dict(r) for r in cursor.fetchall()]
 

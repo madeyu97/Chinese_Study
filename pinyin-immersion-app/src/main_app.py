@@ -13,6 +13,7 @@ from db_manager import (
     flag_word_in_database, get_progress_stats, undo_word_progress,
     get_more_words, delete_word_from_db, update_word_in_db,
 )
+import db_manager as db
 from speech_engine import transcribe_audio, grade_speech, GRADE_MAP
 from config import LISTENING_PCT, MAX_REVIEWS_PER_DAY
 
@@ -253,6 +254,14 @@ st.markdown("---")
 with st.sidebar:
     st.header("📊 Global Progress")
     stats = get_progress_stats()
+    try:
+        bank = db.bank_stats()
+        st.caption(
+            f"🏦 Sentence bank: {bank['active_sentences']} vetted sentences "
+            f"covering {bank['vocab_covered']}/{bank['vocab_total']} words"
+            + (f" · {bank['flagged']} flagged" if bank['flagged'] else ""))
+    except Exception:
+        pass
     if stats['total'] > 0:
         unseen_pct = int((stats['unseen'] / stats['total']) * 100)
         learning_pct = int((stats['learning'] / stats['total']) * 100)
@@ -286,9 +295,26 @@ with st.sidebar:
 # 6. EXERCISE GENERATION — now mode-aware
 # ==========================================
 if st.session_state.current_exercise is None:
-    with st.spinner("Generating localized scenario..."):
-        # NEW: pass current_mode so recall gets predictable sentences
-        exercise_data = generate_dictation_exercise(current_word, mode=current_mode)
+    with st.spinner("Loading scenario..."):
+        # BANK FIRST: serve a vetted, previously-validated sentence when one
+        # exists. Live generation is the fallback — and every validated live
+        # generation is deposited into the bank, so coverage grows with use
+        # and error exposure shrinks over time instead of scaling with vocab.
+        exercise_data = db.bank_get(current_word['chinese'])
+        # A listen card needs real MCQ options; if a bank entry somehow
+        # lacks them, fall through to live generation instead.
+        if (exercise_data is not None and current_mode == 'listen'
+                and len(exercise_data.get('english_distractors', [])) < 2):
+            exercise_data = None
+        if exercise_data is None:
+            exercise_data = generate_dictation_exercise(
+                current_word, mode=current_mode,
+                blocked_sentences=db.get_blocklist(),
+                flagged_examples=db.get_recent_flags())
+            # Only listen-mode generations are banked: recall mode uses
+            # placeholder distractors that must never reach a future MCQ.
+            if exercise_data and exercise_data.get('generation_mode') == 'listen':
+                db.bank_add(current_word['chinese'], exercise_data)
         if exercise_data:
             st.session_state.current_exercise = exercise_data
             audio_script = exercise_data['chinese']
@@ -341,6 +367,17 @@ def render_breakdown():
                         st.markdown("---")
                         st.markdown(f"📱 [Open in Pleco]({pleco_url})")
                         st.markdown(f"💻 [Open in Web]({mdbg_url})")
+
+    # Sentence-level flag: retires this sentence permanently (bank +
+    # blocklist) and feeds it back into the generation/review prompts as a
+    # negative example, then deals a replacement card immediately.
+    flag_key = f"flag_sentence_{st.session_state.current_index}"
+    if st.button("🚩 Flag this sentence as wrong", key=flag_key,
+                 use_container_width=True):
+        db.flag_sentence(ex['chinese'])
+        st.toast("Sentence retired — it will never be shown again.")
+        reset_card_state()
+        st.rerun()
 
 def render_card_settings():
     st.markdown("---")

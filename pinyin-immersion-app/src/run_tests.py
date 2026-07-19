@@ -236,6 +236,34 @@ def t_distractor_dedupe():
     assert len(ds) == len({d.lower() for d in ds})
 
 
+
+
+# ======================================================================
+# HANDWRITING ENGINE
+# ======================================================================
+import handwriting_engine as hw
+
+
+@test("handwriting auto-grade table (parity with hw_component JS)")
+def t_hw_quality():
+    cases = [((0, 0, False, False), 3), ((0, 0, False, True), 2),
+             ((1, 0, False, True), 2), ((0, 1, False, False), 2),
+             ((2, 1, False, False), 1), ((4, 0, False, False), 0),
+             ((0, 0, True, False), 0)]
+    for args, want in cases:
+        assert hw.quality_from_result(*args) == want, (args, want)
+
+
+@test("context word chooser prefers best-known, then shortest")
+def t_hw_context():
+    vocab = [
+        {"chinese": "习惯", "pinyin": "xí guàn", "english": "habit", "review_count": 5},
+        {"chinese": "学习", "pinyin": "xué xí", "english": "to study", "review_count": 9},
+    ]
+    assert hw.choose_context_word("习", vocab)["chinese"] == "学习"
+    assert hw.choose_context_word("猫", vocab) is None
+
+
 # ======================================================================
 # DATABASE (only when DATABASE_URL is set)
 # ======================================================================
@@ -270,8 +298,18 @@ def db_tests():
         db.unflag_sentence("测试句子一二三")
         assert db.bank_count_for("测试词") == 2
 
+    @test("handwriting session entries carry semantic cue fields (read-only)")
+    def t_hw_session():
+        sess = db.get_handwriting_session(new_count=2)
+        for e in sess[:2]:
+            for k in ("character", "word", "word_pinyin", "word_english",
+                      "char_pinyin", "is_new", "stroke_count"):
+                assert k in e, k
+            assert e["character"] in e["word"]
+
     t_bank()
     t_flags()
+    t_hw_session()
 
 
 # ======================================================================
@@ -283,6 +321,8 @@ if __name__ == "__main__":
     t_mismatch(); t_pronouns(); t_classify(); t_grammar_gate()
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
     t_distractor_dedupe()
+    print("Handwriting engine:")
+    t_hw_quality(); t_hw_context()
     if os.environ.get("DATABASE_URL"):
         print("Database (DATABASE_URL detected):")
         db_tests()

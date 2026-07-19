@@ -125,3 +125,40 @@ def compute_next_review(current_interval: int, current_ease: float, grade: int):
     new_interval = min(new_interval, 365)
     next_review_date = (date.today() + timedelta(days=new_interval)).isoformat()
     return new_interval, round(new_ease, 2), next_review_date
+
+
+# ----------------------------------------------------------------------
+# Auto-grading: objective quality from the drill result.
+# The component reports mistakes/hints/revealed; this maps them to an SRS
+# grade deterministically (unit-tested in run_tests.py).
+# ----------------------------------------------------------------------
+def quality_from_result(mistakes: int, hints: int, revealed: bool,
+                        is_new: bool) -> int:
+    """0=Again 1=Hard 2=Good 3=Easy."""
+    if revealed:
+        return HW_GRADE_AGAIN
+    effective = mistakes + hints
+    if effective == 0:
+        # A flawless review earns Easy; a flawless first meeting only Good —
+        # new characters should come back soon regardless.
+        return HW_GRADE_GOOD if is_new else HW_GRADE_EASY
+    if effective == 1:
+        return HW_GRADE_GOOD
+    if effective <= 3:
+        return HW_GRADE_HARD
+    return HW_GRADE_AGAIN
+
+
+def choose_context_word(char: str, candidates):
+    """Pick the best vocab word to show as the recall cue for a character:
+    the word the learner knows best (highest review_count), tie-broken by
+    shortest (clearest context). `candidates` = iterable of dicts with
+    chinese/pinyin/english/review_count."""
+    best = None
+    for w in candidates:
+        if char not in w.get("chinese", ""):
+            continue
+        key = (-(w.get("review_count") or 0), len(w["chinese"]))
+        if best is None or key < best[0]:
+            best = (key, w)
+    return best[1] if best else None

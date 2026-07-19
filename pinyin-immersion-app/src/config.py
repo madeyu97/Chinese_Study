@@ -58,8 +58,17 @@ RECALL_PCT = 0.50
 # ==========================================
 # 6. AI MODELS
 # ==========================================
-GENERATION_MODEL = "llama-3.3-70b-versatile"
-GRADING_MODEL = "llama-3.3-70b-versatile"
+# llama-3.3-70b-versatile is deprecated on Groq and was the source of
+# ungrammatical Chinese (e.g. 把-sentences with no verb). gpt-oss-120b is
+# Groq's current recommended production replacement and is markedly stronger
+# at Chinese. Alternative worth trying: "qwen/qwen3.6-27b" (preview) — a
+# Qwen model with native-level Chinese.
+GENERATION_MODEL = "openai/gpt-oss-120b"
+GRADING_MODEL = "openai/gpt-oss-120b"
+# Reviewer is a DIFFERENT model family from the generator on purpose:
+# Qwen has native-level Chinese and won't share gpt-oss's blind spots, so
+# an error must fool two independent models to reach the learner.
+REVIEW_MODEL = "qwen/qwen3.6-27b"
 WHISPER_MODEL = "whisper-large-v3"
 
 

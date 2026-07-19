@@ -4,4 +4,3 @@ groq
 edge-tts
 python-dotenv
 psycopg2-binary
-pypinyin

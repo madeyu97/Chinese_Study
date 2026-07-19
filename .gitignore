@@ -1,0 +1,5 @@
+﻿__pycache__/
+*.pyc
+data/user_progress.db
+data/current_audio.mp3
+data/audio/

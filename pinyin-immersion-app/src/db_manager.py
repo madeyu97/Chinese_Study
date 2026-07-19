@@ -20,15 +20,9 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 def get_connection():
     db_url = None
-    # st.secrets RAISES (rather than returning False) when no secrets file
-    # exists at all — which is the normal case when running the batch
-    # script locally with DATABASE_URL as an env var.
-    try:
-        if hasattr(st, "secrets") and "DATABASE_URL" in st.secrets:
-            db_url = st.secrets["DATABASE_URL"]
-    except Exception:
-        pass
-    if not db_url and "DATABASE_URL" in os.environ:
+    if hasattr(st, "secrets") and "DATABASE_URL" in st.secrets:
+        db_url = st.secrets["DATABASE_URL"]
+    elif "DATABASE_URL" in os.environ:
         db_url = os.environ["DATABASE_URL"]
     if not db_url:
         raise ValueError("CRITICAL ERROR: DATABASE_URL is missing!")
@@ -61,33 +55,6 @@ def init_db():
             ease_factor REAL DEFAULT 2.5,
             review_count INTEGER DEFAULT 0,
             first_seen_date TEXT NOT NULL
-        )
-    ''')
-    # Vetted sentence bank: exercises are generated ONCE (batch script or
-    # first live use), validated, stored here, and re-served from then on.
-    # Study sessions never depend on a fresh LLM roll of the dice.
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sentence_bank (
-            id SERIAL PRIMARY KEY,
-            vocab_chinese TEXT NOT NULL,
-            chinese TEXT NOT NULL UNIQUE,
-            exercise JSONB NOT NULL,
-            status TEXT DEFAULT 'active',
-            times_used INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT NOW()
-        )
-    ''')
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_bank_vocab
-        ON sentence_bank (vocab_chinese, status)
-    ''')
-    # Learner-flagged sentences: never shown or regenerated again, and fed
-    # back into the generation/review prompts as negative examples.
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sentence_blocklist (
-            chinese TEXT PRIMARY KEY,
-            reason TEXT,
-            flagged_at TIMESTAMP DEFAULT NOW()
         )
     ''')
     conn.commit()
@@ -415,163 +382,5 @@ def get_handwriting_stats():
 
 
 # --- Initialization ---
-
-
-# ==========================================
-# SENTENCE BANK + BLOCKLIST
-# ==========================================
-import json as _json
-
-
-def bank_add(vocab_chinese, exercise):
-    """Store a validated exercise. Audio paths are per-machine so they are
-    stripped; audio is regenerated from text on demand (and cached)."""
-    ex = {k: v for k, v in exercise.items() if k != "audio_path"}
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM sentence_blocklist WHERE chinese = %s",
-                   (ex.get("chinese", ""),))
-    if cursor.fetchone():
-        conn.close()
-        return False
-    cursor.execute(
-        """INSERT INTO sentence_bank (vocab_chinese, chinese, exercise)
-           VALUES (%s, %s, %s) ON CONFLICT (chinese) DO NOTHING""",
-        (vocab_chinese, ex.get("chinese", ""),
-         psycopg2.extras.Json(ex)))
-    added = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    return added
-
-
-def bank_get(vocab_chinese):
-    """Serve a vetted exercise for this vocab item: least-used first so
-    variety cycles, random among ties. Returns the exercise dict or None."""
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute(
-        """SELECT id, exercise FROM sentence_bank
-           WHERE vocab_chinese = %s AND status = 'active'
-             AND chinese NOT IN (SELECT chinese FROM sentence_blocklist)
-           ORDER BY times_used ASC, RANDOM() LIMIT 1""",
-        (vocab_chinese,))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        return None
-    cursor.execute("UPDATE sentence_bank SET times_used = times_used + 1 "
-                   "WHERE id = %s", (row["id"],))
-    conn.commit()
-    conn.close()
-    exercise = row["exercise"]
-    if isinstance(exercise, str):
-        exercise = _json.loads(exercise)
-    return exercise
-
-
-def flag_sentence(chinese_sentence, reason="flagged by learner"):
-    """Learner hit the flag button: retire the sentence everywhere."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE sentence_bank SET status = 'flagged' "
-                   "WHERE chinese = %s", (chinese_sentence,))
-    cursor.execute(
-        """INSERT INTO sentence_blocklist (chinese, reason) VALUES (%s, %s)
-           ON CONFLICT (chinese) DO NOTHING""",
-        (chinese_sentence, reason))
-    conn.commit()
-    conn.close()
-    logging.info(f"[FLAG] Retired sentence: {chinese_sentence}")
-
-
-def get_blocklist():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT chinese FROM sentence_blocklist")
-    rows = {r[0] for r in cursor.fetchall()}
-    conn.close()
-    return rows
-
-
-def get_recent_flags(limit=8):
-    """(sentence, reason) pairs, newest first — injected into generation and
-    review prompts so every flag permanently strengthens the pipeline."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT chinese, COALESCE(reason, '') FROM sentence_blocklist "
-                   "ORDER BY flagged_at DESC LIMIT %s", (limit,))
-    rows = [(r[0], r[1]) for r in cursor.fetchall()]
-    conn.close()
-    return rows
-
-
-def bank_stats():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT COUNT(*) FILTER (WHERE status = 'active'),
-               COUNT(*) FILTER (WHERE status = 'flagged'),
-               COUNT(DISTINCT vocab_chinese) FILTER (WHERE status = 'active')
-        FROM sentence_bank""")
-    active, flagged, covered = cursor.fetchone()
-    cursor.execute("SELECT COUNT(*) FROM vocab_progress")
-    total_vocab = cursor.fetchone()[0]
-    conn.close()
-    return {"active_sentences": active, "flagged": flagged,
-            "vocab_covered": covered, "vocab_total": total_vocab}
-
-
-def bank_count_for(vocab_chinese):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM sentence_bank "
-                   "WHERE vocab_chinese = %s AND status = 'active'",
-                   (vocab_chinese,))
-    n = cursor.fetchone()[0]
-    conn.close()
-    return n
-
-
-def unflag_sentence(chinese_sentence):
-    """Curation: restore a sentence that was flagged by mistake."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM sentence_blocklist WHERE chinese = %s",
-                   (chinese_sentence,))
-    cursor.execute("UPDATE sentence_bank SET status = 'active' "
-                   "WHERE chinese = %s", (chinese_sentence,))
-    conn.commit()
-    conn.close()
-
-
-def bank_browse(vocab_chinese=None, status='active', limit=50):
-    """List bank rows for the curation page, newest first."""
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    if vocab_chinese:
-        cursor.execute(
-            """SELECT vocab_chinese, chinese, exercise, status, times_used
-               FROM sentence_bank WHERE vocab_chinese = %s AND status = %s
-               ORDER BY created_at DESC LIMIT %s""",
-            (vocab_chinese, status, limit))
-    else:
-        cursor.execute(
-            """SELECT vocab_chinese, chinese, exercise, status, times_used
-               FROM sentence_bank WHERE status = %s
-               ORDER BY created_at DESC LIMIT %s""",
-            (status, limit))
-    rows = []
-    for r in cursor.fetchall():
-        ex = r["exercise"]
-        if isinstance(ex, str):
-            ex = _json.loads(ex)
-        rows.append({"vocab_chinese": r["vocab_chinese"], "chinese": r["chinese"],
-                     "exercise": ex, "status": r["status"],
-                     "times_used": r["times_used"]})
-    conn.close()
-    return rows
-
-
 init_db()
 import_vocab_from_csv()

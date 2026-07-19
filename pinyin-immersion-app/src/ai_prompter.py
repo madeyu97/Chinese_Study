@@ -7,14 +7,9 @@ import random
 import logging
 from groq import Groq
 from dotenv import load_dotenv
-from config import GENERATION_MODEL, GRADING_MODEL, REVIEW_MODEL
-from dictionary_engine import (
-    derive_pinyin as _derive_pinyin,
-    parse_cn_numeral as _parse_cn_numeral,
-    CN_NUMERAL_CHARS as _CN_NUMERAL_CHARS,
-    is_cjk_char as _is_cjk_char,
-    build_breakdown,
-)
+from pypinyin import pinyin as _pypinyin, Style as _PinyinStyle
+
+from config import GENERATION_MODEL
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -27,32 +22,15 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 MALAYSIAN_SLANG = {
     "酱": ("sauce (literal)", "colloquial contraction of 这样 — 'like this / so / that'"),
     "啊那": ("(none)", "contraction of 那个 — 'that one / um'"),
-    "烧": ("to burn (literal)", "hot TO THE TOUCH only — food, drinks, objects "
-           "(烧水 hot water, 咖啡很烧). NEVER for weather, rooms, or places; "
-           "hot weather/places use 热 (今天很热, 巴刹很热)"),
+    "烧": ("to burn (literal)", "used for 'hot' (temperature) instead of 热"),
     "怕输": ("(literal: afraid of losing)", "kiasu — fear of missing out"),
     "做工": ("to do work (literal)", "to work / go to work — used where mainland says 上班"),
     "讲": ("to speak (literal)", "preferred over 说 in casual speech"),
-    "要": ("to want (literal)", "future 'going to' for INTENTIONS/plans only "
-           "(我明天要去) — not for predictions or abilities, which still use 会 "
-           "(明天会下雨, 他会讲华语)"),
+    "要": ("to want (literal)", "often future tense 'going to' where mainland uses 会"),
     "几时": ("(uncommon in PRC)", "Malaysian for 'when' — instead of 什么时候"),
     "罢了": ("(literary)", "casual 'only / just' — like 而已"),
     "巴刹": ("(none)", "from Malay 'pasar' — wet market"),
     "甘榜": ("(none)", "from Malay 'kampung' — village"),
-}
-
-# Short senses for the Dictionary Breakdown where CC-CEDICT lacks (or buries)
-# the Malaysian usage. Keys not listed fall through to CEDICT normally.
-SLANG_BREAKDOWN_GLOSS = {
-    "酱": "like this / so (Malaysian, = 这样)",
-    "啊那": "that one / um (Malaysian filler, = 那个)",
-    "怕输": "kiasu — afraid of losing out",
-    "做工": "to work / go to work (Malaysian, = 上班)",
-    "几时": "when? (Malaysian, = 什么时候)",
-    "罢了": "only / just (= 而已)",
-    "巴刹": "wet market (Malay loanword: pasar)",
-    "甘榜": "village (Malay loanword: kampung)",
 }
 
 HOMOPHONE_GROUPS = [
@@ -145,9 +123,46 @@ def _force_simplified(text):
 
 
 # ======================================================================
-# NUMERAL VERIFICATION — pinyin derivation and numeral parsing now live in
-# dictionary_engine (single source of truth, shared with the breakdown).
+# DETERMINISTIC PINYIN — the LLM can no longer desync pinyin from hanzi.
+# Pinyin is derived directly from the characters via pypinyin, with the
+# app's Malaysian overrides applied (了 -> liǎo, 咩 -> meh).
 # ======================================================================
+_PINYIN_OVERRIDES = {"咩": "meh"}
+
+def _is_cjk_char(ch):
+    return "\u4e00" <= ch <= "\u9fff"
+
+def _derive_pinyin(text):
+    """Generate pinyin that is guaranteed to match the characters."""
+    if not text:
+        return ""
+    syllables = []
+    # Walk chars ourselves so punctuation/latin passes through in order.
+    per_char = _pypinyin(list(text), style=_PinyinStyle.TONE, errors="default")
+    for ch, py in zip(text, per_char):
+        if _is_cjk_char(ch):
+            if ch in _PINYIN_OVERRIDES:
+                syllables.append(_PINYIN_OVERRIDES[ch])
+            elif ch == "了":
+                # Malaysian Mandarin design choice: 了 is read liǎo
+                syllables.append("liǎo")
+            else:
+                syllables.append(py[0])
+        elif ch.strip() and ch not in "，。！？；：,.!?;: ":
+            syllables.append(ch)
+    return " ".join(syllables)
+
+
+# ======================================================================
+# NUMERAL VERIFICATION — fixes the "三 glossed as 4" class of LLM errors
+# deterministically, and detects sentence-level number mismatches so the
+# exercise can be regenerated instead of shown wrong.
+# ======================================================================
+_CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+              "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_CN_UNITS = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+_CN_NUMERAL_CHARS = set(_CN_DIGITS) | set(_CN_UNITS)
+
 _EN_NUMBER_WORDS = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
@@ -158,6 +173,28 @@ _EN_NUMBER_WORDS = {
     "thousand": 1000,
 }
 _INT_TO_EN = {v: k for k, v in _EN_NUMBER_WORDS.items()}
+
+def _parse_cn_numeral(s):
+    """Parse a run of Chinese numeral characters into an int. Returns None
+    if it isn't a well-formed numeral."""
+    if not s or any(ch not in _CN_NUMERAL_CHARS for ch in s):
+        return None
+    total, section, current = 0, 0, 0
+    for ch in s:
+        if ch in _CN_DIGITS:
+            current = _CN_DIGITS[ch]
+        else:
+            unit = _CN_UNITS[ch]
+            if unit == 10000:  # 万 closes the whole section
+                block = section + current
+                total += (block if block else 1) * unit
+                section, current = 0, 0
+            else:
+                if current == 0:
+                    current = 1  # e.g. 十二 = 12, 百 = 100
+                section += current * unit
+                current = 0
+    return total + section + current
 
 def _numbers_in_hanzi(text):
     """All integers expressed as numeral runs inside a Chinese sentence."""
@@ -277,96 +314,6 @@ def _normalize_ta_pronouns(text):
     return text
 
 
-# ======================================================================
-# GRAMMAR REVIEW GATE
-# A second, independent LLM pass that checks every generated sentence
-# BEFORE it is shown to the learner. Catches ungrammatical output like
-# 我想把我的成绩更好 (a 把-sentence with no verb), which the deterministic
-# checks (numbers, pinyin sync) cannot see. If the sentence fails review,
-# the generation loop retries with the reviewer's feedback injected.
-# ======================================================================
-def _format_flagged_for_review(flagged_examples):
-    if not flagged_examples:
-        return ""
-    lines = "\n".join(f"- {s}" + (f"  ({r})" if r else "")
-                      for s, r in flagged_examples[:8])
-    return ("\nThe learner has previously flagged these sentences as wrong — "
-            "reject anything with the same kind of mistake:\n" + lines + "\n")
-
-
-def _review_grammar(sentence, english, flagged_examples=None):
-    review_prompt = f"""
-You are a strict native-speaker reviewer of Mandarin Chinese teaching
-material. Judge ONLY whether this sentence is grammatical, natural
-Mandarin (Malaysian colloquialisms like 酱/做工/罢了/咩 are acceptable
-and must NOT be marked as errors), and whether the English translation
-is accurate.
-
-SENTENCE: {sentence}
-CLAIMED MEANING: {english}
-{_format_flagged_for_review(flagged_examples)}
-
-Check with particular care:
-- 把-construction: the object MUST be followed by a verb with a result,
-  complement, or directional. "把 + object + adjective" (e.g. 把成绩更好)
-  is WRONG — there is no verb.
-- Resultative/degree complements used correctly (V + 得/好/完/到...).
-- 更/最/很 + adjective needs a proper predicate structure (变得更好,
-  让...更好), not a bare hanging adjective phrase.
-- Measure words match their nouns.
-- 比 comparisons formed correctly.
-- WORD CHOICE must be semantically correct, not just syntactically legal.
-  Reject colloquialisms shoehorned into contexts where they don't apply.
-  Example: Malaysian 烧 means hot TO THE TOUCH (food/drinks/objects: 咖啡
-  很烧); it can NEVER describe hot weather, rooms, or places — 烧的巴刹 is
-  WRONG, a hot market is 很热的巴刹. Similarly reject any word used outside
-  its real meaning even if the sentence parses.
-- The sentence must describe something that makes real-world sense.
-- The English translation matches the actual meaning of the sentence.
-
-Return ONLY raw JSON:
-{{
-  "acceptable": true/false,
-  "problems": "<empty string if acceptable, otherwise a one-line diagnosis>",
-  "corrected_sentence": "<empty string if acceptable, otherwise a corrected, natural version keeping the same intended meaning>"
-}}
-""".strip()
-    def _call_reviewer(model):
-        kwargs = dict(
-            messages=[{"role": "user", "content": review_prompt}],
-            model=model,
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        if "qwen" in model:
-            # Qwen models on Groq emit reasoning by default; turn it off so
-            # the response is pure JSON.
-            kwargs["reasoning_effort"] = "none"
-        resp = client.chat.completions.create(**kwargs)
-        return json.loads(resp.choices[0].message.content)
-
-    try:
-        # REVIEW_MODEL is deliberately a DIFFERENT model family from the
-        # generator, so an error must fool two independent models to get
-        # through. If the preview model is unavailable, fall back to the
-        # production model rather than skipping review.
-        try:
-            verdict = _call_reviewer(REVIEW_MODEL)
-        except Exception as first_err:
-            logging.warning(f"[REVIEW] {REVIEW_MODEL} failed ({first_err}); "
-                            f"falling back to {GRADING_MODEL}")
-            verdict = _call_reviewer(GRADING_MODEL)
-        return {
-            "acceptable": bool(verdict.get("acceptable", True)),
-            "problems": str(verdict.get("problems", "") or ""),
-            "corrected_sentence": str(verdict.get("corrected_sentence", "") or ""),
-        }
-    except Exception as e:
-        # Fail open: a broken reviewer should not block study sessions.
-        logging.warning(f"[REVIEW] Grammar review failed (skipping): {e}")
-        return {"acceptable": True, "problems": "", "corrected_sentence": ""}
-
-
 DISTRACTOR_PLAYBOOKS = {
     "particle": """
     TARGET CATEGORY: PARTICLE — train ear for particle nuance.
@@ -380,70 +327,7 @@ DISTRACTOR_PLAYBOOKS = {
 }
 
 
-def generate_distractors_for(chinese, english_correct, n=3):
-    """Distractors for an existing (human-written) sentence — used by the
-    Tatoeba seeder. The sentence itself is never touched, so grammar risk
-    is zero; only the wrong-answer options come from the LLM."""
-    target_category = _classify_target("", english_correct)
-    playbook = DISTRACTOR_PLAYBOOKS.get(target_category,
-                                        DISTRACTOR_PLAYBOOKS["general"])
-    has_ta = any("他" in g for g in _detect_homophones(chinese))
-    pronoun_rule = ""
-    if has_ta:
-        pronoun_rule = ("The sentence contains 他/她/它 (all 'tā'): use "
-                        "He/She, him/her, his/her forms, and never vary a "
-                        "distractor on the pronoun alone.")
-    prompt = f"""
-Create exactly {n} plausible WRONG English translations (distractors) for a
-listening comprehension exercise.
-
-CHINESE SENTENCE: {chinese}
-CORRECT TRANSLATION: {english_correct}
-
-{playbook}
-{pronoun_rule}
-
-Each distractor must be clearly wrong for a listener who understood the
-sentence, but tempting for one who misheard a single element (content word,
-time, negation, number, or particle). Same register and similar length as
-the correct translation.
-
-Return ONLY raw JSON: {{"english_distractors": ["<d1>", "<d2>", "<d3>"]}}
-""".strip()
-    try:
-        resp = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model=GENERATION_MODEL,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content)
-        raw = [str(d) for d in data.get("english_distractors", [])
-               if isinstance(d, (str, int, float)) and str(d).strip()]
-    except Exception as e:
-        logging.error(f"[DISTRACTORS] generation failed: {e}")
-        return []
-
-    correct = english_correct
-    if has_ta:
-        correct = _normalize_ta_pronouns(correct)
-        raw = [_normalize_ta_pronouns(d) for d in raw]
-    seen, out = set(), []
-    for d in raw:
-        key = d.strip().lower()
-        if key and key != correct.strip().lower() and key not in seen:
-            seen.add(key)
-            out.append(d)
-    return out[:n]
-
-
-def generate_dictation_exercise(target_word_dict, mode='listen',
-                                blocked_sentences=None, flagged_examples=None):
-    """blocked_sentences: set of Chinese sentences the learner has flagged —
-    never produce these again. flagged_examples: recent (sentence, reason)
-    pairs injected into the prompts so every flag permanently strengthens
-    both the generator and the reviewer."""
-    blocked_sentences = blocked_sentences or set()
-    flagged_examples = flagged_examples or []
+def generate_dictation_exercise(target_word_dict, mode='listen'):
     pinyin = target_word_dict.get('pinyin', '')
     english = target_word_dict.get('english', '')
     chinese_chars = target_word_dict.get(
@@ -506,11 +390,7 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
 {slang_lines}
     """
 
-    full_slang_reference = (
-        "MALAYSIAN COLLOQUIAL GLOSSARY (for RECOGNITION and register — do NOT "
-        "force these into the sentence. Only use a colloquialism when it is "
-        "natural AND semantically correct for the context. When in doubt, use "
-        "standard Mandarin. Respect each entry's usage constraints exactly):\n")
+    full_slang_reference = "MALAYSIAN COLLOQUIAL GLOSSARY:\n"
     for char, (literal, malaysian) in MALAYSIAN_SLANG.items():
         full_slang_reference += f"   {char}: literal={literal}; Malaysian={malaysian}\n"
 
@@ -535,18 +415,7 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
     Include 3 minimal placeholder distractors for data shape consistency.
     """
 
-    def build_prompt(reviewer_feedback_section=""):
-        flagged_section = ""
-        if flagged_examples:
-            lines = "\n".join(
-                f"       - {s}" + (f"  ({r})" if r else "")
-                for s, r in flagged_examples[:8])
-            flagged_section = f"""
-    SENTENCES THE LEARNER FLAGGED AS WRONG (never produce these, or
-    sentences with the same kind of mistake):
-{lines}
-"""
-        return f"""
+    prompt = f"""
     You are an expert Malaysian Mandarin tutor.
 
     {sentence_instruction}
@@ -562,19 +431,6 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
     4. Arabic numerals -> Chinese characters.
     5. 'hanzi' field MUST NEVER contain '/' or '／' or ';'.
 
-    GRAMMATICALITY (CRITICAL — the sentence teaches a learner):
-    a. The sentence must be fully grammatical, natural Mandarin a native
-       speaker would actually say. If unsure, use a SIMPLER structure.
-    b. 把-construction: 把 + object MUST be followed by a VERB plus a
-       result/complement/directional. NEVER "把 + object + adjective".
-       WRONG: 我想把我的成绩更好 (no verb!)
-       RIGHT: 我想把我的成绩提高 / 我想让我的成绩更好
-    c. 更/最 + adjective needs a proper predicate (变得更好, 让...更好),
-       never left dangling after an object.
-    d. Measure words must match their nouns; 比 comparisons must be
-       correctly formed.
-{reviewer_feedback_section}
-{flagged_section}
     {distractor_section}
 
     HOMOPHONES (CRITICAL):
@@ -602,19 +458,11 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
     raw_data = None
     final_chinese = ""
     english_correct = ""
-    reviewer_feedback = ""
 
     try:
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            feedback_section = ""
-            if reviewer_feedback:
-                feedback_section = f"""
-    YOUR PREVIOUS ATTEMPT WAS REJECTED BY A NATIVE-SPEAKER REVIEWER:
-    {reviewer_feedback}
-    Produce a NEW, fully grammatical sentence that fixes this.
-"""
             response = client.chat.completions.create(
-                messages=[{'role': 'user', 'content': build_prompt(feedback_section)}],
+                messages=[{'role': 'user', 'content': prompt}],
                 model=GENERATION_MODEL,
                 response_format={"type": "json_object"}
             )
@@ -648,22 +496,6 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
                     f"english says {_numbers_in_english(cand_english)}")
             if not is_locked and chinese_chars and chinese_chars not in cand_chinese:
                 problems.append(f"target '{chinese_chars}' missing from sentence")
-            if cand_chinese in blocked_sentences:
-                problems.append("sentence previously flagged by learner")
-
-            # ── GRAMMAR REVIEW GATE ─────────────────────────────────────
-            # Independent second-pass check for grammaticality/naturalness
-            # (catches e.g. verbless 把-sentences). Skipped for locked CSV
-            # sentences, which are user-authored, and for candidates that
-            # already failed the deterministic checks.
-            review = None
-            if not problems and not is_locked:
-                review = _review_grammar(cand_chinese, cand_english,
-                                          flagged_examples=flagged_examples)
-                if not review["acceptable"]:
-                    problems.append(f"grammar review: {review['problems']}")
-                    reviewer_feedback = (
-                        f"Sentence: {cand_chinese}\n    Problem: {review['problems']}")
 
             if not problems:
                 raw_data = candidate
@@ -677,17 +509,6 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
             final_chinese = cand_chinese
             english_correct = cand_english
 
-            # Last resort on the final attempt: if the reviewer supplied a
-            # corrected sentence, teach THAT instead of the broken one. The
-            # breakdown verifier will drop any entries that no longer match.
-            if (attempt == MAX_ATTEMPTS and review is not None
-                    and review["corrected_sentence"].strip()):
-                corrected = _force_simplified(review["corrected_sentence"].strip())
-                logging.warning(
-                    f"[REVIEW] Using reviewer's corrected sentence: "
-                    f"'{final_chinese}' -> '{corrected}'")
-                final_chinese = corrected
-
         if raw_data is None:
             return None
 
@@ -699,24 +520,17 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
         else:
             final_pinyin = _derive_pinyin(final_chinese)
 
-        # ── DICTIONARY-GROUNDED BREAKDOWN ─────────────────────────────
-        # The breakdown is built from jieba segmentation + CC-CEDICT, not
-        # trusted to the LLM. LLM glosses are used only where the dictionary
-        # corroborates them; Malaysian slang senses override where CEDICT
-        # lacks them. Scales to any vocab size with zero added error rate.
-        llm_breakdown = [item for item in raw_data.get("word_breakdown", [])
-                         if isinstance(item, dict)]
-        for item in llm_breakdown:
-            if "hanzi" in item and "chinese" not in item:
-                item["chinese"] = _force_simplified(item.get("hanzi", ""))
-        slang_overrides = {
-            k: SLANG_BREAKDOWN_GLOSS[k]
-            for k in SLANG_BREAKDOWN_GLOSS if k in final_chinese
-        }
-        word_breakdown = build_breakdown(
-            final_chinese, llm_breakdown=llm_breakdown,
-            overrides=slang_overrides,
-            ensure_words=[chinese_chars] + list(MALAYSIAN_SLANG.keys()))
+        word_breakdown = []
+        for item in raw_data.get("word_breakdown", []):
+            if not isinstance(item, dict):
+                continue
+            word_breakdown.append({
+                "chinese": _force_simplified(item.get("hanzi", item.get("chinese", ""))),
+                "pinyin": item.get("pinyin", ""),
+                "english": str(item.get("english", ""))
+            })
+        # Drop confabulated entries, fix numeral glosses, re-derive pinyin
+        word_breakdown = _verify_breakdown(word_breakdown, final_chinese)
 
         english_distractors = [str(d) for d in raw_data.get("english_distractors", [])
                                if isinstance(d, (str, int, float)) and str(d).strip()]

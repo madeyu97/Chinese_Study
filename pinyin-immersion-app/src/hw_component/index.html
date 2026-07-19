@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  :root {
+    --bg: #0E1117;          /* matches Streamlit dark */
+    --card: #161B26;
+    --card-edge: #262D3B;
+    --grid: #232A38;
+    --text: #E9ECF4;
+    --text-dim: #8B93A7;
+    --ink: #F5C84C;         /* the learner's live ink — gold */
+    --stroke-done: #E9ECF4; /* completed strokes — light */
+    --outline: #39435A;     /* faint skeleton when shown */
+    --good: #46D18C;
+    --bad: #E05561;
+    --accent: #7EB6FF;
+    --chip: #1E2532;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    user-select: none; -webkit-user-select: none;
+  }
+  #app { max-width: 430px; margin: 0 auto; padding: 10px 14px 18px; }
+
+  /* ---- progress ---- */
+  #bar-wrap { height: 4px; background: var(--card-edge); border-radius: 2px; overflow: hidden; }
+  #bar { height: 100%; width: 0%; background: var(--ink); transition: width .35s ease; }
+  #dots { display: flex; gap: 5px; margin: 8px 0 2px; flex-wrap: wrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--card-edge); }
+  .dot.now { background: var(--ink); }
+  .dot.g3 { background: var(--good); }
+  .dot.g2 { background: #9BD98F; }
+  .dot.g1 { background: #E0A95C; }
+  .dot.g0 { background: var(--bad); }
+
+  /* ---- cue card ---- */
+  #cue {
+    margin-top: 10px; padding: 14px 16px; background: var(--card);
+    border: 1px solid var(--card-edge); border-radius: 14px; text-align: center;
+  }
+  #chips { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 11px; letter-spacing: .4px; padding: 3px 9px; border-radius: 99px;
+    background: var(--chip); color: var(--text-dim); border: 1px solid var(--card-edge);
+  }
+  .chip.new { color: #0E1117; background: var(--ink); border-color: var(--ink); font-weight: 700; }
+  .chip.phase { color: var(--accent); border-color: #2C3A52; }
+  #masked-word {
+    font-size: 40px; line-height: 1.15; font-family: "Noto Serif SC", serif;
+    letter-spacing: 4px; margin: 2px 0 4px;
+  }
+  #masked-word .blank {
+    display: inline-block; width: 1.05em; height: 1.05em; vertical-align: -0.14em;
+    border: 2px dashed var(--ink); border-radius: 8px; opacity: .9;
+  }
+  #word-pinyin { color: var(--accent); font-size: 17px; margin-bottom: 2px; }
+  #word-english { color: var(--text-dim); font-size: 14px; line-height: 1.35; }
+  #char-pinyin {
+    margin-top: 8px; font-size: 24px; color: var(--ink); font-weight: 600;
+  }
+  #char-pinyin small { color: var(--text-dim); font-weight: 400; font-size: 12px; }
+
+  /* ---- writing card ---- */
+  #board-wrap { margin-top: 12px; display: flex; justify-content: center; }
+  #board {
+    position: relative; width: 100%; max-width: 370px; aspect-ratio: 1;
+    background: var(--card); border: 2px solid var(--card-edge); border-radius: 16px;
+    transition: border-color .15s, box-shadow .15s; overflow: hidden;
+  }
+  #board.flash-bad { border-color: var(--bad); box-shadow: 0 0 0 3px rgba(224,85,97,.25); }
+  #board.flash-good { border-color: var(--good); box-shadow: 0 0 0 3px rgba(70,209,140,.25); }
+  #grid, #writer-target { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #writer-target svg { width: 100%; height: 100%; }
+
+  /* ---- status + buttons ---- */
+  #statusline {
+    display: flex; justify-content: space-between; align-items: center;
+    margin: 10px 2px 0; min-height: 22px; font-size: 14px; color: var(--text-dim);
+  }
+  #miss-marks { color: var(--bad); letter-spacing: 2px; font-size: 15px; min-height: 20px; }
+  #controls { display: flex; gap: 8px; margin-top: 12px; }
+  .btn {
+    flex: 1; padding: 14px 4px; font-size: 15px; font-weight: 600;
+    background: var(--card); color: var(--text); border: 1px solid var(--card-edge);
+    border-radius: 12px; cursor: pointer; min-height: 52px;
+  }
+  .btn:active { transform: scale(.97); background: #1B2230; }
+  .btn:disabled { opacity: .35; }
+  .btn.warn { color: var(--bad); }
+
+  /* ---- overlays ---- */
+  #tap-next {
+    position: fixed; inset: 0; display: none; align-items: flex-end;
+    justify-content: center; padding-bottom: 8vh; background: transparent;
+  }
+  #tap-next span {
+    background: var(--chip); border: 1px solid var(--card-edge); color: var(--text-dim);
+    border-radius: 99px; padding: 8px 18px; font-size: 13px;
+  }
+  #summary { display: none; margin-top: 12px; padding: 18px; background: var(--card);
+    border: 1px solid var(--card-edge); border-radius: 14px; }
+  #summary h2 { margin: 0 0 6px; font-size: 20px; }
+  #summary .row { display: flex; justify-content: space-between; padding: 5px 0;
+    border-bottom: 1px solid var(--card-edge); font-size: 15px; }
+  #summary .row:last-child { border-bottom: none; }
+  #summary .weak { font-family: "Noto Serif SC", serif; font-size: 26px; letter-spacing: 6px; margin-top: 6px; }
+  #saved { color: var(--good); font-size: 13px; margin-top: 8px; }
+  #loading { text-align: center; color: var(--text-dim); padding: 60px 0; }
+  #fatal { display:none; color: var(--bad); background: var(--card); border: 1px solid var(--bad);
+    border-radius: 12px; padding: 14px; margin-top: 12px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="loading">Loading drill…</div>
+  <div id="drill" style="display:none">
+    <div id="bar-wrap"><div id="bar"></div></div>
+    <div id="dots"></div>
+
+    <div id="cue">
+      <div id="chips"></div>
+      <div id="masked-word"></div>
+      <div id="word-pinyin"></div>
+      <div id="word-english"></div>
+      <div id="char-pinyin"></div>
+    </div>
+
+    <div id="board-wrap">
+      <div id="board">
+        <svg id="grid" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <line x1="0" y1="0" x2="100" y2="100" stroke="var(--grid)" stroke-width="0.6"/>
+          <line x1="100" y1="0" x2="0" y2="100" stroke="var(--grid)" stroke-width="0.6"/>
+          <line x1="50" y1="0" x2="50" y2="100" stroke="var(--grid)" stroke-width="0.6"/>
+          <line x1="0" y1="50" x2="100" y2="50" stroke="var(--grid)" stroke-width="0.6"/>
+        </svg>
+        <div id="writer-target"></div>
+      </div>
+    </div>
+
+    <div id="statusline">
+      <span id="stroke-progress"></span>
+      <span id="miss-marks"></span>
+    </div>
+
+    <div id="controls">
+      <button class="btn" id="btn-hint">💡 Hint</button>
+      <button class="btn" id="btn-say">🔊 Say</button>
+      <button class="btn warn" id="btn-reveal">👁 Reveal</button>
+    </div>
+  </div>
+
+  <div id="summary"></div>
+  <div id="fatal"></div>
+</div>
+<div id="tap-next"><span>tap anywhere to continue</span></div>
+
+<script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.5/dist/hanzi-writer.min.js"></script>
+<script>
+"use strict";
+// =====================================================================
+// STREAMLIT COMPONENT PROTOCOL (vanilla implementation)
+// =====================================================================
+function stMsg(type, data) {
+  window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*");
+}
+function stReady()        { stMsg("streamlit:componentReady", { apiVersion: 1 }); }
+function stHeight()       { stMsg("streamlit:setFrameHeight", { height: document.body.scrollHeight + 8 }); }
+function stValue(value)   { stMsg("streamlit:setComponentValue", { dataType: "json", value: value }); }
+
+// =====================================================================
+// STATE
+// =====================================================================
+const INK = {
+  drawing: "#F5C84C", done: "#E9ECF4", outline: "#39435A",
+  radical: "#7EB6FF", highlight: "#46D18C", hint: "#F5C84C",
+};
+let S = null;   // {sessionId, chars, i, results, phase, writer, mistakes, hints,
+                //  revealed, strokeTotal, strokesDone, finished}
+
+function qualityFromResult(mistakes, hints, revealed, isNew) {
+  // MUST mirror handwriting_engine.quality_from_result exactly.
+  if (revealed) return 0;
+  const eff = mistakes + hints;
+  if (eff === 0) return isNew ? 2 : 3;
+  if (eff === 1) return 2;
+  if (eff <= 3) return 1;
+  return 0;
+}
+const GRADE_NAMES = ["Again", "Hard", "Good", "Easy"];
+
+// =====================================================================
+// RENDER HANDLER
+// =====================================================================
+window.addEventListener("message", (e) => {
+  const d = e.data || {};
+  if (d.type !== "streamlit:render") return;
+  const args = d.args || {};
+  const session = args.session || {};
+  if (S && S.sessionId === session.session_id) { stHeight(); return; } // same session — keep going
+  try { startSession(session); }
+  catch (err) { fatal(err); }
+});
+
+function fatal(err) {
+  const el = document.getElementById("fatal");
+  el.style.display = "block";
+  el.textContent = "Handwriting drill error: " + (err && err.message ? err.message : err);
+  stHeight();
+}
+
+function startSession(session) {
+  S = {
+    sessionId: session.session_id,
+    chars: session.chars || [],
+    i: 0, results: [], finished: false,
+    writer: null, phase: null,
+    mistakes: 0, hints: 0, revealed: false,
+    strokeTotal: 0, strokesDone: 0,
+  };
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("summary").style.display = "none";
+  document.getElementById("drill").style.display = "block";
+  buildDots();
+  if (!S.chars.length) { showSummary(); return; }
+  loadChar();
+}
+
+// =====================================================================
+// PER-CHARACTER FLOW
+//   new char:   WATCH (animation) → TRACE (outlined quiz, unscored)
+//               → WRITE (blind quiz, scored)
+//   review:     WRITE
+//   Reveal:     animation → COPY (outlined quiz, unscored) → next (Again)
+// =====================================================================
+function cur() { return S.chars[S.i]; }
+
+function buildDots() {
+  const dots = document.getElementById("dots");
+  dots.innerHTML = "";
+  S.chars.forEach((_, idx) => {
+    const el = document.createElement("div");
+    el.className = "dot" + (idx === S.i ? " now" : "");
+    el.id = "dot-" + idx;
+    dots.appendChild(el);
+  });
+}
+
+function setBar() {
+  document.getElementById("bar").style.width =
+    Math.round((S.i / S.chars.length) * 100) + "%";
+  document.querySelectorAll(".dot").forEach((el, idx) =>
+    el.classList.toggle("now", idx === S.i));
+}
+
+function setChips(phaseLabel) {
+  const c = cur();
+  const chips = [];
+  if (c.is_new) chips.push('<span class="chip new">NEW</span>');
+  chips.push(`<span class="chip">${S.i + 1} / ${S.chars.length}</span>`);
+  if (S.strokeTotal) chips.push(`<span class="chip">${S.strokeTotal} strokes</span>`);
+  if (phaseLabel) chips.push(`<span class="chip phase">${phaseLabel}</span>`);
+  document.getElementById("chips").innerHTML = chips.join("");
+}
+
+function renderCue() {
+  const c = cur();
+  // The character under test must NEVER appear as text. Mask every
+  // occurrence of it inside the context word.
+  const masked = Array.from(c.word || c.character).map(ch =>
+    ch === c.character ? '<span class="blank"></span>'
+                       : ch).join("");
+  document.getElementById("masked-word").innerHTML = masked;
+  document.getElementById("word-pinyin").textContent = c.word_pinyin || "";
+  document.getElementById("word-english").textContent = c.word_english || "";
+  document.getElementById("char-pinyin").innerHTML =
+    (c.char_pinyin || "") + ' <small>← write this character</small>';
+}
+
+function setStrokeProgress() {
+  document.getElementById("stroke-progress").textContent =
+    S.strokeTotal ? `stroke ${Math.min(S.strokesDone + 1, S.strokeTotal)} / ${S.strokeTotal}` : "";
+  document.getElementById("miss-marks").textContent = "✗".repeat(Math.min(S.mistakes, 8));
+}
+
+function boardFlash(cls) {
+  const b = document.getElementById("board");
+  b.classList.remove("flash-bad", "flash-good");
+  void b.offsetWidth;
+  b.classList.add(cls);
+  setTimeout(() => b.classList.remove(cls), 450);
+}
+
+function makeWriter(showOutline) {
+  document.getElementById("writer-target").innerHTML = "";
+  const size = document.getElementById("board").clientWidth;
+  S.writer = window.HanziWriter.create("writer-target", cur().character, {
+    width: size, height: size, padding: Math.round(size * 0.08),
+    showCharacter: false, showOutline: showOutline,
+    strokeColor: INK.done, radicalColor: INK.radical,
+    outlineColor: INK.outline, drawingColor: INK.drawing,
+    drawingWidth: 20, highlightColor: INK.highlight,
+    strokeAnimationSpeed: 1.1, delayBetweenStrokes: 110,
+  });
+}
+
+async function loadChar() {
+  S.mistakes = 0; S.hints = 0; S.revealed = false; S.strokesDone = 0;
+  setBar(); renderCue();
+  try {
+    const data = await window.HanziWriter.loadCharacterData(cur().character);
+    S.strokeTotal = data.strokes.length;
+  } catch (e) { S.strokeTotal = cur().stroke_count || 0; }
+  setStrokeProgress();
+  if (cur().is_new) phaseWatch(); else phaseWrite();
+  stHeight();
+}
+
+function phaseWatch() {
+  S.phase = "watch";
+  setChips("WATCH");
+  setButtons({ hint: false, reveal: false });
+  makeWriter(true);
+  S.writer.animateCharacter({ onComplete: () => setTimeout(phaseTrace, 500) });
+}
+
+function phaseTrace() {
+  S.phase = "trace";
+  setChips("TRACE");
+  setButtons({ hint: false, reveal: true });
+  makeWriter(true);
+  S.writer.quiz({
+    leniency: 1.4, showHintAfterMisses: 1, highlightOnComplete: false,
+    onCorrectStroke: (info) => { S.strokesDone = S.strokeTotal - info.strokesRemaining; setStrokeProgress(); },
+    onMistake: () => boardFlash("flash-bad"),
+    onComplete: () => setTimeout(phaseWrite, 500),
+  });
+}
+
+function phaseWrite() {
+  S.phase = "write";
+  S.strokesDone = 0;
+  setChips(cur().is_new ? "WRITE FROM MEMORY" : "REVIEW");
+  setButtons({ hint: true, reveal: true });
+  setStrokeProgress();
+  makeWriter(false);
+  S.writer.quiz({
+    leniency: 1.0, showHintAfterMisses: 3, highlightOnComplete: true,
+    onCorrectStroke: (info) => {
+      S.strokesDone = S.strokeTotal - info.strokesRemaining;
+      setStrokeProgress();
+    },
+    onMistake: (info) => {
+      S.mistakes += 1;
+      setStrokeProgress();
+      boardFlash("flash-bad");
+      if (navigator.vibrate) navigator.vibrate(35);
+    },
+    onComplete: () => finishChar(false),
+  });
+}
+
+function doReveal() {
+  if (S.phase !== "write" && S.phase !== "trace") return;
+  S.revealed = true;
+  S.phase = "copy";
+  setChips("STUDY, THEN COPY");
+  setButtons({ hint: false, reveal: false });
+  if (S.writer && S.writer.cancelQuiz) S.writer.cancelQuiz();
+  makeWriter(true);
+  S.writer.animateCharacter({
+    onComplete: () => setTimeout(() => {
+      makeWriter(true);
+      S.writer.quiz({          // unscored reinforcement copy
+        leniency: 1.4, showHintAfterMisses: 1, highlightOnComplete: false,
+        onComplete: () => finishChar(true),
+      });
+    }, 400),
+  });
+}
+
+function doHint() {
+  if (S.phase !== "write" || !S.writer) return;
+  S.hints += 1;
+  S.writer.highlightStroke(Math.min(S.strokesDone, Math.max(0, S.strokeTotal - 1)));
+  setStrokeProgress();
+}
+
+function doSay() {
+  const c = cur();
+  try {
+    const u = new SpeechSynthesisUtterance(c.word || c.character);
+    u.lang = "zh-CN"; u.rate = 0.85;
+    const v = speechSynthesis.getVoices().find(v => v.lang && v.lang.startsWith("zh"));
+    if (v) u.voice = v;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  } catch (e) { /* voices unavailable — silently skip */ }
+}
+
+function setButtons(en) {
+  document.getElementById("btn-hint").disabled = !en.hint;
+  document.getElementById("btn-reveal").disabled = !en.reveal;
+}
+
+function finishChar(wasRevealed) {
+  const c = cur();
+  const grade = qualityFromResult(S.mistakes, S.hints, wasRevealed || S.revealed, !!c.is_new);
+  S.results.push({
+    i: S.i, character: c.character, mistakes: S.mistakes, hints: S.hints,
+    revealed: wasRevealed || S.revealed, grade: grade,
+  });
+  const dot = document.getElementById("dot-" + S.i);
+  if (dot) { dot.className = "dot g" + grade; }
+  boardFlash(grade >= 2 ? "flash-good" : "flash-bad");
+  stValue({ session_id: S.sessionId, results: S.results, done: false });
+
+  const advance = () => {
+    document.getElementById("tap-next").style.display = "none";
+    S.i += 1;
+    if (S.i >= S.chars.length) showSummary(); else loadChar();
+  };
+  // auto-advance; tap to skip the pause
+  const t = setTimeout(advance, grade >= 2 ? 900 : 1600);
+  const tapEl = document.getElementById("tap-next");
+  tapEl.style.display = "flex";
+  tapEl.onclick = () => { clearTimeout(t); advance(); };
+}
+
+function showSummary() {
+  S.finished = true;
+  document.getElementById("drill").style.display = "none";
+  const el = document.getElementById("summary");
+  const counts = [0, 0, 0, 0];
+  S.results.forEach(r => counts[r.grade] += 1);
+  const clean = S.results.filter(r => r.mistakes === 0 && !r.revealed).length;
+  const weak = S.results.filter(r => r.grade <= 1).map(r => r.character);
+  el.innerHTML = `
+    <h2>Session complete 🎉</h2>
+    <div class="row"><span>Characters</span><b>${S.results.length}</b></div>
+    <div class="row"><span>First-time clean</span><b>${clean}</b></div>
+    <div class="row"><span>Easy / Good</span><b style="color:var(--good)">${counts[3]} / ${counts[2]}</b></div>
+    <div class="row"><span>Hard / Again</span><b style="color:var(--bad)">${counts[1]} / ${counts[0]}</b></div>
+    ${weak.length ? `<div class="row"><span>Worth another look</span><span class="weak">${weak.join(" ")}</span></div>` : ""}
+    <div id="saved">✓ Progress saved to your SRS</div>`;
+  el.style.display = "block";
+  stValue({ session_id: S.sessionId, results: S.results, done: true });
+  stHeight();
+}
+
+// =====================================================================
+// BOOT
+// =====================================================================
+document.getElementById("btn-hint").addEventListener("click", doHint);
+document.getElementById("btn-say").addEventListener("click", doSay);
+document.getElementById("btn-reveal").addEventListener("click", doReveal);
+window.addEventListener("resize", stHeight);
+stReady();
+stHeight();
+</script>
+</body>
+</html>

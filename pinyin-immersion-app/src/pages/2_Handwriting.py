@@ -11,11 +11,10 @@ go, so nothing is lost even if you close mid-session.
 """
 
 import uuid
-from pathlib import Path
 
 import streamlit as st
-import streamlit.components.v1 as components
 
+from hanzi_component import hanzi_drill
 from db_manager import (
     get_handwriting_session,
     get_focus_session,
@@ -25,9 +24,6 @@ from db_manager import (
 )
 
 st.set_page_config(page_title="Handwriting", page_icon="✍️", layout="centered")
-
-COMPONENT_DIR = Path(__file__).resolve().parent.parent / "hw_component"
-hanzi_drill = components.declare_component("hanzi_drill", path=str(COMPONENT_DIR))
 
 GRADE_NAMES = ["Again", "Hard", "Good", "Easy"]
 

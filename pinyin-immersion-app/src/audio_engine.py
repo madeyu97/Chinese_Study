@@ -39,15 +39,24 @@ def _prune_old_audio():
 # ==========================================
 # THE EXPANDED VOICE CAST
 # ==========================================
+# NOTE: Microsoft Edge TTS has NO zh-MY or zh-SG Mandarin voices (Malaysia
+# gets ms-MY Malay, Singapore gets en-SG English). The previous cast listed
+# fabricated names that failed on every call and silently fell back to the
+# mainland default. This cast is verified-real; Taiwan voices are the
+# closest register to Southeast Asian Mandarin.
 VOICE_CAST = [
-    "zh-MY-XiaoxiaoNeural",  # Malaysia Female
-    "zh-MY-JianNeural",      # Malaysia Male
-    "zh-SG-LunaNeural",      # Singapore Female
-    "zh-SG-JianNeural",      # Singapore Male
-    "zh-TW-HsiaoChenNeural", # Taiwan Female
-    "zh-TW-HsiaoYuNeural",   # Taiwan Female
-    "zh-TW-YunJheNeural"     # Taiwan Male
+    "zh-TW-HsiaoChenNeural",  # Taiwan Female
+    "zh-TW-HsiaoYuNeural",    # Taiwan Female
+    "zh-TW-YunJheNeural",     # Taiwan Male
+    "zh-CN-XiaoxiaoNeural",   # Mainland Female
+    "zh-CN-XiaoyiNeural",     # Mainland Female
+    "zh-CN-YunxiNeural",      # Mainland Male
+    "zh-CN-YunyangNeural",    # Mainland Male
 ]
+
+# Voices that error get benched for the rest of the process, so a broken
+# voice costs one failed call ever, not one per card.
+_DEAD_VOICES = set()
 
 async def _generate_audio_async(text: str, voice: str, output_path: str):
     communicate = edge_tts.Communicate(text, voice)
@@ -84,8 +93,12 @@ def create_audio_file(chinese_text: str, voice: str = None):
     tts_text = re.sub(r'了(?!解)', '料', clean_text)
     tts_text = tts_text.replace("咩", " meh ")
 
-    # 3. Select Voice
-    selected_voice = voice if voice else random.choice(VOICE_CAST)
+    # 3. Select Voice (skipping any that have already failed this session)
+    if voice:
+        selected_voice = voice
+    else:
+        alive = [v for v in VOICE_CAST if v not in _DEAD_VOICES]
+        selected_voice = random.choice(alive if alive else VOICE_CAST)
 
     # 4. Unique output path per (text, voice) so history never goes stale
     digest = hashlib.md5(f"{tts_text}|{selected_voice}".encode("utf-8")).hexdigest()[:16]
@@ -106,7 +119,9 @@ def create_audio_file(chinese_text: str, voice: str = None):
         return str(output_path)
 
     except Exception:
-        logging.warning(f"Voice {selected_voice} failed. Trying fallback...")
+        _DEAD_VOICES.add(selected_voice)
+        logging.warning(f"Voice {selected_voice} failed — benched for this "
+                        f"session. Trying fallback...")
         try:
             fallback_digest = hashlib.md5(
                 f"{tts_text}|zh-CN-XiaoxiaoNeural".encode("utf-8")).hexdigest()[:16]

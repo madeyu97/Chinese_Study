@@ -216,17 +216,22 @@ function fatal(err) {
 function startSession(session) {
   S = {
     sessionId: session.session_id,
-    chars: session.chars || [],
+    // queue is a mutable list of char objects; struggle mode re-appends,
+    // standard mode splices in a requeue a few cards later.
+    queue: (session.chars || []).slice(),
+    mode: session.mode || "standard",   // "standard" | "struggle"
+    served: 0,                          // how many cards shown (for progress)
     i: 0, results: [], finished: false,
     writer: null, phase: null,
     mistakes: 0, hints: 0, revealed: false,
     strokeTotal: 0, strokesDone: 0,
+    cleanStreak: {},                    // char -> consecutive clean count (struggle)
   };
   document.getElementById("loading").style.display = "none";
   document.getElementById("summary").style.display = "none";
   document.getElementById("drill").style.display = "block";
   buildDots();
-  if (!S.chars.length) { showSummary(); return; }
+  if (!S.queue.length) { showSummary(); return; }
   loadChar();
 }
 
@@ -237,12 +242,12 @@ function startSession(session) {
 //   review:     WRITE
 //   Reveal:     animation → COPY (outlined quiz, unscored) → next (Again)
 // =====================================================================
-function cur() { return S.chars[S.i]; }
+function cur() { return S.queue[S.i]; }
 
 function buildDots() {
   const dots = document.getElementById("dots");
   dots.innerHTML = "";
-  S.chars.forEach((_, idx) => {
+  S.queue.forEach((_, idx) => {
     const el = document.createElement("div");
     el.className = "dot" + (idx === S.i ? " now" : "");
     el.id = "dot-" + idx;
@@ -252,7 +257,7 @@ function buildDots() {
 
 function setBar() {
   document.getElementById("bar").style.width =
-    Math.round((S.i / S.chars.length) * 100) + "%";
+    Math.round((S.i / S.queue.length) * 100) + "%";
   document.querySelectorAll(".dot").forEach((el, idx) =>
     el.classList.toggle("now", idx === S.i));
 }
@@ -261,7 +266,7 @@ function setChips(phaseLabel) {
   const c = cur();
   const chips = [];
   if (c.is_new) chips.push('<span class="chip new">NEW</span>');
-  chips.push(`<span class="chip">${S.i + 1} / ${S.chars.length}</span>`);
+  chips.push(`<span class="chip">${S.i + 1} / ${S.queue.length}</span>`);
   if (S.strokeTotal) chips.push(`<span class="chip">${S.strokeTotal} strokes</span>`);
   if (phaseLabel) chips.push(`<span class="chip phase">${phaseLabel}</span>`);
   document.getElementById("chips").innerHTML = chips.join("");
@@ -406,11 +411,17 @@ function setButtons(en) {
   document.getElementById("btn-reveal").disabled = !en.reveal;
 }
 
+const REQUEUE_MISTAKES = 4;   // >3 mistakes -> requeue this session (mirrors backend)
+const REQUEUE_GAP = 3;        // cards to wait before a standard-mode requeue
+
 function finishChar(wasRevealed) {
   const c = cur();
+  const clean = (S.mistakes === 0 && !wasRevealed && !S.revealed);
   const grade = qualityFromResult(S.mistakes, S.hints, wasRevealed || S.revealed, !!c.is_new);
+
+  // Report every attempt so the backend records mistakes + SRS grade.
   S.results.push({
-    i: S.i, character: c.character, mistakes: S.mistakes, hints: S.hints,
+    character: c.character, mistakes: S.mistakes, hints: S.hints,
     revealed: wasRevealed || S.revealed, grade: grade,
   });
   const dot = document.getElementById("dot-" + S.i);
@@ -418,16 +429,52 @@ function finishChar(wasRevealed) {
   boardFlash(grade >= 2 ? "flash-good" : "flash-bad");
   stValue({ session_id: S.sessionId, results: S.results, done: false });
 
+  // ---- decide whether this character comes back ----
+  let toast = "";
+  if (S.mode === "struggle") {
+    // graduate only after TWO consecutive clean writes
+    S.cleanStreak[c.character] = clean ? (S.cleanStreak[c.character] || 0) + 1 : 0;
+    if (S.cleanStreak[c.character] < 2) {
+      S.queue.push(Object.assign({}, c));   // send to back of the loop
+      toast = clean ? "Clean once — one more to graduate" : "Again — keep going";
+    } else {
+      toast = "Graduated ✓";
+    }
+  } else if (S.mistakes >= REQUEUE_MISTAKES) {
+    // standard mode: struggled badly -> see it again a few cards later
+    const at = Math.min(S.i + REQUEUE_GAP, S.queue.length);
+    S.queue.splice(at, 0, Object.assign({}, c, { _requeued: true }));
+    toast = "You'll see this one again shortly";
+  }
+  if (toast) showToast(toast);
+
   const advance = () => {
     document.getElementById("tap-next").style.display = "none";
     S.i += 1;
-    if (S.i >= S.chars.length) showSummary(); else loadChar();
+    buildDots();
+    if (S.i >= S.queue.length) showSummary(); else loadChar();
   };
-  // auto-advance; tap to skip the pause
   const t = setTimeout(advance, grade >= 2 ? 900 : 1600);
   const tapEl = document.getElementById("tap-next");
   tapEl.style.display = "flex";
   tapEl.onclick = () => { clearTimeout(t); advance(); };
+}
+
+function showToast(msg) {
+  let el = document.getElementById("mini-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "mini-toast";
+    el.style.cssText = "position:fixed;left:50%;top:14%;transform:translateX(-50%);"
+      + "background:var(--chip);border:1px solid var(--card-edge);color:var(--text);"
+      + "padding:8px 16px;border-radius:99px;font-size:13px;z-index:99;opacity:0;"
+      + "transition:opacity .2s;";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = "1";
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.opacity = "0"; }, 1400);
 }
 
 function showSummary() {
@@ -437,10 +484,13 @@ function showSummary() {
   const counts = [0, 0, 0, 0];
   S.results.forEach(r => counts[r.grade] += 1);
   const clean = S.results.filter(r => r.mistakes === 0 && !r.revealed).length;
-  const weak = S.results.filter(r => r.grade <= 1).map(r => r.character);
+  const uniqueChars = new Set(S.results.map(r => r.character)).size;
+  // "weak" = ended on a bad grade at least once
+  const weak = [...new Set(S.results.filter(r => r.grade <= 1).map(r => r.character))];
   el.innerHTML = `
     <h2>Session complete 🎉</h2>
-    <div class="row"><span>Characters</span><b>${S.results.length}</b></div>
+    <div class="row"><span>Characters</span><b>${uniqueChars}</b></div>
+    <div class="row"><span>Total attempts</span><b>${S.results.length}</b></div>
     <div class="row"><span>First-time clean</span><b>${clean}</b></div>
     <div class="row"><span>Easy / Good</span><b style="color:var(--good)">${counts[3]} / ${counts[2]}</b></div>
     <div class="row"><span>Hard / Again</span><b style="color:var(--bad)">${counts[1]} / ${counts[0]}</b></div>

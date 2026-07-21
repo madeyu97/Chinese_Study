@@ -59,9 +59,22 @@ def init_db():
             interval INTEGER DEFAULT 0,
             ease_factor REAL DEFAULT 2.5,
             review_count INTEGER DEFAULT 0,
-            first_seen_date TEXT NOT NULL
+            first_seen_date TEXT NOT NULL,
+            total_mistakes INTEGER DEFAULT 0,
+            recent_grades TEXT DEFAULT '',
+            recent_mistakes TEXT DEFAULT '',
+            last_reviewed TEXT
         )
     ''')
+    # Backfill struggle-tracking columns on databases created before this
+    # feature (CREATE TABLE IF NOT EXISTS never alters an existing table).
+    for _coldef in ("total_mistakes INTEGER DEFAULT 0",
+                    "recent_grades TEXT DEFAULT ''",
+                    "recent_mistakes TEXT DEFAULT ''",
+                    "last_reviewed TEXT"):
+        cursor.execute(
+            "ALTER TABLE handwriting_progress "
+            "ADD COLUMN IF NOT EXISTS " + _coldef)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sentence_bank (
             id SERIAL PRIMARY KEY,
@@ -403,8 +416,27 @@ def get_handwriting_session(new_count=5):
     return due_reviews + new_entries
 
 
-def update_handwriting_progress(character, grade, current_state):
-    """Apply SRS grade to a character and upsert progress."""
+RECENT_WINDOW = 5          # attempts kept for the "recent mistake rate" ranking
+REQUEUE_MISTAKE_THRESHOLD = 4   # >3 mistakes forces same-day requeue + next-day review
+
+
+def _push_recent(csv_str, value, window=RECENT_WINDOW):
+    """Append an int to a comma-string, keep only the last `window`."""
+    items = [x for x in (csv_str or "").split(",") if x != ""]
+    items.append(str(int(value)))
+    items = items[-window:]
+    return ",".join(items)
+
+
+def update_handwriting_progress(character, grade, current_state, mistakes=0):
+    """Apply SRS grade to a character, record mistake history, and upsert.
+
+    Returns True if the character should be REQUEUED in the same session
+    (more than 3 mistakes) — the caller uses this to re-drill it a few
+    cards later, and its next scheduled review is pinned to tomorrow so a
+    struggled character never disappears for days.
+    """
+    requeue = mistakes >= REQUEUE_MISTAKE_THRESHOLD
     new_interval, new_ease, next_review_date = compute_next_review(
         current_interval=current_state.get('interval', 0),
         current_ease=current_state.get('ease_factor', 2.5),
@@ -412,21 +444,42 @@ def update_handwriting_progress(character, grade, current_state):
     )
     today_str = date.today().isoformat()
 
+    if requeue:
+        # Even a later-clean requeue can't push it past tomorrow.
+        from datetime import timedelta
+        next_review_date = (date.today() + timedelta(days=1)).isoformat()
+        new_interval = min(new_interval, 1)
+
+    prev_grades = current_state.get('recent_grades', '') or ''
+    prev_mist = current_state.get('recent_mistakes', '') or ''
+    new_grades = _push_recent(prev_grades, grade)
+    new_mist = _push_recent(prev_mist, mistakes)
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO handwriting_progress
-            (character, next_review_date, interval, ease_factor, review_count, first_seen_date)
-        VALUES (%s, %s, %s, %s, 1, %s)
+            (character, next_review_date, interval, ease_factor, review_count,
+             first_seen_date, total_mistakes, recent_grades, recent_mistakes,
+             last_reviewed)
+        VALUES (%s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
         ON CONFLICT (character) DO UPDATE SET
             next_review_date = EXCLUDED.next_review_date,
             interval = EXCLUDED.interval,
             ease_factor = EXCLUDED.ease_factor,
-            review_count = handwriting_progress.review_count + 1
-    ''', (character, next_review_date, new_interval, new_ease, today_str))
+            review_count = handwriting_progress.review_count + 1,
+            total_mistakes = handwriting_progress.total_mistakes + EXCLUDED.total_mistakes,
+            recent_grades = EXCLUDED.recent_grades,
+            recent_mistakes = EXCLUDED.recent_mistakes,
+            last_reviewed = EXCLUDED.last_reviewed
+    ''', (character, next_review_date, new_interval, new_ease, today_str,
+           mistakes, new_grades, new_mist, today_str))
     conn.commit()
     conn.close()
-    logging.info(f"[HW] {character} graded {grade} → next review in {new_interval}d")
+    logging.info(f"[HW] {character} graded {grade} ({mistakes} mistakes) "
+                 f"→ next review in {new_interval}d"
+                 + (" [REQUEUED this session]" if requeue else ""))
+    return requeue
 
 
 def get_handwriting_stats():
@@ -605,6 +658,117 @@ def bank_browse(vocab_chinese=None, status='active', limit=50):
     conn.close()
     return rows
 
+
+
+
+# ==========================================
+# STRUGGLE TRACKING — weakness ranking + focused drills
+# ==========================================
+def _recent_mistake_rate(recent_mistakes_csv):
+    """Mean mistakes over the recent window (0 if no history)."""
+    vals = [int(x) for x in (recent_mistakes_csv or "").split(",") if x != ""]
+    return sum(vals) / len(vals) if vals else 0.0
+
+
+def get_weak_characters(limit=50, min_attempts=1):
+    """Characters ranked by RECENT struggle, worst first.
+
+    Ranking key is the recent mistake rate (mean mistakes over the last
+    ~5 attempts), so a character you've improved on naturally falls down
+    the list. Ties broken by recent Again/Hard grades, then lifetime
+    mistakes. Only characters with at least `min_attempts` recorded
+    attempts are included."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""
+        SELECT character, review_count, total_mistakes, recent_grades,
+               recent_mistakes, next_review_date, interval, ease_factor
+        FROM handwriting_progress
+        WHERE review_count >= %s
+    """, (min_attempts,))
+    rows = [dict(r) for r in cursor.fetchall()]
+
+    # pull word context for the cue, same as the normal session
+    cursor.execute("""SELECT chinese, pinyin, english, review_count
+                      FROM vocab_progress WHERE review_count > 0""")
+    vocab_rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    ranked = []
+    for r in rows:
+        rate = _recent_mistake_rate(r.get("recent_mistakes"))
+        if rate <= 0 and not [g for g in (r.get("recent_grades") or "").split(",")
+                              if g in ("0", "1")]:
+            continue  # no recent struggle at all — not "weak"
+        recent_bad = sum(1 for g in (r.get("recent_grades") or "").split(",")
+                         if g in ("0", "1"))
+        r["_rate"] = rate
+        r["_recent_bad"] = recent_bad
+        ranked.append(r)
+
+    ranked.sort(key=lambda r: (-r["_rate"], -r["_recent_bad"],
+                               -(r.get("total_mistakes") or 0)))
+    ranked = ranked[:limit]
+
+    out = []
+    for r in ranked:
+        ctx = choose_context_word(r["character"], vocab_rows) or {}
+        out.append({
+            "character": r["character"],
+            "recent_mistake_rate": round(r["_rate"], 2),
+            "recent_bad_grades": r["_recent_bad"],
+            "total_mistakes": r.get("total_mistakes") or 0,
+            "review_count": r.get("review_count") or 0,
+            "char_pinyin": derive_pinyin(r["character"]),
+            "word": ctx.get("chinese", r["character"]),
+            "word_pinyin": ctx.get("pinyin", ""),
+            "word_english": ctx.get("english", ""),
+            # carry SRS state so a drill here still updates the schedule
+            "interval": r.get("interval", 0),
+            "ease_factor": float(r.get("ease_factor", 2.5)),
+            "next_review_date": r.get("next_review_date"),
+            "recent_grades": r.get("recent_grades", ""),
+            "recent_mistakes": r.get("recent_mistakes", ""),
+            "is_new": False,
+        })
+    return out
+
+
+def get_struggle_session(characters):
+    """Build a drill queue for an explicit list of characters (the
+    'drill my weak characters' mode). Each character carries full state so
+    grades still feed the SRS. Order preserved as given."""
+    if not characters:
+        return []
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT chinese, pinyin, english, review_count
+                      FROM vocab_progress""")
+    vocab_rows = [dict(r) for r in cursor.fetchall()]
+    ph = ','.join(['%s'] * len(characters))
+    cursor.execute(f"SELECT * FROM handwriting_progress WHERE character IN ({ph})",
+                   characters)
+    pmap = {r['character']: dict(r) for r in cursor.fetchall()}
+    conn.close()
+    session = []
+    for ch in characters:
+        session.append(_hw_entry(ch, pmap.get(ch) is None, 1,
+                                 pmap.get(ch), vocab_rows))
+    return session
+
+
+
+
+def get_char_state(character):
+    """Current stored handwriting state for one character (or None), used to
+    roll recent-grade/mistake history correctly across repeated drills."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM handwriting_progress WHERE character = %s",
+                   (character,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 init_db()

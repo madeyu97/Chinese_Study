@@ -265,6 +265,35 @@ def t_hw_context():
 
 
 # ======================================================================
+# HOKKIEN ROMANISATION ENGINE
+# ======================================================================
+import hokkien_engine as hk
+
+
+@test("Tâi-lô tone classes")
+def t_hk_tones():
+    for syl, tone in {"tsia̍h": 8, "pn̄g": 7, "kóng": 2, "sio": 1,
+                      "bah": 4, "tsài": 3, "lâm": 5}.items():
+        assert hk.tone_of(syl) == tone, (syl, hk.tone_of(syl), tone)
+
+
+@test("Tâi-lô -> Taiji matches Tye's published examples")
+def t_hk_taiji():
+    # From penang-traveltips.com: tsia̍h = ciak1, pn̄g = png33
+    assert hk.tailo_to_taiji("tsia̍h") == "ciak1"
+    assert hk.tailo_to_taiji("pn̄g") == "png33"
+    assert hk.tailo_to_taiji("tsia̍h-pn̄g") == "ciak1 png33"
+
+
+@test("romanisation answer matching is tone/hyphen/case tolerant")
+def t_hk_match():
+    assert hk.answers_match("tsiah png", "tsia̍h-pn̄g")
+    assert hk.answers_match("TSIAH-PNG", "tsia̍h-pn̄g")
+    assert hk.answers_match("tsiah8 png7", "tsia̍h-pn̄g")
+    assert not hk.answers_match("chiah png", "tsia̍h-pn̄g")
+
+
+# ======================================================================
 # DATABASE (only when DATABASE_URL is set)
 # ======================================================================
 def db_tests():
@@ -323,6 +352,8 @@ if __name__ == "__main__":
     t_distractor_dedupe()
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context()
+    print("Hokkien engine:")
+    t_hk_tones(); t_hk_taiji(); t_hk_match()
     if os.environ.get("DATABASE_URL"):
         print("Database (DATABASE_URL detected):")
         db_tests()

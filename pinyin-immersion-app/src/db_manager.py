@@ -91,6 +91,32 @@ def init_db():
         ON sentence_bank (vocab_chinese, status)
     ''')
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hokkien_deck (
+            id SERIAL PRIMARY KEY,
+            mandarin TEXT NOT NULL,
+            mandarin_full TEXT,
+            english TEXT,
+            hokkien_hanji TEXT NOT NULL,
+            tailo TEXT NOT NULL,
+            taiji TEXT,
+            tier TEXT DEFAULT 'single',
+            sources TEXT,
+            alternatives INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'unverified',
+            note TEXT,
+            next_review_date TEXT,
+            interval INTEGER DEFAULT 0,
+            ease_factor REAL DEFAULT 2.5,
+            review_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE (mandarin, hokkien_hanji)
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_hokkien_status
+        ON hokkien_deck (status, next_review_date)
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS sentence_blocklist (
             chinese TEXT PRIMARY KEY,
             reason TEXT,
@@ -769,6 +795,141 @@ def get_char_state(character):
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+
+# ==========================================
+# PENANG HOKKIEN DECK
+# Built offline from licensed dictionaries (see build_hokkien_deck.py).
+# Entries stay 'unverified' — and undrillable — until the learner confirms
+# them, because no open Penang Hokkien lexicon exists to trust blindly.
+# ==========================================
+def hokkien_add(mandarin, mandarin_full, english, hokkien_hanji, tailo,
+                taiji, tier, sources, alternatives):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO hokkien_deck
+            (mandarin, mandarin_full, english, hokkien_hanji, tailo, taiji,
+             tier, sources, alternatives, next_review_date)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (mandarin, hokkien_hanji) DO NOTHING
+    """, (mandarin, mandarin_full, english, hokkien_hanji, tailo, taiji,
+          tier, sources, alternatives, date.today().isoformat()))
+    added = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return added
+
+
+def hokkien_stats():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*),
+               COUNT(*) FILTER (WHERE status = 'verified'),
+               COUNT(*) FILTER (WHERE status = 'unverified'),
+               COUNT(*) FILTER (WHERE status = 'rejected'),
+               COUNT(*) FILTER (WHERE tier = 'penang'),
+               COUNT(*) FILTER (WHERE tier = 'consensus')
+        FROM hokkien_deck
+    """)
+    t, v, u, r, p, c = cursor.fetchone()
+    conn.close()
+    return {"total": t or 0, "verified": v or 0, "unverified": u or 0,
+            "rejected": r or 0, "penang": p or 0, "consensus": c or 0}
+
+
+def hokkien_queue(limit=25, tier=None):
+    """Unverified entries for the verification queue, best-evidence first."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    if tier:
+        cursor.execute("""SELECT * FROM hokkien_deck
+                          WHERE status = 'unverified' AND tier = %s
+                          ORDER BY CASE tier WHEN 'penang' THEN 0
+                                             WHEN 'consensus' THEN 1 ELSE 2 END,
+                                   alternatives ASC, id
+                          LIMIT %s""", (tier, limit))
+    else:
+        cursor.execute("""SELECT * FROM hokkien_deck
+                          WHERE status = 'unverified'
+                          ORDER BY CASE tier WHEN 'penang' THEN 0
+                                             WHEN 'consensus' THEN 1 ELSE 2 END,
+                                   alternatives ASC, id
+                          LIMIT %s""", (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def hokkien_set_status(entry_id, status, tailo=None, taiji=None, note=None):
+    """Verify / reject an entry, optionally correcting its romanisation."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    fields, params = ["status = %s"], [status]
+    if tailo is not None:
+        fields.append("tailo = %s"); params.append(tailo)
+    if taiji is not None:
+        fields.append("taiji = %s"); params.append(taiji)
+    if note is not None:
+        fields.append("note = %s"); params.append(note)
+    params.append(entry_id)
+    cursor.execute(f"UPDATE hokkien_deck SET {', '.join(fields)} WHERE id = %s",
+                   params)
+    conn.commit()
+    conn.close()
+
+
+def hokkien_session(limit=20):
+    """Verified entries due for review, plus unseen verified ones."""
+    today = date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""
+        SELECT * FROM hokkien_deck
+        WHERE status = 'verified'
+          AND (next_review_date IS NULL OR next_review_date <= %s)
+        ORDER BY review_count ASC, next_review_date NULLS FIRST, RANDOM()
+        LIMIT %s
+    """, (today, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def hokkien_grade(entry_id, grade, current_state):
+    """Apply an SRS grade to a Hokkien entry (same engine as handwriting)."""
+    new_interval, new_ease, next_review = compute_next_review(
+        current_interval=current_state.get("interval", 0),
+        current_ease=float(current_state.get("ease_factor", 2.5)),
+        grade=grade)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE hokkien_deck
+        SET interval = %s, ease_factor = %s, next_review_date = %s,
+            review_count = review_count + 1
+        WHERE id = %s
+    """, (new_interval, new_ease, next_review, entry_id))
+    conn.commit()
+    conn.close()
+    return new_interval
+
+
+def hokkien_search(term, limit=30):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    like = f"%{term}%"
+    cursor.execute("""
+        SELECT * FROM hokkien_deck
+        WHERE mandarin ILIKE %s OR english ILIKE %s
+           OR hokkien_hanji ILIKE %s OR tailo ILIKE %s
+        ORDER BY status DESC, id LIMIT %s
+    """, (like, like, like, like, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
 
 
 init_db()

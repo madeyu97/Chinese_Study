@@ -849,7 +849,8 @@ def hokkien_queue(limit=25, tier=None):
                           WHERE status = 'unverified' AND tier = %s
                           ORDER BY CASE tier WHEN 'penang' THEN 0
                                              WHEN 'consensus' THEN 1
-                                             WHEN 'single' THEN 2 ELSE 3 END,
+                                             WHEN 'core' THEN 2
+                                             WHEN 'single' THEN 3 ELSE 4 END,
                                    alternatives ASC, id
                           LIMIT %s""", (tier, limit))
     else:
@@ -857,7 +858,8 @@ def hokkien_queue(limit=25, tier=None):
                           WHERE status = 'unverified'
                           ORDER BY CASE tier WHEN 'penang' THEN 0
                                              WHEN 'consensus' THEN 1
-                                             WHEN 'single' THEN 2 ELSE 3 END,
+                                             WHEN 'core' THEN 2
+                                             WHEN 'single' THEN 3 ELSE 4 END,
                                    alternatives ASC, id
                           LIMIT %s""", (limit,))
     rows = [dict(r) for r in cursor.fetchall()]

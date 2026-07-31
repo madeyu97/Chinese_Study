@@ -24,6 +24,9 @@ TIER_BADGE = {
     "penang": ("🟢 Penang-tagged", "A Penang-specific reading was found in Wiktionary."),
     "consensus": ("🟡 Consensus", "2+ Taiwanese dictionaries agree — may differ in Penang."),
     "single": ("🔴 Single source", "Only one dictionary offered this. Verify before trusting."),
+    "core": ("🔵 Core vocabulary", "Foundational Hokkien from the 基礎語句 "
+             "basic-vocabulary dictionary — not derived from your Mandarin "
+             "list. Characters confirmed against the Mandarin gloss."),
     "composed": ("🟠 Composed", "Built word-by-word from parts because the whole "
                  "phrase wasn't in any dictionary. Often literal and sometimes "
                  "wrong — check carefully."),
@@ -168,7 +171,7 @@ with tab_verify:
         "what's right, correct what isn't, reject what Penang wouldn't say. "
         "Only confirmed entries enter the study rotation.")
     tier_filter = st.selectbox(
-        "Show tier", ["all", "penang", "consensus", "single", "composed"], index=0)
+        "Show tier", ["all", "penang", "consensus", "core", "single", "composed"], index=0)
     rows = db.hokkien_queue(limit=20,
                             tier=None if tier_filter == "all" else tier_filter)
     if not rows:

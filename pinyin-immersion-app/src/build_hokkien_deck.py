@@ -188,6 +188,123 @@ def load_penang_overlay(jsonl_path):
     return overlay
 
 
+BASIC_FILE = "ChhoeTaigi_TaioanPehoeKichhooGiku.csv"   # 基礎語句 core vocabulary
+JUNK_ENGLISH = re.compile(r"^\s*(\d|cf\.|see\b|\[)", re.I)
+HANJI_SOURCES = ["ChhoeTaigi_KauiokpooTaigiSutian.csv",
+                 "ChhoeTaigi_TaihoaSoanntengTuichiautian.csv"]
+
+
+def load_romanisation_to_hanji(base):
+    """Map (Tâi-lô, Mandarin gloss) -> hàn-jī.
+
+    Keyed on the PAIR, not the romanisation alone. Hokkien is full of
+    homophones — sik alone is 色 colour, 熟 ripe, 式 ceremony and 室 room —
+    so a romanisation-only lookup confidently assigns wrong characters
+    (observed: 龍 lîng "dragon" rendered as 拎). Requiring the Mandarin gloss
+    to agree as well makes the mapping trustworthy.
+    """
+    out = {}
+    for fname in HANJI_SOURCES:
+        path = os.path.join(base, fname)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                kip = clean_field(row.get("KipUnicode"))
+                han = clean_field(row.get("HanLoTaibunKip"))
+                if not kip or not han or LATIN_RE.search(han):
+                    continue
+                for hoa in SPLIT_RE.split(row.get("HoaBun") or ""):
+                    hoa = clean_field(hoa)
+                    if hoa:
+                        out.setdefault((kip, hoa), han)
+    return out
+
+
+def load_core_vocabulary(base):
+    """Foundational Hokkien vocabulary (kinship, particles, everyday words)
+    that a Mandarin wordlist will never surface. Returns rows ranked by
+    cross-dictionary presence — a reasonable proxy for how core a word is."""
+    path = os.path.join(base, BASIC_FILE)
+    if not os.path.exists(path):
+        print(f"  ! {BASIC_FILE} not found — core vocabulary unavailable")
+        return []
+    rom2han = load_romanisation_to_hanji(base)
+
+    # how many dictionaries mention each romanisation
+    freq = collections.Counter()
+    for fname in HANJI_SOURCES + [BASIC_FILE]:
+        p = os.path.join(base, fname)
+        if not os.path.exists(p):
+            continue
+        with open(p, encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                kip = clean_field(row.get("KipUnicode"))
+                if kip:
+                    freq[kip] += 1
+
+    entries = []
+    seen = set()
+    with open(path, encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            kip = clean_field(row.get("KipUnicode"))
+            eng = (row.get("EngBun") or "").strip()
+            hoa = clean_field(row.get("HoaBun"))
+            if not kip or not eng or not hoa:
+                continue
+            # Some rows carry page references or cross-reference codes rather
+            # than a definition (e.g. '2934 [penn5]') — not teachable.
+            if JUNK_ENGLISH.match(eng) or len(eng) < 3:
+                continue
+            # Require romanisation AND Mandarin gloss to agree before trusting
+            # the characters (see load_romanisation_to_hanji).
+            hanji = rom2han.get((kip, hoa))
+            if not hanji:
+                continue
+            key = (hanji, kip)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append({
+                "tailo": normalise_tailo(kip), "english": eng,
+                "mandarin": hoa or kip, "hanji": hanji,
+                "rank": freq.get(kip, 1),
+            })
+    entries.sort(key=lambda e: -e["rank"])
+    return entries
+
+
+def words_from_sentences(vocab, cand):
+    """Pull the individual words out of sentence-type vocabulary entries.
+
+    Sentences can't be looked up whole, but the words inside them are words
+    the learner is actively studying — the most relevant expansion source
+    available. Ordered by how often each word appears across the sentences.
+    """
+    try:
+        import jieba
+        jieba.setLogLevel(60)
+    except ImportError:
+        print("  ! jieba not installed — cannot mine sentences")
+        return []
+    counts = collections.Counter()
+    for v in vocab:
+        word = v["chinese"].strip()
+        if classify_entry(word) not in ("sentence", "phrase"):
+            continue
+        for tok in jieba.cut(word):
+            tok = tok.strip()
+            if len(tok) >= 2 and all("\u4e00" <= c <= "\u9fff" for c in tok):
+                counts[tok] += 1
+    out = []
+    for tok, n in counts.most_common():
+        for variant in lookup_variants(tok):
+            if variant in cand:
+                out.append((tok, variant, n))
+                break
+    return out
+
+
 SENTENCE_PUNCT = "。，？！；：、,?!"
 
 
@@ -297,6 +414,14 @@ def main():
                     help="only process the first N vocab words (testing)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print results without writing to the database")
+    ap.add_argument("--from-sentences", action="store_true",
+                    help="also mine the words inside your sentence entries")
+    ap.add_argument("--core", type=int, default=0,
+                    help="also add N core Hokkien words (kinship, particles, "
+                         "everyday vocabulary a Mandarin list never surfaces)")
+    ap.add_argument("--target", type=int, default=0,
+                    help="aim for this total deck size; enables --from-sentences "
+                         "and tops up with core vocabulary automatically")
     args = ap.parse_args()
 
     print("Loading ChhoeTaigi…")
@@ -384,8 +509,81 @@ def main():
                 sources=",".join(sources), alternatives=n_alts):
             made += 1
 
+    # ------------------------------------------------------------------
+    # EXPANSION PASS 1 — words inside your sentence entries
+    # ------------------------------------------------------------------
+    want_sentences = args.from_sentences or args.target
+    if want_sentences:
+        print("\nMining words from your sentence entries…")
+        mined = words_from_sentences(vocab, cand)
+        added = 0
+        for tok, variant, _n in mined:
+            forms = cand[variant]
+            hokkien_hanji, meta, n_alts = pick_best(forms)
+            if LATIN_RE.search(hokkien_hanji):
+                continue
+            tailo = normalise_tailo(meta["kip"])
+            sources = sorted(meta["srcs"])
+            tier = "consensus" if len(sources) > 1 else "single"
+            ov = overlay.get(hokkien_hanji)
+            if ov and (ov.get("tailo") or ov.get("poj")):
+                if ov.get("tailo"):
+                    tailo = normalise_tailo(ov["tailo"])
+                tier = "penang"
+            if args.dry_run:
+                if added < 10:
+                    print(f"  {tok:8} -> {hokkien_hanji:8} {tailo:18} [{tier}] (from sentences)")
+            elif db.hokkien_add(mandarin=tok, mandarin_full=tok,
+                                english="(from your sentences)",
+                                hokkien_hanji=hokkien_hanji, tailo=tailo,
+                                taiji=tailo_to_taiji(tailo), tier=tier,
+                                sources=",".join(sources) or "sentence-mined",
+                                alternatives=n_alts):
+                added += 1
+                made += 1
+            tiers[f"sentence_{tier}"] += 1
+        print(f"  {'previewed' if args.dry_run else 'added'} "
+              f"{len(mined) if args.dry_run else added} words from sentences")
+
+    # ------------------------------------------------------------------
+    # EXPANSION PASS 2 — core Hokkien vocabulary
+    # ------------------------------------------------------------------
+    core_wanted = args.core
+    if args.target and not args.dry_run:
+        current = db.hokkien_stats()["total"]
+        core_wanted = max(0, args.target - current)
+    elif args.target and args.dry_run:
+        core_wanted = args.core or 500
+
+    if core_wanted:
+        print(f"\nAdding up to {core_wanted} core Hokkien words…")
+        core = load_core_vocabulary(
+            os.path.join(args.chhoetaigi, "ChhoeTaigiDatabase")
+            if os.path.isdir(os.path.join(args.chhoetaigi, "ChhoeTaigiDatabase"))
+            else args.chhoetaigi)
+        added = 0
+        for e in core:
+            if added >= core_wanted:
+                break
+            if args.dry_run:
+                if added < 10:
+                    print(f"  {e['hanji']:8} {e['tailo']:18} "
+                          f"{tailo_to_taiji(e['tailo']):18} — {e['english'][:40]}")
+                added += 1
+                continue
+            if db.hokkien_add(mandarin=e["mandarin"], mandarin_full=e["mandarin"],
+                              english=e["english"], hokkien_hanji=e["hanji"],
+                              tailo=e["tailo"], taiji=tailo_to_taiji(e["tailo"]),
+                              tier="core", sources="basic-vocabulary",
+                              alternatives=1):
+                added += 1
+                made += 1
+        tiers["core"] = added
+        print(f"  {'previewed' if args.dry_run else 'added'} {added} core words")
+
     print("\nResults:")
-    for k in ("penang", "consensus", "single", "composed"):
+    for k in ("penang", "consensus", "single", "composed", "core",
+              "sentence_penang", "sentence_consensus", "sentence_single"):
         if tiers.get(k):
             print(f"  {k:22} {tiers[k]:5}")
     skipped = sum(v for k, v in tiers.items() if k.startswith("skipped_"))

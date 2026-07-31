@@ -41,7 +41,9 @@ COMBINING = {
     "\u0302": 5,   # ̂  circumflex
     "\u0304": 7,   # ̄  macron
     "\u030D": 8,   # ̍  vertical line above
-    "\u0306": 6,   # ̆  breve (rare, Longyan etc.)
+    "\u0306": 6,   # ̆  breve (rare: Longyan, Zhangzhou tone 6)
+    "\u030B": 9,   # ̋  double acute — Tâi-lô tone 9 (high level, loanwords
+                   #    and certain tone-change forms, e.g. tsha̋i)
 }
 
 CHECKED_ENDINGS = ("p", "t", "k", "h")
@@ -79,7 +81,9 @@ def split_syllables(tailo_word):
     """'tsia̍h-pn̄g' -> ['tsia̍h', 'pn̄g']. Handles - and space separators."""
     if not tailo_word:
         return []
-    parts = re.split(r"[-\s]+", tailo_word.strip())
+    # '--' marks a following neutral-tone syllable in Tâi-lô (lōo--lí);
+    # treat it as a plain separator.
+    parts = re.split(r"[-\s]+", tailo_word.strip().replace("--", "-"))
     return [p for p in parts if p]
 
 
@@ -106,6 +110,7 @@ def split_syllables(tailo_word):
 # UI as an approximation regardless.
 # ======================================================================
 TAILO_TO_TAIJI_TONE = {
+    9: "1",   # tone 9 is high-level; Taiji's tone 1 is its nearest match
     1: "1",
     2: "4",
     3: "3",

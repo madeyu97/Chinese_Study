@@ -285,6 +285,25 @@ def t_hk_taiji():
     assert hk.tailo_to_taiji("tsia̍h-pn̄g") == "ciak1 png33"
 
 
+@test("Tâi-lô tone 9 (double acute) does not leak into Taiji output")
+def t_hk_tone9():
+    assert hk.tone_of("tsha\u030bi") == 9
+    out = hk.tailo_to_taiji("tsha\u030bi")
+    assert "\u030b" not in out and out == "chai1", out
+
+
+@test("Tâi-lô double-hyphen (neutral tone marker) parses")
+def t_hk_dblhyphen():
+    assert hk.tailo_to_taiji("lo\u0304o--li\u0301") == "lo33 li4"
+
+
+@test("simplified vocabulary converts for traditional dictionary lookup")
+def t_hk_s2t():
+    from zhconv import convert
+    assert convert("吃饭", "zh-tw") == "吃飯"
+    assert convert("头发", "zh-tw") == "頭髮"
+
+
 @test("romanisation answer matching is tone/hyphen/case tolerant")
 def t_hk_match():
     assert hk.answers_match("tsiah png", "tsia̍h-pn̄g")
@@ -353,7 +372,8 @@ if __name__ == "__main__":
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context()
     print("Hokkien engine:")
-    t_hk_tones(); t_hk_taiji(); t_hk_match()
+    t_hk_tones(); t_hk_taiji(); t_hk_tone9(); t_hk_dblhyphen()
+    t_hk_s2t(); t_hk_match()
     if os.environ.get("DATABASE_URL"):
         print("Database (DATABASE_URL detected):")
         db_tests()

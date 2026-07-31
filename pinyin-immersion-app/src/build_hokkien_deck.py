@@ -45,6 +45,31 @@ import sys
 import db_manager as db
 from hokkien_engine import tailo_to_taiji, normalise_tailo
 
+# ChhoeTaigi's Mandarin headwords are TRADITIONAL characters; this app's
+# vocabulary is SIMPLIFIED. Without conversion the hit rate collapses to
+# almost nothing (measured: 0/8 on a simplified sample, 4/8 traditional).
+# zhconv is pure-Python with no compiled dependencies, so it installs
+# cleanly on Windows. 'zh-tw' is used because ChhoeTaigi is Taiwanese —
+# it yields 吃飯 rather than the zh-hant form 喫飯.
+try:
+    from zhconv import convert as _zh_convert
+except ImportError:  # pragma: no cover
+    _zh_convert = None
+    print("  ! zhconv not installed — simplified vocabulary will barely match.\n"
+          "    Fix with:  python -m pip install zhconv")
+
+
+def lookup_variants(word):
+    """Every spelling worth trying against a traditional-character index."""
+    seen, out = set(), []
+    for cand in (word,
+                 _zh_convert(word, "zh-tw") if _zh_convert else None,
+                 _zh_convert(word, "zh-hant") if _zh_convert else None):
+        if cand and cand not in seen:
+            seen.add(cand)
+            out.append(cand)
+    return out
+
 # ChhoeTaigi files that carry a Mandarin (HoaBun) column, with a weight
 # reflecting how directly they assert Mandarin<->Hokkien equivalence.
 # iTaigi is an explicit comparison dictionary, so it is trusted most.
@@ -196,8 +221,11 @@ def main():
         forms = None
         used_head = mand
         for h in heads:
-            if h in cand:
-                forms, used_head = cand[h], h
+            for variant in lookup_variants(h):
+                if variant in cand:
+                    forms, used_head = cand[variant], h
+                    break
+            if forms:
                 break
         if not forms:
             tiers["no_match"] += 1

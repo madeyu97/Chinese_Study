@@ -208,6 +208,24 @@ def classify_entry(word):
     return "word"
 
 
+# Hokkien characters have separate literary (文) and colloquial (白) readings.
+# Dictionaries list the literary one for an isolated character, but inside a
+# counting phrase the colloquial reading is correct: 一碗 is tsi̍t-uánn, not
+# i̍t-uánn. Whole-word dictionary hits already carry the right reading — this
+# only corrects word-by-word composition.
+COLLOQUIAL_IN_COMPOUND = {
+    "一": "tsi̍t",
+    "二": "nn\u0304g",
+    "個": "\u00ea",
+    "个": "\u00ea",
+}
+
+# Characters that behave as classifiers/measure words, used to detect a
+# counting phrase.
+MEASURE_WORDS = set("盤盘碟碗次擺摆個个杯支枝張张條条隻只件本頭头包份塊块"
+                    "粒瓶罐點点箱台部間间張张床區区種种層层頓顿位隻")
+
+
 def decompose(word, cand, max_piece=4):
     """Greedy longest-match split of a compound into dictionary sub-words.
 
@@ -233,12 +251,20 @@ def decompose(word, cand, max_piece=4):
     if len(pieces) < 2:
         return None
     forms, tailos = [], []
-    for _piece, variant in pieces:
+    for pos, (piece, variant) in enumerate(pieces):
         form, meta, _n = pick_best(cand[variant])
         if LATIN_RE.search(form):
             return None          # unusable piece — don't build a junk card
+        tailo = normalise_tailo(meta["kip"])
+        # Apply the colloquial reading when this piece is a numeral or 個
+        # sitting inside a counting phrase.
+        if piece in COLLOQUIAL_IN_COMPOUND:
+            nxt = pieces[pos + 1][0] if pos + 1 < len(pieces) else ""
+            if piece in ("個", "个") or (nxt and (nxt[0] in MEASURE_WORDS
+                                                 or nxt in COLLOQUIAL_IN_COMPOUND)):
+                tailo = COLLOQUIAL_IN_COMPOUND[piece]
         forms.append(form)
-        tailos.append(normalise_tailo(meta["kip"]))
+        tailos.append(tailo)
     return [p for p, _ in pieces], "".join(forms), "-".join(t for t in tailos if t)
 
 

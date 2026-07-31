@@ -848,14 +848,16 @@ def hokkien_queue(limit=25, tier=None):
         cursor.execute("""SELECT * FROM hokkien_deck
                           WHERE status = 'unverified' AND tier = %s
                           ORDER BY CASE tier WHEN 'penang' THEN 0
-                                             WHEN 'consensus' THEN 1 ELSE 2 END,
+                                             WHEN 'consensus' THEN 1
+                                             WHEN 'single' THEN 2 ELSE 3 END,
                                    alternatives ASC, id
                           LIMIT %s""", (tier, limit))
     else:
         cursor.execute("""SELECT * FROM hokkien_deck
                           WHERE status = 'unverified'
                           ORDER BY CASE tier WHEN 'penang' THEN 0
-                                             WHEN 'consensus' THEN 1 ELSE 2 END,
+                                             WHEN 'consensus' THEN 1
+                                             WHEN 'single' THEN 2 ELSE 3 END,
                                    alternatives ASC, id
                           LIMIT %s""", (limit,))
     rows = [dict(r) for r in cursor.fetchall()]

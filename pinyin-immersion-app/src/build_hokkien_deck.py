@@ -173,10 +173,75 @@ def load_penang_overlay(jsonl_path):
     return overlay
 
 
+SENTENCE_PUNCT = "。，？！；：、,?!"
+
+
+def classify_entry(word):
+    """Why an entry can't be looked up, if it can't.
+
+    A third of a real learner vocabulary is sentences and idiomatic phrases.
+    No dictionary contains those, so they are reported separately rather
+    than lumped in with genuine lookup failures.
+    """
+    han = [c for c in word if "\u4e00" <= c <= "\u9fff"]
+    if any(p in word for p in SENTENCE_PUNCT):
+        return "sentence"
+    if len(han) >= 5:
+        return "phrase"
+    if not han:
+        return "non_han"
+    return "word"
+
+
+def decompose(word, cand, max_piece=4):
+    """Greedy longest-match split of a compound into dictionary sub-words.
+
+    一定要 -> 一定 + 要. Returns (pieces, forms, tailos) or None. Used only
+    when the whole word is absent, and tagged 'composed' because
+    word-by-word composition is a weaker claim than a dictionary entry.
+    """
+    pieces, i = [], 0
+    while i < len(word):
+        hit = None
+        for length in range(min(max_piece, len(word) - i), 0, -1):
+            piece = word[i:i + length]
+            for variant in lookup_variants(piece):
+                if variant in cand:
+                    hit = (piece, variant)
+                    break
+            if hit:
+                break
+        if not hit:
+            return None
+        pieces.append(hit)
+        i += len(hit[0])
+    if len(pieces) < 2:
+        return None
+    forms, tailos = [], []
+    for _piece, variant in pieces:
+        form, meta, _n = pick_best(cand[variant])
+        if LATIN_RE.search(form):
+            return None          # unusable piece — don't build a junk card
+        forms.append(form)
+        tailos.append(normalise_tailo(meta["kip"]))
+    return [p for p, _ in pieces], "".join(forms), "-".join(t for t in tailos if t)
+
+
+LATIN_RE = re.compile(r"[A-Za-z\u0100-\u01ff\u1e00-\u1eff]")
+
+
 def pick_best(forms):
-    """Rank candidate Hokkien forms: most source agreement first, then weight."""
-    items = sorted(forms.items(),
-                   key=lambda kv: (-len(kv[1]["srcs"]), -kv[1]["w"]))
+    """Rank candidate Hokkien forms: most source agreement first, then weight.
+
+    Forms containing Latin letters are demoted — some dictionary rows mix
+    romanisation into the hàn-jī field (e.g. '我lóngm̄-bat'), which makes a
+    useless flashcard.
+    """
+    def key(kv):
+        form, meta = kv
+        mixed = 1 if LATIN_RE.search(form) else 0
+        return (mixed, -len(meta["srcs"]), -meta["w"])
+    items = sorted(forms.items(), key=key)
     top_form, top = items[0]
     return top_form, top, len(items)
 
@@ -228,6 +293,26 @@ def main():
             if forms:
                 break
         if not forms:
+            kind = classify_entry(mand)
+            if kind in ("sentence", "phrase", "non_han"):
+                tiers[f"skipped_{kind}"] += 1
+                continue
+            comp = decompose(heads[0], cand)
+            if comp:
+                _pieces, hokkien_hanji, tailo = comp
+                tiers["composed"] += 1
+                taiji = tailo_to_taiji(tailo)
+                if args.dry_run:
+                    print(f"  {mand:8} -> {hokkien_hanji:8} {tailo:18} {taiji:18} "
+                          f"[composed]")
+                else:
+                    if db.hokkien_add(
+                            mandarin=heads[0], mandarin_full=mand,
+                            english=v["english"], hokkien_hanji=hokkien_hanji,
+                            tailo=tailo, taiji=taiji, tier="composed",
+                            sources="composed", alternatives=1):
+                        made += 1
+                continue
             tiers["no_match"] += 1
             continue
 
@@ -258,7 +343,16 @@ def main():
                 sources=",".join(sources), alternatives=n_alts):
             made += 1
 
-    print("\nTiers:", dict(tiers))
+    print("\nResults:")
+    for k in ("penang", "consensus", "single", "composed"):
+        if tiers.get(k):
+            print(f"  {k:22} {tiers[k]:5}")
+    skipped = sum(v for k, v in tiers.items() if k.startswith("skipped_"))
+    if skipped:
+        print(f"  {'skipped (sentences/phrases)':22} {skipped:5}"
+              "   <- no dictionary contains these; expected, not a failure")
+    if tiers.get("no_match"):
+        print(f"  {'no dictionary entry':22} {tiers['no_match']:5}")
     if args.dry_run:
         print("(dry run — nothing written)")
     else:

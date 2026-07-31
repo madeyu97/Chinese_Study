@@ -81,6 +81,20 @@ CHHOETAIGI_SOURCES = [
 
 SPLIT_RE = re.compile(r"[,，、;；/]")
 
+# ChhoeTaigi annotates entries inline: (白) colloquial reading, (文) literary,
+# (替) substitute character, (俗) common form, plus occasional alternative
+# readings like (tshìn). None belong on a flashcard, so strip them all.
+ANNOTATION_RE = re.compile(r"[（(][^）)]*[）)]")
+
+
+def clean_field(value):
+    """Remove inline annotations and pick the first variant."""
+    if not value:
+        return ""
+    value = ANNOTATION_RE.sub("", value)
+    value = value.split("/")[0]
+    return re.sub(r"\s+", " ", value).strip(" -")
+
 
 def load_chhoetaigi(root):
     """Return {mandarin: {hokkien_hanji: {'kip':…, 'srcs':set(), 'w':int}}}."""
@@ -105,9 +119,10 @@ def load_chhoetaigi(root):
                 han = (row.get("HanLoTaibunKip") or "").strip()
                 if not hoa or not kip:
                     continue
-                # '(替)' marks a substitute character; '/' separates variants
-                kip = kip.replace("(替)", "").split("/")[0].strip()
-                han = han.replace("(替)", "").split("/")[0].strip()
+                kip = clean_field(kip)
+                han = clean_field(han)
+                if not kip:
+                    continue
                 form = han or hoa
                 for m in SPLIT_RE.split(hoa):
                     m = m.strip()

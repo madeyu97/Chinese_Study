@@ -69,7 +69,12 @@ NEGATIONS = {"不", "没", "没有", "别", "甭"}
 QUANTIFIERS = {"一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
                "百", "千", "万", "几", "多", "少", "些", "都"}
 
-SENTENCE_PUNCTUATION = "。!?，,!?;"
+SENTENCE_PUNCTUATION = "。！？，；：、!?,;:"  # fullwidth AND halfwidth — a CSV
+# entry containing any of these is a whole sentence to be taught verbatim,
+# never a vocabulary word to build a new sentence around. The fullwidth
+# forms (？！，) were previously missing, so sentences typed with a Chinese
+# IME were mistaken for vocabulary and the generator was asked to embed an
+# entire sentence inside another sentence — which always failed 3 times.
 SYNONYM_SEPARATORS_REGEX = r'\s*(?:[/／;；]|\s或\s)\s*'
 
 
@@ -690,6 +695,15 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
 
         if raw_data is None:
             return None
+
+        # Safety net: if every attempt failed and left us with nothing
+        # usable, fall back to teaching the CSV entry verbatim rather than
+        # returning a malformed card.
+        if not final_chinese.strip():
+            logging.error(f"[GEN] All attempts produced empty output for "
+                          f"'{chinese_chars}' — falling back to the CSV entry.")
+            final_chinese = chinese_chars
+            english_correct = english or english_correct
 
         # ── DETERMINISTIC PINYIN ───────────────────────────────────────
         # Pinyin is derived from the characters, never trusted from the LLM,

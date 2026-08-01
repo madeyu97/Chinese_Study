@@ -264,6 +264,22 @@ def t_hw_context():
     assert hw.choose_context_word("猫", vocab) is None
 
 
+@test("BUG: Latin text in a sentence (T-shirt) no longer crashes breakdown")
+def t_latin_breakdown():
+    for s in ["我的红色 T-shirt 怎么不见了？不是放在椅子上吗？",
+              "坐Grab去巴刹", "她喊我 T-shirt"]:
+        de.build_breakdown(s)          # must not raise
+    by = {i["chinese"]: i for i in de.build_breakdown("我有三只猫")}
+    assert by["只"]["pinyin"] == "zhī"   # context readings still correct
+
+
+@test("fullwidth ？！， mark an entry as a whole sentence")
+def t_fullwidth_punct():
+    assert ap._is_locked_sentence("这么早起来干嘛？")
+    assert ap._is_locked_sentence("我的红色 T-shirt 怎么不见了？")
+    assert not ap._is_locked_sentence("红色")
+
+
 # ======================================================================
 # HOKKIEN ROMANISATION ENGINE
 # ======================================================================
@@ -368,7 +384,7 @@ if __name__ == "__main__":
     print("Generation pipeline (mocked LLM):")
     t_mismatch(); t_pronouns(); t_classify(); t_grammar_gate()
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
-    t_distractor_dedupe()
+    t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context()
     print("Hokkien engine:")

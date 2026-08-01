@@ -73,22 +73,27 @@ _PINYIN_OVERRIDES = {"咩": "meh"}
 
 
 def _char_pinyin_list(text):
-    """Context-aware per-character pinyin for a whole sentence, with the
-    app's Malaysian conventions (了 -> liǎo, 咩 -> meh)."""
-    per_char = _pypinyin(text, style=_PinyinStyle.TONE, errors="default", strict=False)
-    # pypinyin on a string returns one item per char, context-aware
-    # (e.g. 只 -> zhī after a numeral, 行 -> háng/xíng by context).
+    """Context-aware pinyin, ALIGNED ONE ENTRY PER CHARACTER.
+
+    pypinyin returns one item per *token*, not per character: it collapses a
+    run of Latin letters ("T-shirt") into a single entry, so a naive
+    zip/index against the source string runs off the end (IndexError) or
+    silently misaligns tones. Chinese vocabulary lists routinely contain
+    English words, so this alignment is rebuilt explicitly.
+    """
     out = []
-    i = 0
-    for item in per_char:
-        ch = text[i] if i < len(text) else ""
-        py = item[0] if item else ""
-        if ch in _PINYIN_OVERRIDES:
-            py = _PINYIN_OVERRIDES[ch]
-        elif ch == "了":
-            py = "liǎo"
-        out.append(py)
-        i += 1
+    for ch in text:
+        if is_cjk_char(ch):
+            if ch in _PINYIN_OVERRIDES:
+                out.append(_PINYIN_OVERRIDES[ch])
+            elif ch == "了":
+                out.append("liǎo")
+            else:
+                res = _pypinyin(ch, style=_PinyinStyle.TONE,
+                                errors="default", strict=False)
+                out.append(res[0][0] if res and res[0] else ch)
+        else:
+            out.append(ch)
     return out
 
 
@@ -333,8 +338,9 @@ def build_breakdown(sentence, llm_breakdown=None, overrides=None,
             prev_was_numeral = False
             continue
 
+        limit = min(end, len(sentence), len(sentence_pinyin))
         token_pinyin = " ".join(
-            sentence_pinyin[i] for i in range(start, min(end, len(sentence)))
+            sentence_pinyin[i] for i in range(start, limit)
             if is_cjk_char(sentence[i]))
 
         is_numeral = all(c in CN_NUMERAL_CHARS for c in token)

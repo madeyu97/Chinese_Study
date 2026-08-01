@@ -14,6 +14,10 @@ from db_manager import (
     get_more_words, delete_word_from_db, update_word_in_db,
 )
 import db_manager as db
+from auth import require_login, sidebar_user_badge
+
+USER = require_login()
+USER_ID = USER["id"]
 from speech_engine import transcribe_audio, grade_speech, GRADE_MAP
 from config import LISTENING_PCT, MAX_REVIEWS_PER_DAY
 
@@ -98,7 +102,7 @@ if 'words_due' not in st.session_state:
         st.session_state.session_date = str(date.today())
     else:
         st.title("🎧 Pinyin Immersion Study")
-        stats = get_progress_stats()
+        stats = get_progress_stats(USER_ID)
         st.markdown(f"You have **{stats['total']}** words in your vocabulary database.")
         st.markdown("### How long should today's session be?")
 
@@ -122,7 +126,7 @@ if 'words_due' not in st.session_state:
             st.stop()
 
         with st.spinner("Building your session..."):
-            st.session_state.words_due = get_todays_quiz_batch(session_size=int(session_size))
+            st.session_state.words_due = get_todays_quiz_batch(USER_ID, session_size=int(session_size))
             st.session_state.modes = assign_modes(st.session_state.words_due)
             st.session_state.current_index = 0
             st.session_state.current_exercise = None
@@ -155,6 +159,7 @@ def reset_card_state():
 def grade_word_and_next(grade):
     current_word = st.session_state.words_due[st.session_state.current_index]
     process_review(
+        USER_ID,
         word_id=current_word['id'],
         current_interval=current_word['interval'],
         current_ease=current_word['ease_factor'],
@@ -169,6 +174,7 @@ def undo_last_grade():
         prev_index = st.session_state.current_index - 1
         original_word = st.session_state.words_due[prev_index]
         undo_word_progress(
+            USER_ID,
             word_id=original_word['id'],
             old_next_review_date=original_word['next_review_date'],
             old_interval=original_word['interval'],
@@ -215,7 +221,7 @@ if st.session_state.current_index >= len(st.session_state.words_due):
         if st.button("➕ Do 5 More Words", type="secondary", use_container_width=True):
             with st.spinner("Fetching more words..."):
                 exclude_ids = [w['id'] for w in st.session_state.words_due]
-                extra_words = get_more_words(exclude_ids, amount=5)
+                extra_words = get_more_words(USER_ID, exclude_ids, amount=5)
                 if extra_words:
                     st.session_state.words_due.extend(extra_words)
                     st.session_state.modes.extend(assign_modes(extra_words))
@@ -252,8 +258,9 @@ st.markdown("---")
 # 5.5 SIDEBAR
 # ==========================================
 with st.sidebar:
+    sidebar_user_badge()
     st.header("📊 Global Progress")
-    stats = get_progress_stats()
+    stats = get_progress_stats(USER_ID)
     try:
         bank = db.bank_stats()
         st.caption(
@@ -362,7 +369,7 @@ def render_breakdown():
                         st.caption(f"Char: {char}")
                         button_key = f"flag_btn_{st.session_state.current_index}_{i}_{j}_{char}"
                         if st.button("🚩 Needs Practice", key=button_key):
-                            flag_word_in_database(char)
+                            flag_word_in_database(char, USER_ID)
                             st.toast(f"Flagged '{char}' for more practice!")
                         st.markdown("---")
                         st.markdown(f"📱 [Open in Pleco]({pleco_url})")

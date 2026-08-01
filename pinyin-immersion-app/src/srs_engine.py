@@ -13,7 +13,7 @@ GRADE_HARD = 1
 GRADE_GOOD = 2
 GRADE_EASY = 3
 
-def process_review(word_id, current_interval, current_ease, grade):
+def process_review(user_id, word_id, current_interval, current_ease, grade):
     """
     Per-word SRS state is still maintained, even though the session-selection
     layer no longer uses next_review_date.
@@ -44,15 +44,15 @@ def process_review(word_id, current_interval, current_ease, grade):
 
     new_interval = min(new_interval, 365)
     next_review_date = (date.today() + timedelta(days=new_interval)).isoformat()
-    update_word_progress(word_id, next_review_date, new_interval, round(new_ease, 2))
+    update_word_progress(user_id, word_id, next_review_date, new_interval, round(new_ease, 2))
     logging.info(f"Word {word_id} graded {grade}. New interval: {new_interval} days.")
     return next_review_date
 
-def get_todays_quiz_batch(session_size=MAX_REVIEWS_PER_DAY):
+def get_todays_quiz_batch(user_id, session_size=MAX_REVIEWS_PER_DAY):
     """
     Uses 50/50 random+latest composition with a user-chosen session size.
     """
-    batch = get_session_words(total=session_size)
+    batch = get_session_words(user_id, total=session_size)
     if not batch:
         logging.info("No words available - is your CSV imported?")
     else:

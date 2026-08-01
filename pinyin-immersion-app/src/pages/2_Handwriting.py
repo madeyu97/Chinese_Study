@@ -19,6 +19,7 @@ import uuid
 
 import streamlit as st
 
+from auth import require_login, sidebar_user_badge
 from hanzi_component import hanzi_drill
 from db_manager import (
     get_handwriting_session,
@@ -33,12 +34,16 @@ from db_manager import (
 
 st.set_page_config(page_title="Handwriting", page_icon="✍️", layout="centered")
 
+USER = require_login()
+USER_ID = USER["id"]
+
 # ----------------------------------------------------------------------
 # SIDEBAR
 # ----------------------------------------------------------------------
 with st.sidebar:
+    sidebar_user_badge()
     st.header("✍️ Handwriting")
-    hw_stats = get_handwriting_stats()
+    hw_stats = get_handwriting_stats(USER_ID)
     total = hw_stats["total_chars_available"]
     st.metric("Characters in your vocab", total)
     if total:
@@ -62,9 +67,9 @@ def process_results(value):
         # Fetch the character's *current* stored state each time so the
         # recent-grade / recent-mistake windows roll correctly even when a
         # character is drilled several times in one session.
-        state = get_char_state(ch) or st.session_state.hw_state_seed.get(ch, {})
+        state = get_char_state(USER_ID, ch) or st.session_state.hw_state_seed.get(ch, {})
         update_handwriting_progress(
-            ch, int(r["grade"]), state, mistakes=int(r.get("mistakes", 0)))
+            USER_ID, ch, int(r["grade"]), state, mistakes=int(r.get("mistakes", 0)))
     st.session_state.hw_processed = len(results)
     if value.get("done"):
         st.session_state.hw_done = True
@@ -93,7 +98,7 @@ if "hw_payload" not in st.session_state:
 
     # --- standard review session ---
     with tab_review:
-        due, new_available = get_handwriting_counts()
+        due, new_available = get_handwriting_counts(USER_ID)
         c1, c2 = st.columns(2)
         c1.metric("Due for review", due)
         c2.metric("New available", new_available)
@@ -105,7 +110,7 @@ if "hw_payload" not in st.session_state:
             "the session, with its next review pulled to tomorrow.")
         if st.button("▶️ Start review", type="primary", use_container_width=True,
                      disabled=(due + min(new_count, new_available) == 0)):
-            chars = get_handwriting_session(new_count=new_count)
+            chars = get_handwriting_session(USER_ID, new_count=new_count)
             if chars:
                 launch(chars, "standard")
             else:
@@ -116,7 +121,7 @@ if "hw_payload" not in st.session_state:
         st.caption("Characters you've been missing most, worst first "
                    "(ranked by recent mistake rate). Pick any to loop — each "
                    "repeats until you write it clean twice in a row.")
-        weak = get_weak_characters(limit=40)
+        weak = get_weak_characters(USER_ID, limit=40)
         if not weak:
             st.info("No struggle data yet. Do a few review sessions and the "
                     "characters you miss will show up here.")
@@ -133,11 +138,11 @@ if "hw_payload" not in st.session_state:
             cola, colb = st.columns(2)
             if cola.button("🔁 Drill selected", type="primary",
                            use_container_width=True, disabled=not picked):
-                chars = get_struggle_session([weak[i]["character"] for i in picked])
+                chars = get_struggle_session(USER_ID, [weak[i]["character"] for i in picked])
                 launch(chars, "struggle")
             if colb.button("🔥 Drill top 10", use_container_width=True,
                            disabled=len(weak) == 0):
-                chars = get_struggle_session([w["character"] for w in weak[:10]])
+                chars = get_struggle_session(USER_ID, [w["character"] for w in weak[:10]])
                 launch(chars, "struggle")
 
     # --- focus on a word ---
@@ -148,7 +153,7 @@ if "hw_payload" not in st.session_state:
                               placeholder="e.g. 巴刹")
         if st.button("Start focus session", use_container_width=True,
                      disabled=not focus.strip()):
-            chars = get_focus_session(focus.strip())
+            chars = get_focus_session(USER_ID, focus.strip())
             if chars:
                 launch(chars, "standard")
             else:

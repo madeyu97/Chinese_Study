@@ -364,16 +364,57 @@ def db_tests():
 
     @test("handwriting session entries carry semantic cue fields (read-only)")
     def t_hw_session():
-        sess = db.get_handwriting_session(new_count=2)
+        uid = db.list_users()[0]["id"]
+        sess = db.get_handwriting_session(uid, new_count=2)
         for e in sess[:2]:
             for k in ("character", "word", "word_pinyin", "word_english",
                       "char_pinyin", "is_new", "stroke_count"):
                 assert k in e, k
             assert e["character"] in e["word"]
 
+
+    @test("multi-user: vocab shared, progress isolated")
+    def t_multiuser_vocab():
+        users = db.list_users()
+        assert len(users) >= 2, users
+        a, b = users[0]["id"], users[1]["id"]
+        sa, sb = db.get_progress_stats(a), db.get_progress_stats(b)
+        assert sa["total"] == sb["total"], "vocabulary must be shared"
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("""SELECT count(*) FROM vocab_progress p1
+                       JOIN vocab_progress p2 ON p1.vocab_id = p2.vocab_id
+                       WHERE p1.user_id = %s AND p2.user_id = %s
+                         AND p1.id = p2.id""", (a, b))
+        assert cur.fetchone()[0] == 0, "progress rows must not be shared"
+        conn.close()
+
+    @test("multi-user: PINs are hashed and don't cross-unlock")
+    def t_multiuser_pins():
+        users = db.list_users()
+        if not all(u["has_pin"] for u in users[:2]):
+            return
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT pin_hash FROM users WHERE pin_hash IS NOT NULL LIMIT 1")
+        h = cur.fetchone()[0]; conn.close()
+        assert len(h) == 64, "PIN must be stored as a sha256 hash"
+
+    @test("multi-user: migration preserved the legacy table")
+    def t_legacy_backup():
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("""SELECT count(*) FROM information_schema.tables
+                       WHERE table_name = 'vocab_progress_legacy'""")
+        had_legacy = cur.fetchone()[0]
+        cur.execute("""SELECT count(*) FROM information_schema.columns
+                       WHERE table_name='vocab_progress' AND column_name='user_id'""")
+        assert cur.fetchone()[0] == 1, "vocab_progress must be user-scoped"
+        conn.close()
+
     t_bank()
     t_flags()
     t_hw_session()
+    t_multiuser_vocab()
+    t_multiuser_pins()
+    t_legacy_backup()
 
 
 # ======================================================================

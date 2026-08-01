@@ -1,6 +1,7 @@
 # src/db_manager.py
 
 import os
+import hashlib
 import pandas as pd
 from datetime import datetime, date
 import logging
@@ -37,24 +38,61 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS vocab_progress (
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            display_name TEXT NOT NULL,
+            pin_hash TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+    # Vocabulary CONTENT is shared by everyone studying on this deployment.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vocab (
             id SERIAL PRIMARY KEY,
             chinese TEXT NOT NULL,
             pinyin TEXT NOT NULL,
             english TEXT NOT NULL,
-            date_added TEXT NOT NULL,
+            date_added TEXT NOT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_vocab_unique
+        ON vocab (chinese, pinyin)
+    ''')
+    conn.commit()
+
+    # Users must exist before anything references them, and the legacy
+    # vocab table must be split BEFORE the new-shape vocab_progress is
+    # declared — otherwise CREATE TABLE IF NOT EXISTS silently no-ops on the
+    # old table and every later index fails.
+    _seed_users(conn)
+    _split_legacy_vocab(conn)
+    # SRS state is PER USER. (The pre-multi-user table of the same name held
+    # content and progress together; _migrate_to_multiuser splits it.)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vocab_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            vocab_id INTEGER NOT NULL REFERENCES vocab(id) ON DELETE CASCADE,
             next_review_date TEXT NOT NULL,
             interval INTEGER DEFAULT 0,
             ease_factor REAL DEFAULT 2.5,
             review_count INTEGER DEFAULT 0,
-            priority_weight INTEGER DEFAULT 1
+            priority_weight INTEGER DEFAULT 1,
+            UNIQUE (user_id, vocab_id)
         )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_vp_user
+        ON vocab_progress (user_id, next_review_date)
     ''')
     # NEW: handwriting progress
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS handwriting_progress (
             id SERIAL PRIMARY KEY,
-            character TEXT UNIQUE NOT NULL,
+            character TEXT NOT NULL,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
             next_review_date TEXT NOT NULL,
             interval INTEGER DEFAULT 0,
             ease_factor REAL DEFAULT 2.5,
@@ -68,7 +106,8 @@ def init_db():
     ''')
     # Backfill struggle-tracking columns on databases created before this
     # feature (CREATE TABLE IF NOT EXISTS never alters an existing table).
-    for _coldef in ("total_mistakes INTEGER DEFAULT 0",
+    for _coldef in ("user_id INTEGER",
+                    "total_mistakes INTEGER DEFAULT 0",
                     "recent_grades TEXT DEFAULT ''",
                     "recent_mistakes TEXT DEFAULT ''",
                     "last_reviewed TEXT"):
@@ -128,11 +167,230 @@ def init_db():
             flagged_at TIMESTAMP DEFAULT NOW()
         )
     ''')
+    # Per-user Hokkien SRS (the deck itself stays shared — verifications and
+    # Tâi-lô corrections are curation work, not personal progress).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hokkien_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            entry_id INTEGER NOT NULL REFERENCES hokkien_deck(id) ON DELETE CASCADE,
+            next_review_date TEXT,
+            interval INTEGER DEFAULT 0,
+            ease_factor REAL DEFAULT 2.5,
+            review_count INTEGER DEFAULT 0,
+            UNIQUE (user_id, entry_id)
+        )
+    ''')
     conn.commit()
+
+    _migrate_progress_tables(conn)
+
     conn.close()
     logging.info("Supabase database initialized successfully.")
 
+
+# ==========================================
+# USERS
+# ==========================================
+DEFAULT_USERS = [
+    ("matt", "玛德宇"),
+    ("jean", "姚皢慧"),
+]
+
+
+def _seed_users(conn):
+    cursor = conn.cursor()
+    for username, display in DEFAULT_USERS:
+        cursor.execute(
+            "INSERT INTO users (username, display_name) VALUES (%s, %s) "
+            "ON CONFLICT (username) DO NOTHING", (username, display))
+    conn.commit()
+
+
+def _pin_hash(pin):
+    return hashlib.sha256(f"pinyin-immersion::{pin}".encode("utf-8")).hexdigest()
+
+
+def list_users():
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT id, username, display_name, "
+                   "(pin_hash IS NOT NULL) AS has_pin FROM users ORDER BY id")
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def set_user_pin(user_id, pin):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET pin_hash = %s WHERE id = %s",
+                   (_pin_hash(str(pin)), user_id))
+    conn.commit()
+    conn.close()
+
+
+def verify_user_pin(user_id, pin):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT pin_hash FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return False
+    return row[0] == _pin_hash(str(pin))
+
+
+def get_user(user_id):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT id, username, display_name FROM users WHERE id = %s",
+                   (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# ==========================================
+# ONE-TIME MIGRATION TO MULTI-USER
+# Splits the old combined vocab_progress table into shared `vocab` content
+# plus per-user progress, and attaches all existing study history to the
+# first user. Idempotent, transactional, and NON-DESTRUCTIVE: the original
+# table is renamed to vocab_progress_legacy rather than dropped.
+# ==========================================
+def _split_legacy_vocab(conn):
+    """Phase 1: split the old combined vocab_progress table."""
+    cursor = conn.cursor()
+
+    cursor.execute("""SELECT column_name FROM information_schema.columns
+                      WHERE table_name = 'vocab_progress'""")
+    cols = {r[0] for r in cursor.fetchall()}
+    legacy_shape = "chinese" in cols
+
+    cursor.execute("SELECT id FROM users ORDER BY id LIMIT 1")
+    owner = cursor.fetchone()
+    if not owner:
+        return
+    owner_id = owner[0]
+
+    if legacy_shape:
+        logging.warning("[MIGRATE] Legacy vocab_progress detected — "
+                        "splitting into shared vocab + per-user progress…")
+        try:
+            cursor.execute("ALTER TABLE vocab_progress RENAME TO vocab_progress_legacy")
+            cursor.execute("""
+                CREATE TABLE vocab_progress (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    vocab_id INTEGER NOT NULL REFERENCES vocab(id) ON DELETE CASCADE,
+                    next_review_date TEXT NOT NULL,
+                    interval INTEGER DEFAULT 0,
+                    ease_factor REAL DEFAULT 2.5,
+                    review_count INTEGER DEFAULT 0,
+                    priority_weight INTEGER DEFAULT 1,
+                    UNIQUE (user_id, vocab_id)
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_vp_user
+                ON vocab_progress (user_id, next_review_date)
+            """)
+            # content -> vocab (deduped, keeping the earliest row per word)
+            cursor.execute("""
+                INSERT INTO vocab (chinese, pinyin, english, date_added)
+                SELECT DISTINCT ON (chinese, pinyin)
+                       chinese, pinyin, english, date_added
+                FROM vocab_progress_legacy
+                ORDER BY chinese, pinyin, id
+                ON CONFLICT (chinese, pinyin) DO NOTHING
+            """)
+            # progress -> the first user
+            cursor.execute("""
+                INSERT INTO vocab_progress
+                    (user_id, vocab_id, next_review_date, interval,
+                     ease_factor, review_count, priority_weight)
+                SELECT DISTINCT ON (v.id)
+                       %s, v.id, l.next_review_date, l.interval,
+                       l.ease_factor, l.review_count, l.priority_weight
+                FROM vocab_progress_legacy l
+                JOIN vocab v ON v.chinese = l.chinese AND v.pinyin = l.pinyin
+                ORDER BY v.id, l.review_count DESC, l.id
+                ON CONFLICT (user_id, vocab_id) DO NOTHING
+            """, (owner_id,))
+            conn.commit()
+            cursor.execute("SELECT COUNT(*) FROM vocab")
+            nv = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM vocab_progress")
+            np_ = cursor.fetchone()[0]
+            logging.warning(f"[MIGRATE] {nv} shared vocab words, {np_} progress "
+                            f"rows kept for user {owner_id}. Original data "
+                            f"preserved in vocab_progress_legacy.")
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"[MIGRATE] Vocabulary migration FAILED, rolled back: {e}")
+            raise
+
+def _migrate_progress_tables(conn):
+    """Phase 2: attach existing handwriting and Hokkien progress to the
+    first user, once all tables exist."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM users ORDER BY id LIMIT 1")
+    owner = cursor.fetchone()
+    if not owner:
+        return
+    owner_id = owner[0]
+
+    # handwriting: attach existing rows to the first user, then key on
+    # (user_id, character) instead of character alone
+    try:
+        cursor.execute("UPDATE handwriting_progress SET user_id = %s "
+                       "WHERE user_id IS NULL", (owner_id,))
+        cursor.execute("""SELECT conname FROM pg_constraint
+                          WHERE conrelid = 'handwriting_progress'::regclass
+                            AND contype = 'u'""")
+        for (name,) in cursor.fetchall():
+            cursor.execute(f'ALTER TABLE handwriting_progress DROP CONSTRAINT "{name}"')
+        cursor.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_hw_user_char
+                          ON handwriting_progress (user_id, character)""")
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"[MIGRATE] Handwriting migration issue: {e}")
+
+    # hokkien: move any existing SRS state onto the first user
+    try:
+        cursor.execute("""
+            INSERT INTO hokkien_progress
+                (user_id, entry_id, next_review_date, interval,
+                 ease_factor, review_count)
+            SELECT %s, id, next_review_date, interval, ease_factor, review_count
+            FROM hokkien_deck WHERE review_count > 0
+            ON CONFLICT (user_id, entry_id) DO NOTHING
+        """, (owner_id,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"[MIGRATE] Hokkien migration issue: {e}")
+
+# Shared projection: vocabulary content LEFT JOINed to one user's progress,
+# so a word with no progress row yet simply reads as unseen (review_count 0).
+# Every query returns the same dict shape the app used before multi-user.
+_VOCAB_SELECT = """
+    SELECT v.id AS id, v.chinese, v.pinyin, v.english, v.date_added,
+           COALESCE(p.next_review_date, v.date_added) AS next_review_date,
+           COALESCE(p.interval, 0)        AS interval,
+           COALESCE(p.ease_factor, 2.5)   AS ease_factor,
+           COALESCE(p.review_count, 0)    AS review_count,
+           COALESCE(p.priority_weight, 1) AS priority_weight
+    FROM vocab v
+    LEFT JOIN vocab_progress p
+           ON p.vocab_id = v.id AND p.user_id = %s
+"""
+
+
 def import_vocab_from_csv():
+    """Import the CSV into the SHARED vocabulary table. Progress is per-user
+    and is created lazily the first time someone studies a word."""
     if not VOCAB_CSV_PATH.exists():
         logging.warning("CSV file not found. Skipping import.")
         return
@@ -145,167 +403,197 @@ def import_vocab_from_csv():
     conn = get_connection()
     cursor = conn.cursor()
     new_words_added = 0
-    skipped_words = []
+    skipped = 0
     today_str = date.today().isoformat()
 
-    for index, row in df.iterrows():
-        cursor.execute('SELECT id FROM vocab_progress WHERE chinese = %s AND pinyin = %s',
+    for _index, row in df.iterrows():
+        cursor.execute('SELECT id FROM vocab WHERE chinese = %s AND pinyin = %s',
                        (row['Chinese'], row['Pinyin']))
         if not cursor.fetchone():
-            cursor.execute('''
-                INSERT INTO vocab_progress
-                (chinese, pinyin, english, date_added, next_review_date)
-                VALUES (%s, %s, %s, %s, %s)
-            ''', (row['Chinese'], row['Pinyin'], row['English'], today_str, today_str))
+            cursor.execute("""
+                INSERT INTO vocab (chinese, pinyin, english, date_added)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (chinese, pinyin) DO NOTHING
+            """, (row['Chinese'], row['Pinyin'], row['English'], today_str))
             new_words_added += 1
         else:
-            skipped_words.append(row['Chinese'])
+            skipped += 1
     conn.commit()
     conn.close()
-    if new_words_added > 0:
+    if new_words_added:
         logging.info(f"Imported {new_words_added} new words.")
-    if skipped_words:
-        logging.info(f"Skipped {len(skipped_words)} duplicates.")
+    if skipped:
+        logging.info(f"Skipped {skipped} duplicates.")
 
-def flag_word_in_database(chinese_char):
+
+def _ensure_progress(cursor, user_id, vocab_id):
+    """Create this user's progress row for a word if they've not met it yet."""
+    cursor.execute("""
+        INSERT INTO vocab_progress (user_id, vocab_id, next_review_date)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id, vocab_id) DO NOTHING
+    """, (user_id, vocab_id, date.today().isoformat()))
+
+
+def flag_word_in_database(chinese_char, user_id):
+    """Bump a word's priority for THIS user only."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE vocab_progress SET priority_weight = priority_weight + 10 WHERE chinese = %s',
-                   (chinese_char,))
+    cursor.execute("SELECT id FROM vocab WHERE chinese = %s", (chinese_char,))
+    for (vid,) in cursor.fetchall():
+        _ensure_progress(cursor, user_id, vid)
+        cursor.execute("""UPDATE vocab_progress
+                          SET priority_weight = priority_weight + 10
+                          WHERE user_id = %s AND vocab_id = %s""", (user_id, vid))
     conn.commit()
     conn.close()
 
 
-def get_session_words(total=MAX_REVIEWS_PER_DAY, random_pct=RANDOM_BREADTH_PCT):
+def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
+                      random_pct=RANDOM_BREADTH_PCT):
     import random as _random
     random_count = int(round(total * random_pct))
     latest_count = total - random_count
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute('SELECT * FROM vocab_progress ORDER BY id DESC LIMIT %s', (latest_count,))
+
+    cursor.execute(_VOCAB_SELECT + " ORDER BY v.id DESC LIMIT %s",
+                   (user_id, latest_count))
     latest_rows = [dict(r) for r in cursor.fetchall()]
     latest_ids = [r['id'] for r in latest_rows]
+
     if latest_ids:
-        placeholders = ','.join(['%s'] * len(latest_ids))
-        cursor.execute(f'''
-            SELECT * FROM vocab_progress
-            WHERE id NOT IN ({placeholders})
-            ORDER BY RANDOM() LIMIT %s
-        ''', latest_ids + [random_count])
+        ph = ','.join(['%s'] * len(latest_ids))
+        cursor.execute(_VOCAB_SELECT + f" WHERE v.id NOT IN ({ph}) "
+                       "ORDER BY RANDOM() LIMIT %s",
+                       [user_id] + latest_ids + [random_count])
     else:
-        cursor.execute('SELECT * FROM vocab_progress ORDER BY RANDOM() LIMIT %s', (random_count,))
+        cursor.execute(_VOCAB_SELECT + " ORDER BY RANDOM() LIMIT %s",
+                       (user_id, random_count))
     random_rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     session = latest_rows + random_rows
     _random.shuffle(session)
     return session
 
-def get_due_words():
+
+def get_due_words(user_id):
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     today_str = date.today().isoformat()
-    cursor.execute('''
-        SELECT * FROM vocab_progress WHERE review_count > 0 AND next_review_date <= %s
-        ORDER BY priority_weight DESC, next_review_date ASC
-    ''', (today_str,))
-    due_reviews = [dict(row) for row in cursor.fetchall()]
+    cursor.execute(_VOCAB_SELECT + """
+        WHERE p.review_count > 0 AND p.next_review_date <= %s
+        ORDER BY p.priority_weight DESC, p.next_review_date ASC
+    """, (user_id, today_str))
+    due_reviews = [dict(r) for r in cursor.fetchall()]
     needed = MAX_REVIEWS_PER_DAY - len(due_reviews)
     if needed > 0:
-        cursor.execute('''
-            SELECT * FROM vocab_progress WHERE review_count = 0
-            ORDER BY priority_weight DESC, id DESC LIMIT %s
-        ''', (needed,))
-        new_words = [dict(row) for row in cursor.fetchall()]
+        cursor.execute(_VOCAB_SELECT + """
+            WHERE p.review_count IS NULL OR p.review_count = 0
+            ORDER BY COALESCE(p.priority_weight, 1) DESC, v.id DESC LIMIT %s
+        """, (user_id, needed))
+        new_words = [dict(r) for r in cursor.fetchall()]
     else:
         new_words = []
     conn.close()
     return (due_reviews + new_words)[:MAX_REVIEWS_PER_DAY]
 
-def update_word_progress(word_id, next_review_date, new_interval, new_ease):
+
+def update_word_progress(user_id, word_id, next_review_date, new_interval, new_ease):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE vocab_progress
-        SET next_review_date = %s, interval = %s, ease_factor = %s,
-            review_count = review_count + 1,
-            priority_weight = GREATEST(1, priority_weight - 2)
-        WHERE id = %s
-    ''', (next_review_date, new_interval, new_ease, word_id))
+    cursor.execute("""
+        INSERT INTO vocab_progress
+            (user_id, vocab_id, next_review_date, interval, ease_factor,
+             review_count, priority_weight)
+        VALUES (%s, %s, %s, %s, %s, 1, 1)
+        ON CONFLICT (user_id, vocab_id) DO UPDATE SET
+            next_review_date = EXCLUDED.next_review_date,
+            interval = EXCLUDED.interval,
+            ease_factor = EXCLUDED.ease_factor,
+            review_count = vocab_progress.review_count + 1,
+            priority_weight = GREATEST(1, vocab_progress.priority_weight - 2)
+    """, (user_id, word_id, next_review_date, new_interval, new_ease))
     conn.commit()
     conn.close()
 
-def get_progress_stats():
+
+def get_progress_stats(user_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM vocab_progress")
+    cursor.execute("SELECT COUNT(*) FROM vocab")
     total = cursor.fetchone()[0]
-    if total == 0:
-        conn.close()
-        return {"unseen": 0, "learning": 0, "mastered": 0, "total": 0}
-    cursor.execute("SELECT COUNT(*) FROM vocab_progress WHERE review_count = 0")
+    cursor.execute("""SELECT COUNT(*) FROM vocab v
+                      LEFT JOIN vocab_progress p
+                             ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE p.review_count IS NULL OR p.review_count = 0""",
+                   (user_id,))
     unseen = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM vocab_progress WHERE interval >= 21")
+    cursor.execute("""SELECT COUNT(*) FROM vocab_progress
+                      WHERE user_id = %s AND interval >= 21""", (user_id,))
     mastered = cursor.fetchone()[0]
     conn.close()
-    return {"unseen": unseen, "learning": total - unseen - mastered, "mastered": mastered, "total": total}
+    learning = max(0, total - unseen - mastered)
+    return {"total": total, "unseen": unseen,
+            "learning": learning, "mastered": mastered}
 
-def undo_word_progress(word_id, old_next_review_date, old_interval, old_ease, old_review_count, old_priority):
+
+def undo_word_progress(user_id, word_id, old_next_review_date, old_interval,
+                       old_ease, old_review_count, old_priority):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE vocab_progress
-        SET next_review_date = %s, interval = %s, ease_factor = %s,
-            review_count = %s, priority_weight = %s
-        WHERE id = %s
-    ''', (old_next_review_date, old_interval, old_ease, old_review_count, old_priority, word_id))
+    cursor.execute("""
+        INSERT INTO vocab_progress
+            (user_id, vocab_id, next_review_date, interval, ease_factor,
+             review_count, priority_weight)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, vocab_id) DO UPDATE SET
+            next_review_date = EXCLUDED.next_review_date,
+            interval = EXCLUDED.interval,
+            ease_factor = EXCLUDED.ease_factor,
+            review_count = EXCLUDED.review_count,
+            priority_weight = EXCLUDED.priority_weight
+    """, (user_id, word_id, old_next_review_date, old_interval, old_ease,
+          old_review_count, old_priority))
     conn.commit()
     conn.close()
 
-def get_more_words(exclude_ids, amount=5):
-    import random as _random
-    if not exclude_ids:
-        exclude_ids = [-1]
-    random_count = int(round(amount * RANDOM_BREADTH_PCT))
-    latest_count = amount - random_count
+
+def get_more_words(user_id, exclude_ids, amount=5):
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    exclude_placeholders = ','.join(['%s'] * len(exclude_ids))
-    cursor.execute(f'''
-        SELECT * FROM vocab_progress WHERE id NOT IN ({exclude_placeholders})
-        ORDER BY id DESC LIMIT %s
-    ''', exclude_ids + [latest_count])
-    latest_rows = [dict(r) for r in cursor.fetchall()]
-    all_excluded = exclude_ids + [r['id'] for r in latest_rows]
-    all_placeholders = ','.join(['%s'] * len(all_excluded))
-    cursor.execute(f'''
-        SELECT * FROM vocab_progress WHERE id NOT IN ({all_placeholders})
-        ORDER BY RANDOM() LIMIT %s
-    ''', all_excluded + [random_count])
-    random_rows = [dict(r) for r in cursor.fetchall()]
+    if exclude_ids:
+        ph = ','.join(['%s'] * len(exclude_ids))
+        cursor.execute(_VOCAB_SELECT + f" WHERE v.id NOT IN ({ph}) "
+                       "ORDER BY RANDOM() LIMIT %s",
+                       [user_id] + list(exclude_ids) + [amount])
+    else:
+        cursor.execute(_VOCAB_SELECT + " ORDER BY RANDOM() LIMIT %s",
+                       (user_id, amount))
+    rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
-    extra = latest_rows + random_rows
-    _random.shuffle(extra)
-    return extra[:amount]
+    return rows
+
 
 def delete_word_from_db(word_id):
+    """Deletes SHARED vocabulary — affects everyone studying this deck."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM vocab_progress WHERE id = %s", (word_id,))
+    cursor.execute("DELETE FROM vocab WHERE id = %s", (word_id,))
     conn.commit()
     conn.close()
 
+
 def update_word_in_db(word_id, new_chinese, new_pinyin, new_english):
+    """Edits SHARED vocabulary content."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE vocab_progress SET chinese = %s, pinyin = %s, english = %s WHERE id = %s',
+    cursor.execute('UPDATE vocab SET chinese = %s, pinyin = %s, english = %s '
+                   'WHERE id = %s',
                    (new_chinese, new_pinyin, new_english, word_id))
     conn.commit()
     conn.close()
 
-
-# ======================================================================
-# HANDWRITING FUNCTIONS
-# ======================================================================
 
 def _is_cjk(ch):
     return '\u4e00' <= ch <= '\u9fff'
@@ -334,7 +622,7 @@ def _hw_entry(ch, is_new, personal_freq, progress, vocab_rows):
     }
 
 
-def get_focus_session(text):
+def get_focus_session(user_id, text):
     """Drill exactly the CJK characters of `text`, regardless of due dates."""
     chars = []
     for ch in text:
@@ -344,12 +632,15 @@ def get_focus_session(text):
         return []
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("""SELECT chinese, pinyin, english, review_count
-                      FROM vocab_progress""")
+    cursor.execute("""SELECT v.chinese, v.pinyin, v.english,
+                             COALESCE(p.review_count, 0) AS review_count
+                      FROM vocab v LEFT JOIN vocab_progress p
+                        ON p.vocab_id = v.id AND p.user_id = %s""", (user_id,))
     vocab_rows = [dict(r) for r in cursor.fetchall()]
     placeholders = ','.join(['%s'] * len(chars))
     cursor.execute(f"SELECT * FROM handwriting_progress "
-                   f"WHERE character IN ({placeholders})", chars)
+                   f"WHERE user_id = %s AND character IN ({placeholders})",
+                   [user_id] + chars)
     progress_map = {r['character']: dict(r) for r in cursor.fetchall()}
     conn.close()
     focus_row = next((w for w in vocab_rows if w["chinese"] == text), None)
@@ -369,15 +660,15 @@ def get_focus_session(text):
     return session
 
 
-def get_handwriting_counts():
+def get_handwriting_counts(user_id):
     """(due_reviews, new_available) for the session setup screen."""
-    session = get_handwriting_session(new_count=10**6)
+    session = get_handwriting_session(user_id, new_count=10**6)
     due = sum(1 for e in session if not e["is_new"])
     new = sum(1 for e in session if e["is_new"])
     return due, new
 
 
-def get_handwriting_session(new_count=5):
+def get_handwriting_session(user_id, new_count=5):
     """
     Build a daily handwriting session from your studying + mastered vocab.
 
@@ -397,8 +688,10 @@ def get_handwriting_session(new_count=5):
 
     # 1. Pull all vocab the user is actively studying (or has mastered),
     #    with pinyin/english so each character can carry its word context.
-    cursor.execute("""SELECT chinese, pinyin, english, review_count
-                      FROM vocab_progress WHERE review_count > 0""")
+    cursor.execute("""SELECT v.chinese, v.pinyin, v.english, p.review_count
+                      FROM vocab v JOIN vocab_progress p
+                        ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE p.review_count > 0""", (user_id,))
     rows = [dict(r) for r in cursor.fetchall()]
 
     if not rows:
@@ -421,8 +714,9 @@ def get_handwriting_session(new_count=5):
     # 3. Fetch existing handwriting progress for those chars
     placeholders = ','.join(['%s'] * len(unique_chars))
     cursor.execute(f'''
-        SELECT * FROM handwriting_progress WHERE character IN ({placeholders})
-    ''', unique_chars)
+        SELECT * FROM handwriting_progress
+        WHERE user_id = %s AND character IN ({placeholders})
+    ''', [user_id] + unique_chars)
     progress_map = {row['character']: dict(row) for row in cursor.fetchall()}
     conn.close()
 
@@ -459,7 +753,7 @@ def _push_recent(csv_str, value, window=RECENT_WINDOW):
     return ",".join(items)
 
 
-def update_handwriting_progress(character, grade, current_state, mistakes=0):
+def update_handwriting_progress(user_id, character, grade, current_state, mistakes=0):
     """Apply SRS grade to a character, record mistake history, and upsert.
 
     Returns True if the character should be REQUEUED in the same session
@@ -490,11 +784,11 @@ def update_handwriting_progress(character, grade, current_state, mistakes=0):
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO handwriting_progress
-            (character, next_review_date, interval, ease_factor, review_count,
-             first_seen_date, total_mistakes, recent_grades, recent_mistakes,
-             last_reviewed)
-        VALUES (%s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
-        ON CONFLICT (character) DO UPDATE SET
+            (character, user_id, next_review_date, interval, ease_factor,
+             review_count, first_seen_date, total_mistakes, recent_grades,
+             recent_mistakes, last_reviewed)
+        VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, character) DO UPDATE SET
             next_review_date = EXCLUDED.next_review_date,
             interval = EXCLUDED.interval,
             ease_factor = EXCLUDED.ease_factor,
@@ -503,8 +797,8 @@ def update_handwriting_progress(character, grade, current_state, mistakes=0):
             recent_grades = EXCLUDED.recent_grades,
             recent_mistakes = EXCLUDED.recent_mistakes,
             last_reviewed = EXCLUDED.last_reviewed
-    ''', (character, next_review_date, new_interval, new_ease, today_str,
-           mistakes, new_grades, new_mist, today_str))
+    ''', (character, user_id, next_review_date, new_interval, new_ease,
+           today_str, mistakes, new_grades, new_mist, today_str))
     conn.commit()
     conn.close()
     logging.info(f"[HW] {character} graded {grade} ({mistakes} mistakes) "
@@ -513,13 +807,15 @@ def update_handwriting_progress(character, grade, current_state, mistakes=0):
     return requeue
 
 
-def get_handwriting_stats():
+def get_handwriting_stats(user_id):
     """Counts for the handwriting sidebar widget."""
     conn = get_connection()
     cursor = conn.cursor()
 
     # Total unique chars across studying+mastered vocab
-    cursor.execute("SELECT chinese FROM vocab_progress WHERE review_count > 0")
+    cursor.execute("""SELECT v.chinese FROM vocab v JOIN vocab_progress p
+                        ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE p.review_count > 0""", (user_id,))
     rows = cursor.fetchall()
     unique_chars = set()
     for r in rows:
@@ -528,9 +824,11 @@ def get_handwriting_stats():
                 unique_chars.add(ch)
     total = len(unique_chars)
 
-    cursor.execute("SELECT COUNT(*) FROM handwriting_progress")
+    cursor.execute("SELECT COUNT(*) FROM handwriting_progress WHERE user_id = %s",
+                   (user_id,))
     practiced = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM handwriting_progress WHERE interval >= 21")
+    cursor.execute("SELECT COUNT(*) FROM handwriting_progress "
+                   "WHERE user_id = %s AND interval >= 21", (user_id,))
     mastered = cursor.fetchone()[0]
 
     conn.close()
@@ -645,7 +943,7 @@ def bank_stats():
                COUNT(DISTINCT vocab_chinese) FILTER (WHERE status = 'active')
         FROM sentence_bank""")
     active, flagged, covered = cursor.fetchone()
-    cursor.execute("SELECT COUNT(*) FROM vocab_progress")
+    cursor.execute("SELECT COUNT(*) FROM vocab")
     total_vocab = cursor.fetchone()[0]
     conn.close()
     return {"active_sentences": active or 0, "flagged": flagged or 0,
@@ -701,7 +999,7 @@ def _recent_mistake_rate(recent_mistakes_csv):
     return sum(vals) / len(vals) if vals else 0.0
 
 
-def get_weak_characters(limit=50, min_attempts=1):
+def get_weak_characters(user_id, limit=50, min_attempts=1):
     """Characters ranked by RECENT struggle, worst first.
 
     Ranking key is the recent mistake rate (mean mistakes over the last
@@ -715,13 +1013,15 @@ def get_weak_characters(limit=50, min_attempts=1):
         SELECT character, review_count, total_mistakes, recent_grades,
                recent_mistakes, next_review_date, interval, ease_factor
         FROM handwriting_progress
-        WHERE review_count >= %s
-    """, (min_attempts,))
+        WHERE user_id = %s AND review_count >= %s
+    """, (user_id, min_attempts))
     rows = [dict(r) for r in cursor.fetchall()]
 
     # pull word context for the cue, same as the normal session
-    cursor.execute("""SELECT chinese, pinyin, english, review_count
-                      FROM vocab_progress WHERE review_count > 0""")
+    cursor.execute("""SELECT v.chinese, v.pinyin, v.english, p.review_count
+                      FROM vocab v JOIN vocab_progress p
+                        ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE p.review_count > 0""", (user_id,))
     vocab_rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
 
@@ -765,7 +1065,7 @@ def get_weak_characters(limit=50, min_attempts=1):
     return out
 
 
-def get_struggle_session(characters):
+def get_struggle_session(user_id, characters):
     """Build a drill queue for an explicit list of characters (the
     'drill my weak characters' mode). Each character carries full state so
     grades still feed the SRS. Order preserved as given."""
@@ -773,12 +1073,15 @@ def get_struggle_session(characters):
         return []
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("""SELECT chinese, pinyin, english, review_count
-                      FROM vocab_progress""")
+    cursor.execute("""SELECT v.chinese, v.pinyin, v.english,
+                             COALESCE(p.review_count, 0) AS review_count
+                      FROM vocab v LEFT JOIN vocab_progress p
+                        ON p.vocab_id = v.id AND p.user_id = %s""", (user_id,))
     vocab_rows = [dict(r) for r in cursor.fetchall()]
     ph = ','.join(['%s'] * len(characters))
-    cursor.execute(f"SELECT * FROM handwriting_progress WHERE character IN ({ph})",
-                   characters)
+    cursor.execute(f"SELECT * FROM handwriting_progress "
+                   f"WHERE user_id = %s AND character IN ({ph})",
+                   [user_id] + list(characters))
     pmap = {r['character']: dict(r) for r in cursor.fetchall()}
     conn.close()
     session = []
@@ -790,13 +1093,13 @@ def get_struggle_session(characters):
 
 
 
-def get_char_state(character):
+def get_char_state(user_id, character):
     """Current stored handwriting state for one character (or None), used to
     roll recent-grade/mistake history correctly across repeated drills."""
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("SELECT * FROM handwriting_progress WHERE character = %s",
-                   (character,))
+    cursor.execute("SELECT * FROM handwriting_progress "
+                   "WHERE user_id = %s AND character = %s", (user_id, character))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -827,7 +1130,7 @@ def hokkien_add(mandarin, mandarin_full, english, hokkien_hanji, tailo,
     return added
 
 
-def hokkien_stats():
+def hokkien_stats(user_id=None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -840,9 +1143,15 @@ def hokkien_stats():
         FROM hokkien_deck
     """)
     t, v, u, r, p, c = cursor.fetchone()
+    studied = 0
+    if user_id is not None:
+        cursor.execute("SELECT COUNT(*) FROM hokkien_progress "
+                       "WHERE user_id = %s AND review_count > 0", (user_id,))
+        studied = cursor.fetchone()[0] or 0
     conn.close()
     return {"total": t or 0, "verified": v or 0, "unverified": u or 0,
-            "rejected": r or 0, "penang": p or 0, "consensus": c or 0}
+            "rejected": r or 0, "penang": p or 0, "consensus": c or 0,
+            "studied": studied}
 
 
 def hokkien_queue(limit=25, tier=None):
@@ -882,37 +1191,55 @@ def hokkien_set_status(entry_id, status, tailo=None, taiji=None, note=None):
     conn.close()
 
 
-def hokkien_session(limit=20):
-    """Verified entries due for review, plus unseen verified ones."""
+def hokkien_session(user_id, limit=20):
+    """Verified entries due for THIS user, easiest/most useful first.
+
+    The deck and its verifications are shared; only the SRS state in
+    hokkien_progress is personal, so a card verified by one person is
+    immediately available to the other as unseen.
+    """
     today = date.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute("""
-        SELECT * FROM hokkien_deck
-        WHERE status = 'verified'
-          AND (next_review_date IS NULL OR next_review_date <= %s)
-        ORDER BY review_count ASC, learn_rank ASC, next_review_date NULLS FIRST
+        SELECT d.*,
+               COALESCE(hp.interval, 0)      AS interval,
+               COALESCE(hp.ease_factor, 2.5) AS ease_factor,
+               COALESCE(hp.review_count, 0)  AS review_count,
+               hp.next_review_date           AS next_review_date
+        FROM hokkien_deck d
+        LEFT JOIN hokkien_progress hp
+               ON hp.entry_id = d.id AND hp.user_id = %s
+        WHERE d.status = 'verified'
+          AND (hp.next_review_date IS NULL OR hp.next_review_date <= %s)
+        ORDER BY COALESCE(hp.review_count, 0) ASC, d.learn_rank ASC,
+                 hp.next_review_date NULLS FIRST
         LIMIT %s
-    """, (today, limit))
+    """, (user_id, today, limit))
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
 
 
-def hokkien_grade(entry_id, grade, current_state):
-    """Apply an SRS grade to a Hokkien entry (same engine as handwriting)."""
+def hokkien_grade(user_id, entry_id, grade, current_state):
+    """Apply an SRS grade for one user (same engine as handwriting)."""
     new_interval, new_ease, next_review = compute_next_review(
-        current_interval=current_state.get("interval", 0),
-        current_ease=float(current_state.get("ease_factor", 2.5)),
+        current_interval=current_state.get("interval", 0) or 0,
+        current_ease=float(current_state.get("ease_factor", 2.5) or 2.5),
         grade=grade)
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        UPDATE hokkien_deck
-        SET interval = %s, ease_factor = %s, next_review_date = %s,
-            review_count = review_count + 1
-        WHERE id = %s
-    """, (new_interval, new_ease, next_review, entry_id))
+        INSERT INTO hokkien_progress
+            (user_id, entry_id, interval, ease_factor, next_review_date,
+             review_count)
+        VALUES (%s, %s, %s, %s, %s, 1)
+        ON CONFLICT (user_id, entry_id) DO UPDATE SET
+            interval = EXCLUDED.interval,
+            ease_factor = EXCLUDED.ease_factor,
+            next_review_date = EXCLUDED.next_review_date,
+            review_count = hokkien_progress.review_count + 1
+    """, (user_id, entry_id, new_interval, new_ease, next_review))
     conn.commit()
     conn.close()
     return new_interval

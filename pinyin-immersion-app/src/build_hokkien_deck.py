@@ -562,8 +562,7 @@ def main():
     print("Reading your vocabulary…")
     conn = db.get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT chinese, pinyin, english FROM vocab_progress "
-                "ORDER BY priority_weight DESC, id")
+    cur.execute("SELECT chinese, pinyin, english FROM vocab ORDER BY id")
     vocab = [{"chinese": r[0], "pinyin": r[1], "english": r[2]}
              for r in cur.fetchall()]
     conn.close()

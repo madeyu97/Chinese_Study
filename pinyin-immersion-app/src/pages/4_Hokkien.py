@@ -16,9 +16,13 @@ dictionaries agreed; it does NOT mean a Penang speaker would say it.
 import streamlit as st
 
 import db_manager as db
+from auth import require_login, sidebar_user_badge
 from hokkien_engine import tailo_to_taiji, normalise_tailo, answers_match
 
 st.set_page_config(page_title="Hokkien", page_icon="🇲🇾", layout="centered")
+
+USER = require_login()
+USER_ID = USER["id"]
 
 TIER_BADGE = {
     "malaysian": ("🇲🇾 Malaysian", "From the Hokkien Learning Center's "
@@ -39,9 +43,10 @@ TIER_BADGE = {
 # SIDEBAR
 # ----------------------------------------------------------------------
 with st.sidebar:
+    sidebar_user_badge()
     st.header("福建話 Hokkien")
     try:
-        s = db.hokkien_stats()
+        s = db.hokkien_stats(USER_ID)
     except Exception:
         s = None
     if not s or s["total"] == 0:
@@ -58,7 +63,7 @@ with st.sidebar:
 # ----------------------------------------------------------------------
 stats = None
 try:
-    stats = db.hokkien_stats()
+    stats = db.hokkien_stats(USER_ID)
 except Exception as e:
     st.error(f"Hokkien tables unavailable: {e}")
     st.stop()
@@ -102,7 +107,7 @@ with tab_drill:
             st.session_state.hk_shown = False
 
         if st.button("▶️ Start / refresh session", use_container_width=True):
-            st.session_state.hk_queue = db.hokkien_session(limit=20)
+            st.session_state.hk_queue = db.hokkien_session(USER_ID, limit=20)
             st.session_state.hk_i = 0
             st.session_state.hk_shown = False
             st.rerun()
@@ -153,7 +158,7 @@ with tab_drill:
                         cols, [("Again", 0), ("Hard", 1), ("Good", 2), ("Easy", 3)]):
                     if col.button(label, key=f"g{grade}_{card['id']}",
                                   use_container_width=True):
-                        db.hokkien_grade(card["id"], grade, card)
+                        db.hokkien_grade(USER_ID, card["id"], grade, card)
                         st.session_state.hk_i += 1
                         st.session_state.hk_shown = False
                         st.rerun()

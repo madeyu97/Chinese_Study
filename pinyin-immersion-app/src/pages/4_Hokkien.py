@@ -21,6 +21,9 @@ from hokkien_engine import tailo_to_taiji, normalise_tailo, answers_match
 st.set_page_config(page_title="Hokkien", page_icon="🇲🇾", layout="centered")
 
 TIER_BADGE = {
+    "malaysian": ("🇲🇾 Malaysian", "From the Hokkien Learning Center's "
+                  "northern-Malaysian (Penang region) dataset — the closest "
+                  "thing here to what's actually spoken locally."),
     "penang": ("🟢 Penang-tagged", "A Penang-specific reading was found in Wiktionary."),
     "consensus": ("🟡 Consensus", "2+ Taiwanese dictionaries agree — may differ in Penang."),
     "single": ("🔴 Single source", "Only one dictionary offered this. Verify before trusting."),
@@ -167,11 +170,12 @@ with tab_drill:
 # ======================================================================
 with tab_verify:
     st.caption(
-        "Each entry was assembled from dictionaries, not invented. Confirm "
+        "Ordered by usefulness for a new learner — greetings and survival "
+        "phrases first, obscure vocabulary last. Confirm "
         "what's right, correct what isn't, reject what Penang wouldn't say. "
         "Only confirmed entries enter the study rotation.")
     tier_filter = st.selectbox(
-        "Show tier", ["all", "penang", "consensus", "core", "single", "composed"], index=0)
+        "Show tier", ["all", "malaysian", "penang", "consensus", "core", "single", "composed"], index=0)
     rows = db.hokkien_queue(limit=20,
                             tier=None if tier_filter == "all" else tier_filter)
     if not rows:
@@ -180,7 +184,8 @@ with tab_verify:
     for r in rows:
         badge, why = TIER_BADGE.get(r["tier"], ("?", ""))
         with st.expander(
-                f"{r['mandarin']} → {r['hokkien_hanji']}  ·  {r['tailo']}  ·  {badge}"):
+                f"#{r.get('learn_rank', 9999)}  {r['mandarin']} → "
+                f"{r['hokkien_hanji']}  ·  {r['tailo']}  ·  {badge}"):
             st.caption(why)
             st.write(f"**Mandarin:** {r['mandarin_full'] or r['mandarin']}")
             st.write(f"**English:** {r['english']}")

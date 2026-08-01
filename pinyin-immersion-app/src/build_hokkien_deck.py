@@ -305,6 +305,129 @@ def words_from_sentences(vocab, cand):
     return out
 
 
+
+# ======================================================================
+# HOKKIEN LEARNING CENTER (malaysia_north) — genuinely Malaysian data
+#
+#   git clone https://github.com/william-sy/hokkien-learning-center.git
+#
+# This is northern-Malaysian (Penang-region) Hokkien with English, hàn-jī,
+# POJ, Tâi-lô and semantic tags — far closer to what is spoken in Penang
+# than the Taiwanese dictionaries. Entries are ranked for a new learner by
+# topic, so the verification queue and study order start with what is
+# actually useful on day one.
+#
+# The project describes itself as an open educational resource for Hokkien
+# preservation. It carries no formal licence file, so treat this as
+# personal study use and credit the project if you share anything built
+# from it.
+# ======================================================================
+
+# Lower number = learn earlier. Grouped by what a beginner in Penang needs.
+TAG_PRIORITY = {
+    # survival: greetings, function words, questions
+    "greeting": 10, "politeness": 11, "pronoun": 12, "question": 13,
+    "negation": 14, "particle": 15, "basic": 16, "exclamation": 17,
+    "number": 20, "grammar": 21, "adverb": 22,
+    # daily life in Penang
+    "food": 30, "drink": 31, "shopping": 32, "time": 33, "family": 34,
+    "direction": 35, "place": 36, "transport": 37, "body": 38,
+    # common content words
+    "verb": 45, "adjective": 46, "home": 47, "emotion": 48, "social": 49,
+    "colour": 50, "clothing": 51, "weather": 52, "medical": 53,
+    "people": 54, "profession": 55, "education": 56,
+    # broader vocabulary
+    "culture": 60, "nature": 61, "animal": 62, "plant": 63, "object": 64,
+    "loanword": 40,      # Malay/English loans are high-value in Penang
+    "misc": 80, "vulgar": 85,
+}
+DEFAULT_TAG_RANK = 70
+
+
+def hlc_rank(entry):
+    """Usefulness rank for a Hokkien Learning Center entry (lower = sooner)."""
+    tags = [t.lower() for t in entry.get("tags", [])]
+    base = min((TAG_PRIORITY.get(t, DEFAULT_TAG_RANK) for t in tags),
+               default=DEFAULT_TAG_RANK)
+    # Penang-specific entries first within their band
+    if "penang" in tags:
+        base -= 5
+    # whole phrases are immediately usable
+    if entry.get("category") == "phrase":
+        base -= 2
+    # entries with characters make better cards than romanisation alone
+    if not entry.get("hanzi"):
+        base += 1
+    return max(1, base)
+
+
+def load_hlc(path):
+    """Load malaysia_north entries plus the shared phrase list."""
+    base = path
+    for candidate in (os.path.join(path, "data"), path):
+        if os.path.isdir(os.path.join(candidate, "dialects", "malaysia_north")):
+            base = candidate
+            break
+    else:
+        raise SystemExit(
+            f"Could not find data/dialects/malaysia_north under {path}.\n"
+            "Clone it with:\n"
+            "  git clone --depth 1 "
+            "https://github.com/william-sy/hokkien-learning-center.git")
+
+    entries = []
+    mn_dir = os.path.join(base, "dialects", "malaysia_north")
+    for fname in sorted(os.listdir(mn_dir)):
+        if fname.endswith(".json"):
+            with open(os.path.join(mn_dir, fname), encoding="utf-8") as f:
+                entries.extend(json.load(f))
+
+    phrases_path = os.path.join(base, "phrases.json")
+    if os.path.exists(phrases_path):
+        with open(phrases_path, encoding="utf-8") as f:
+            for p in json.load(f):
+                p.setdefault("tags", []).append("greeting")
+                p["category"] = "phrase"
+                entries.append(p)
+
+    # Lesson order is the most authoritative signal available: promote any
+    # entry whose English matches a lesson word, ranked by lesson number.
+    lessons_path = os.path.join(base, "lessons.json")
+    lesson_rank = {}
+    if os.path.exists(lessons_path):
+        with open(lessons_path, encoding="utf-8") as f:
+            for lesson in json.load(f).get("lessons", []):
+                for pos, key in enumerate(lesson.get("wordKeys", [])):
+                    lesson_rank.setdefault(key.strip().lower(),
+                                           lesson.get("order", 99))
+
+    out = []
+    seen = set()
+    for e in entries:
+        eng = (e.get("english") or "").strip()
+        tailo = normalise_tailo(e.get("tl") or e.get("poj") or "")
+        if not eng or not tailo:
+            continue
+        hanji = (e.get("hanzi") or "").strip()
+        key = (hanji or tailo, eng.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        rank = hlc_rank(e)
+        lr = lesson_rank.get(eng.lower())
+        if lr is not None:
+            rank = lr          # lesson words outrank everything (1-19)
+        out.append({
+            "english": eng, "tailo": tailo,
+            "hanji": hanji or "—",
+            "tags": ",".join(e.get("tags", [])),
+            "rank": rank,
+            "example": (e.get("example") or "").strip(),
+        })
+    out.sort(key=lambda x: (x["rank"], x["english"].lower()))
+    return out
+
+
 SENTENCE_PUNCT = "。，？！；：、,?!"
 
 
@@ -416,6 +539,11 @@ def main():
                     help="print results without writing to the database")
     ap.add_argument("--from-sentences", action="store_true",
                     help="also mine the words inside your sentence entries")
+    ap.add_argument("--hlc", default="",
+                    help="path to a cloned hokkien-learning-center repo; adds "
+                         "genuinely Malaysian vocabulary ordered by usefulness")
+    ap.add_argument("--hlc-limit", type=int, default=0,
+                    help="cap how many HLC entries to add (0 = all)")
     ap.add_argument("--core", type=int, default=0,
                     help="also add N core Hokkien words (kinship, particles, "
                          "everyday vocabulary a Mandarin list never surfaces)")
@@ -502,12 +630,41 @@ def main():
                   f"[{tier}] {sources} alts={n_alts}")
             continue
 
+        rank_by_tier = {"penang": 200, "consensus": 300, "single": 500}
         if db.hokkien_add(
                 mandarin=used_head, mandarin_full=mand,
                 english=v["english"], hokkien_hanji=hokkien_hanji,
                 tailo=tailo, taiji=taiji, tier=tier,
-                sources=",".join(sources), alternatives=n_alts):
+                sources=",".join(sources), alternatives=n_alts,
+                learn_rank=rank_by_tier.get(tier, 500)):
             made += 1
+
+    # ------------------------------------------------------------------
+    # PASS 0 — Hokkien Learning Center (real Malaysian vocabulary)
+    # ------------------------------------------------------------------
+    if args.hlc:
+        print("\nLoading Hokkien Learning Center (malaysia_north)…")
+        hlc = load_hlc(args.hlc)
+        if args.hlc_limit:
+            hlc = hlc[:args.hlc_limit]
+        print(f"  {len(hlc)} Malaysian entries, ordered by usefulness")
+        added = 0
+        for e in hlc:
+            if args.dry_run:
+                if added < 14:
+                    print(f"  [{e['rank']:3}] {e['hanji']:8} {e['tailo']:20} "
+                          f"{e['english'][:38]:38} {e['tags'][:26]}")
+                added += 1
+                continue
+            if db.hokkien_add(mandarin=e["english"], mandarin_full=e["english"],
+                              english=e["english"], hokkien_hanji=e["hanji"],
+                              tailo=e["tailo"], taiji=tailo_to_taiji(e["tailo"]),
+                              tier="malaysian", sources="hokkien-learning-center",
+                              alternatives=1, learn_rank=e["rank"]):
+                added += 1
+                made += 1
+        tiers["malaysian"] = added
+        print(f"  {'previewed' if args.dry_run else 'added'} {added}")
 
     # ------------------------------------------------------------------
     # EXPANSION PASS 1 — words inside your sentence entries
@@ -538,7 +695,7 @@ def main():
                                 hokkien_hanji=hokkien_hanji, tailo=tailo,
                                 taiji=tailo_to_taiji(tailo), tier=tier,
                                 sources=",".join(sources) or "sentence-mined",
-                                alternatives=n_alts):
+                                alternatives=n_alts, learn_rank=400):
                 added += 1
                 made += 1
             tiers[f"sentence_{tier}"] += 1
@@ -575,14 +732,14 @@ def main():
                               english=e["english"], hokkien_hanji=e["hanji"],
                               tailo=e["tailo"], taiji=tailo_to_taiji(e["tailo"]),
                               tier="core", sources="basic-vocabulary",
-                              alternatives=1):
+                              alternatives=1, learn_rank=600):
                 added += 1
                 made += 1
         tiers["core"] = added
         print(f"  {'previewed' if args.dry_run else 'added'} {added} core words")
 
     print("\nResults:")
-    for k in ("penang", "consensus", "single", "composed", "core",
+    for k in ("malaysian", "penang", "consensus", "single", "composed", "core",
               "sentence_penang", "sentence_consensus", "sentence_single"):
         if tiers.get(k):
             print(f"  {k:22} {tiers[k]:5}")

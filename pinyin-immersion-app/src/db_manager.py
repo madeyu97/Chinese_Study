@@ -109,6 +109,7 @@ def init_db():
             ease_factor REAL DEFAULT 2.5,
             review_count INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT NOW(),
+            learn_rank INTEGER DEFAULT 9999,
             UNIQUE (mandarin, hokkien_hanji)
         )
     ''')
@@ -116,6 +117,10 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_hokkien_status
         ON hokkien_deck (status, next_review_date)
     ''')
+    cursor.execute("ALTER TABLE hokkien_deck "
+                   "ADD COLUMN IF NOT EXISTS learn_rank INTEGER DEFAULT 9999")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hokkien_rank "
+                   "ON hokkien_deck (status, learn_rank)")
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sentence_blocklist (
             chinese TEXT PRIMARY KEY,
@@ -805,17 +810,17 @@ def get_char_state(character):
 # them, because no open Penang Hokkien lexicon exists to trust blindly.
 # ==========================================
 def hokkien_add(mandarin, mandarin_full, english, hokkien_hanji, tailo,
-                taiji, tier, sources, alternatives):
+                taiji, tier, sources, alternatives, learn_rank=9999):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO hokkien_deck
             (mandarin, mandarin_full, english, hokkien_hanji, tailo, taiji,
-             tier, sources, alternatives, next_review_date)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+             tier, sources, alternatives, next_review_date, learn_rank)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (mandarin, hokkien_hanji) DO NOTHING
     """, (mandarin, mandarin_full, english, hokkien_hanji, tailo, taiji,
-          tier, sources, alternatives, date.today().isoformat()))
+          tier, sources, alternatives, date.today().isoformat(), learn_rank))
     added = cursor.rowcount > 0
     conn.commit()
     conn.close()
@@ -847,20 +852,12 @@ def hokkien_queue(limit=25, tier=None):
     if tier:
         cursor.execute("""SELECT * FROM hokkien_deck
                           WHERE status = 'unverified' AND tier = %s
-                          ORDER BY CASE tier WHEN 'penang' THEN 0
-                                             WHEN 'consensus' THEN 1
-                                             WHEN 'core' THEN 2
-                                             WHEN 'single' THEN 3 ELSE 4 END,
-                                   alternatives ASC, id
+                          ORDER BY learn_rank ASC, alternatives ASC, id
                           LIMIT %s""", (tier, limit))
     else:
         cursor.execute("""SELECT * FROM hokkien_deck
                           WHERE status = 'unverified'
-                          ORDER BY CASE tier WHEN 'penang' THEN 0
-                                             WHEN 'consensus' THEN 1
-                                             WHEN 'core' THEN 2
-                                             WHEN 'single' THEN 3 ELSE 4 END,
-                                   alternatives ASC, id
+                          ORDER BY learn_rank ASC, alternatives ASC, id
                           LIMIT %s""", (limit,))
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
@@ -894,7 +891,7 @@ def hokkien_session(limit=20):
         SELECT * FROM hokkien_deck
         WHERE status = 'verified'
           AND (next_review_date IS NULL OR next_review_date <= %s)
-        ORDER BY review_count ASC, next_review_date NULLS FIRST, RANDOM()
+        ORDER BY review_count ASC, learn_rank ASC, next_review_date NULLS FIRST
         LIMIT %s
     """, (today, limit))
     rows = [dict(r) for r in cursor.fetchall()]

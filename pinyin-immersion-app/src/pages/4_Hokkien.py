@@ -18,6 +18,8 @@ import streamlit as st
 import db_manager as db
 from auth import require_login, sidebar_user_badge
 from hokkien_engine import tailo_to_taiji, normalise_tailo, answers_match
+from hokkien_audio import synthesize, audio_key
+from config import HOKKIEN_TTS_PROVIDER
 
 st.set_page_config(page_title="Hokkien", page_icon="🇲🇾", layout="centered")
 
@@ -83,6 +85,45 @@ if stats["total"] == 0:
 
 st.title("福建話 Penang Hokkien")
 
+
+def get_audio(card):
+    """Cached Hokkien audio for a card, or None if no service responded.
+
+    Cached in the database on first use, so each clip is synthesised once
+    ever — kinder to these small volunteer-run services, and instant after.
+    """
+    hanji = card.get("hokkien_hanji") or ""
+    tailo = card.get("tailo") or ""
+    if not tailo:
+        return None, None
+    key = audio_key(hanji, tailo, HOKKIEN_TTS_PROVIDER or "auto")
+    try:
+        data, mime = db.hokkien_audio_get(key)
+        if data:
+            return data, mime
+    except Exception:
+        pass
+    data, mime, used = synthesize(hanji, tailo, HOKKIEN_TTS_PROVIDER or None)
+    if data:
+        try:
+            db.hokkien_audio_put(key, card.get("id"), data, mime, used)
+        except Exception:
+            pass
+        return data, mime
+    return None, None
+
+
+def play_card_audio(card, label="🔊 Pronunciation"):
+    data, mime = get_audio(card)
+    if data:
+        st.audio(data, format=mime or "audio/wav")
+        st.caption(f"{label} — Taiwanese Hokkien voice; Penang tones differ.")
+    else:
+        st.caption("🔇 No audio available (TTS service unreachable). "
+                   "Run `python src/test_hokkien_audio.py` to check.")
+    return data is not None
+
+
 tab_drill, tab_verify, tab_browse = st.tabs(
     ["📚 Study", f"✅ Verify ({stats['unverified']})", "🔍 Browse"])
 
@@ -96,9 +137,10 @@ with tab_drill:
     else:
         mode = st.radio(
             "Mode",
-            ["認 Recognise (hanji → meaning)",
-             "音 Romanise (hanji → Tâi-lô)",
-             "講 Produce (English → Hokkien)"],
+            ["聽 Listen (audio → meaning)",
+             "講 Speak (shadow the audio)",
+             "認 Recognise (hanji → meaning)",
+             "音 Romanise (hanji → Tâi-lô)"],
             horizontal=False)
 
         if "hk_queue" not in st.session_state:
@@ -118,7 +160,15 @@ with tab_drill:
             st.caption(f"Card {st.session_state.hk_i + 1} of {len(q)}")
 
             # ---- prompt side ----
-            if mode.startswith("認"):
+            if mode.startswith("聽"):
+                # Audio first: no text at all until you commit to an answer.
+                st.markdown("**Listen, then recall the meaning.**")
+                if not play_card_audio(card, "Play again"):
+                    st.info("This mode needs audio — switch modes or fix TTS.")
+            elif mode.startswith("講"):
+                st.markdown(f"### {card['english']}")
+                st.caption("Say it in Hokkien, then compare with the reference.")
+            elif mode.startswith("認"):
                 st.markdown(f"<div style='font-size:56px;text-align:center'>"
                             f"{card['hokkien_hanji']}</div>",
                             unsafe_allow_html=True)
@@ -146,6 +196,22 @@ with tab_drill:
                 st.markdown(f"**Tâi-lô:** `{card['tailo']}`")
                 st.markdown(f"**Taiji:** `{card['taiji']}`")
                 st.markdown(f"**Meaning:** {card['english']}")
+                if not mode.startswith("聽"):
+                    play_card_audio(card)
+
+                if mode.startswith("講"):
+                    st.markdown("**Now shadow it:**")
+                    if hasattr(st, "audio_input"):
+                        rec = st.audio_input("Record yourself",
+                                             key=f"rec_{card['id']}")
+                        if rec:
+                            st.caption("Yours:")
+                            st.audio(rec)
+                            st.caption("Play both back and compare the tones "
+                                       "and vowel length, then grade honestly.")
+                    else:
+                        st.caption("Recording needs a newer Streamlit — "
+                                   "say it aloud and grade yourself.")
                 if mode.startswith("音"):
                     guess = st.session_state.get(f"hk_in_{card['id']}", "")
                     if guess:
@@ -224,5 +290,7 @@ with tab_browse:
             mark = {"verified": "✅", "rejected": "🚫"}.get(r["status"], "⏳")
             st.write(f"{mark} **{r['hokkien_hanji']}** `{r['tailo']}` / "
                      f"`{r['taiji']}` — {r['english']}  ·  {badge}")
+            if st.button("🔊", key=f"say_{r['id']}"):
+                play_card_audio(r)
     else:
         st.caption("Type to search the deck.")

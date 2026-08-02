@@ -191,3 +191,57 @@ def answers_match(user_input, expected_tailo, ignore_tones=True):
             s = re.sub(r"\d+", "", s)   # allow numeric-tone typing too
         return s
     return norm(user_input) == norm(expected_tailo)
+
+
+# ======================================================================
+# NUMERIC TÂI-LÔ
+# Hokkien TTS endpoints generally expect tone NUMBERS rather than
+# diacritics ("tsiah8-png7" not "tsia̍h-pn̄g"), because numbers survive URL
+# encoding intact. This converts the stored diacritic form on the way out.
+# ======================================================================
+def tailo_to_numeric(tailo_word, joiner="-"):
+    """'tsia̍h-pn̄g' -> 'tsiah8-png7'."""
+    if not tailo_word:
+        return ""
+    out = []
+    for syl in split_syllables(tailo_word):
+        tone = tone_of(syl)
+        bare = strip_tone_marks(syl)
+        out.append(f"{bare}{tone}")
+    return joiner.join(out)
+
+
+def numeric_to_tailo(numeric):
+    """'tsiah8-png7' -> 'tsia̍h-pn̄g' (best effort, for imported data)."""
+    if not numeric:
+        return ""
+    marks = {1: "", 2: "\u0301", 3: "\u0300", 4: "", 5: "\u0302",
+             6: "\u0306", 7: "\u0304", 8: "\u030D", 9: "\u030B"}
+    out = []
+    for syl in re.split(r"[-\s]+", numeric.strip()):
+        m = re.match(r"^([A-Za-zü]+)([1-9])$", syl)
+        if not m:
+            out.append(syl)
+            continue
+        body, tone = m.group(1), int(m.group(2))
+        mark = marks.get(tone, "")
+        if not mark:
+            out.append(body)
+            continue
+        lower = body.lower()
+        if "a" in lower:
+            idx = lower.index("a")
+        elif "e" in lower:
+            idx = lower.index("e")
+        elif "ou" in lower:
+            idx = lower.index("o")
+        else:
+            vowels = [lower.rfind(v) for v in "iouü" if v in lower]
+            if vowels:
+                idx = max(vowels)
+            else:
+                # syllabic nasal (png, m, ng): mark sits on the nasal itself
+                nasals = [lower.find(n) for n in "mn" if n in lower]
+                idx = min(nasals) if nasals else 0
+        out.append(_recompose(body[:idx + 1] + mark + body[idx + 1:]))
+    return "-".join(out)

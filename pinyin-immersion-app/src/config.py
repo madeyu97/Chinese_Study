@@ -71,6 +71,17 @@ GRADING_MODEL = "openai/gpt-oss-120b"
 REVIEW_MODEL = "qwen/qwen3.6-27b"
 WHISPER_MODEL = "whisper-large-v3"
 
+# ==========================================
+# 6b. HOKKIEN AUDIO
+# ==========================================
+# Which TTS service to try first for Hokkien. Run
+#   python src/test_hokkien_audio.py
+# to see which respond from your network, listen to the samples it writes,
+# and set the best one here. "" = try all in order.
+# These voices are TAIWANESE Hokkien: a pronunciation reference, not the
+# Penang accent. Audio is cached in the database after first use.
+HOKKIEN_TTS_PROVIDER = ""
+
 
 # ==========================================
 # 7. SRS MULTIPLIERS

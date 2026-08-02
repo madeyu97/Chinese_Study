@@ -328,6 +328,48 @@ def t_hk_match():
     assert not hk.answers_match("chiah png", "tsia̍h-pn̄g")
 
 
+@test("Hokkien TTS: numeric tone conversion for TTS endpoints")
+def t_hk_numeric():
+    assert hk.tailo_to_numeric("tsia̍h-pn̄g") == "tsiah8-png7"
+    assert hk.tailo_to_numeric("kóng-uē") == "kong2-ue7"
+    assert hk.tailo_to_numeric("") == ""
+    rt = hk.numeric_to_tailo("tsiah8-png7")
+    assert hk.tailo_to_numeric(rt) == "tsiah8-png7"   # lossless round trip
+
+
+@test("Hokkien TTS: dead endpoints degrade gracefully, never raise")
+def t_hk_tts_fallback():
+    import hokkien_audio as ha
+    original = ha._http_get
+    try:
+        ha._http_get = lambda url: (_ for _ in ()).throw(ConnectionError("down"))
+        assert ha.synthesize("食飯", "tsia̍h-pn̄g") == (None, None, None)
+        # an HTML error page must not be mistaken for audio
+        ha._http_get = lambda url: (b"<html>oops</html>", "text/html")
+        assert ha.synthesize("食飯", "tsia̍h-pn̄g")[0] is None
+        # first provider dead -> falls through to another
+        state = {"n": 0}
+        def flaky(url):
+            state["n"] += 1
+            if state["n"] == 1:
+                raise ConnectionError("down")
+            return b"RIFF" + b"\x00" * 4000, "audio/wav"
+        ha._http_get = flaky
+        data, _mime, used = ha.synthesize("食飯", "tsia̍h-pn̄g", "ithuan")
+        assert data and used != "ithuan"
+    finally:
+        ha._http_get = original
+
+
+@test("Hokkien TTS: cache keys stable per (text, provider)")
+def t_hk_audio_keys():
+    import hokkien_audio as ha
+    k1 = ha.audio_key("食飯", "tsia̍h-pn̄g", "ithuan")
+    assert k1 == ha.audio_key("食飯", "tsia̍h-pn̄g", "ithuan")
+    assert k1 != ha.audio_key("食飯", "tsia̍h-pn̄g", "ntut_tailo")
+    assert k1 != ha.audio_key("巴剎", "pa-sat", "ithuan")
+
+
 # ======================================================================
 # DATABASE (only when DATABASE_URL is set)
 # ======================================================================
@@ -431,6 +473,7 @@ if __name__ == "__main__":
     print("Hokkien engine:")
     t_hk_tones(); t_hk_taiji(); t_hk_tone9(); t_hk_dblhyphen()
     t_hk_s2t(); t_hk_match()
+    t_hk_numeric(); t_hk_tts_fallback(); t_hk_audio_keys()
     if os.environ.get("DATABASE_URL"):
         print("Database (DATABASE_URL detected):")
         db_tests()

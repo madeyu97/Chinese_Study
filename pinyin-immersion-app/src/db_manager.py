@@ -170,6 +170,16 @@ def init_db():
     # Per-user Hokkien SRS (the deck itself stays shared — verifications and
     # Tâi-lô corrections are curation work, not personal progress).
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hokkien_audio (
+            cache_key TEXT PRIMARY KEY,
+            entry_id INTEGER REFERENCES hokkien_deck(id) ON DELETE CASCADE,
+            audio BYTEA NOT NULL,
+            mime TEXT DEFAULT 'audio/wav',
+            provider TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS hokkien_progress (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1258,6 +1268,47 @@ def hokkien_search(term, limit=30):
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
+
+
+
+# ==========================================
+# HOKKIEN AUDIO CACHE
+# Clips live in the database, not on disk: Streamlit Cloud wipes the
+# filesystem on reboot, and these come from small volunteer-run TTS
+# services we shouldn't hammer. Synthesised once, then reused forever.
+# ==========================================
+def hokkien_audio_get(cache_key):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT audio, mime FROM hokkien_audio WHERE cache_key = %s",
+                   (cache_key,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None, None
+    return bytes(row[0]), row[1]
+
+
+def hokkien_audio_put(cache_key, entry_id, audio, mime, provider):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO hokkien_audio (cache_key, entry_id, audio, mime, provider)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (cache_key) DO NOTHING
+    """, (cache_key, entry_id, psycopg2.Binary(audio), mime, provider))
+    conn.commit()
+    conn.close()
+
+
+def hokkien_audio_stats():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*), COALESCE(SUM(LENGTH(audio)), 0) "
+                   "FROM hokkien_audio")
+    n, total = cursor.fetchone()
+    conn.close()
+    return {"clips": n or 0, "bytes": int(total or 0)}
 
 
 init_db()

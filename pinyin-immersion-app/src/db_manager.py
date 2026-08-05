@@ -231,7 +231,7 @@ def init_db():
 #                     across difficulty bands. Best for a new learner.
 DEFAULT_USERS = [
     ("matt", "玛德宇", "latest_mix"),
-    ("jean", "姚皢慧", "random_balanced"),
+    ("selina", "姚皢慧", "random_balanced"),
 ]
 
 

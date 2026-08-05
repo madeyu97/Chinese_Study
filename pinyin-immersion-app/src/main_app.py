@@ -259,6 +259,34 @@ st.markdown("---")
 # ==========================================
 with st.sidebar:
     sidebar_user_badge()
+
+    with st.expander("⚙️ Session style"):
+        _MODES = {
+            "srs_latest": "Spaced repetition + newest words",
+            "random_balanced": "Spaced repetition + balanced random",
+            "latest_mix": "Newest + random (no spaced repetition)",
+        }
+        _current = db.get_session_mode(USER_ID)
+        _picked = st.radio(
+            "How today's cards are chosen",
+            options=list(_MODES), index=list(_MODES).index(_current)
+            if _current in _MODES else 1,
+            format_func=lambda k: _MODES[k], key="session_mode_pick")
+        if _picked != _current:
+            db.set_session_mode(USER_ID, _picked)
+            st.session_state.pop("words_due", None)
+            st.rerun()
+        if _picked == "srs_latest":
+            st.caption("Anything due for review comes first, then your "
+                       "newest additions.")
+        elif _picked == "random_balanced":
+            st.caption("Anything due for review comes first, then new words "
+                       "at random, spread across easy/medium/hard.")
+        else:
+            st.caption("⚠️ Half newest, half random — and due dates are "
+                       "ignored, so grading a card doesn't change when you "
+                       "next see it.")
+
     st.header("📊 Global Progress")
     stats = get_progress_stats(USER_ID)
     try:

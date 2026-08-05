@@ -34,18 +34,31 @@ def get_connection():
         raise ValueError("CRITICAL ERROR: DATABASE_URL is missing!")
     return psycopg2.connect(db_url)
 
+# Two Streamlit deployments can share this database (one per person, each
+# with its own API key and resource allocation). If both boot at once they
+# would otherwise race on schema creation and the one-time migration, so
+# the whole of init_db runs under a Postgres advisory lock.
+_INIT_LOCK_KEY = 728451903
+
+
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT pg_advisory_lock(%s)", (_INIT_LOCK_KEY,))
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             display_name TEXT NOT NULL,
             pin_hash TEXT,
+            session_mode TEXT DEFAULT 'latest_mix',
             created_at TIMESTAMP DEFAULT NOW()
         )
     ''')
+    # No DEFAULT here on purpose: pre-existing rows stay NULL so _seed_users
+    # can apply each person's intended mode once, without ever overwriting a
+    # choice they've since made themselves.
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_mode TEXT")
     # Vocabulary CONTENT is shared by everyone studying on this deployment.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vocab (
@@ -195,6 +208,11 @@ def init_db():
 
     _migrate_progress_tables(conn)
 
+    try:
+        cursor.execute("SELECT pg_advisory_unlock(%s)", (_INIT_LOCK_KEY,))
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
     logging.info("Supabase database initialized successfully.")
 
@@ -202,18 +220,32 @@ def init_db():
 # ==========================================
 # USERS
 # ==========================================
+# (username, display name, default session mode)
+#   latest_mix      — newest words + random breadth. The original
+#                     behaviour, and the one that IGNORES due dates: SRS
+#                     grades are stored but never decide what you see.
+#   srs_latest      — due reviews first, then newest additions. Real spaced
+#                     repetition, keeping the "show me what I just added"
+#                     bias.
+#   random_balanced — due reviews first, then unseen words sampled evenly
+#                     across difficulty bands. Best for a new learner.
 DEFAULT_USERS = [
-    ("matt", "玛德宇"),
-    ("jean", "姚皢慧"),
+    ("matt", "玛德宇", "latest_mix"),
+    ("jean", "姚皢慧", "random_balanced"),
 ]
 
 
 def _seed_users(conn):
     cursor = conn.cursor()
-    for username, display in DEFAULT_USERS:
+    for username, display, mode in DEFAULT_USERS:
         cursor.execute(
-            "INSERT INTO users (username, display_name) VALUES (%s, %s) "
-            "ON CONFLICT (username) DO NOTHING", (username, display))
+            "INSERT INTO users (username, display_name, session_mode) "
+            "VALUES (%s, %s, %s) ON CONFLICT (username) DO NOTHING",
+            (username, display, mode))
+        # Backfill only if never set (upgrade from before session modes).
+        cursor.execute("UPDATE users SET session_mode = %s "
+                       "WHERE username = %s AND session_mode IS NULL",
+                       (mode, username))
     conn.commit()
 
 
@@ -224,11 +256,29 @@ def _pin_hash(pin):
 def list_users():
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("SELECT id, username, display_name, "
+    cursor.execute("SELECT id, username, display_name, session_mode, "
                    "(pin_hash IS NOT NULL) AS has_pin FROM users ORDER BY id")
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
+
+
+def set_session_mode(user_id, mode):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET session_mode = %s WHERE id = %s",
+                   (mode, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_session_mode(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT session_mode FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return (row[0] if row and row[0] else "latest_mix")
 
 
 def set_user_pin(user_id, pin):
@@ -254,8 +304,8 @@ def verify_user_pin(user_id, pin):
 def get_user(user_id):
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("SELECT id, username, display_name FROM users WHERE id = %s",
-                   (user_id,))
+    cursor.execute("SELECT id, username, display_name, session_mode "
+                   "FROM users WHERE id = %s", (user_id,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -459,14 +509,136 @@ def flag_word_in_database(chinese_char, user_id):
     conn.close()
 
 
+# ======================================================================
+# DIFFICULTY BANDS
+# A brand-new learner has no performance history, so difficulty is
+# estimated from the shape of the entry. In this deck the honest signal is
+# length: single words are approachable, whole sentences are not. Where
+# ANYONE has already studied a word, their ease factor refines the guess —
+# a word that proved hard for one learner probably is hard.
+# ======================================================================
+EASY, MEDIUM, HARD = 0, 1, 2
+_SENT_PUNCT = "。，？！；：、,?!"
+
+
+def _difficulty_band(chinese, ease=None):
+    han = sum(1 for c in chinese if "\u4e00" <= c <= "\u9fff")
+    if any(p in chinese for p in _SENT_PUNCT) or han >= 8:
+        band = HARD
+    elif han >= 4:
+        band = MEDIUM
+    else:
+        band = EASY
+    # A low ease factor means someone kept forgetting it — nudge it harder.
+    if ease is not None and ease < 2.2 and band < HARD:
+        band += 1
+    return band
+
+
+# Share of a beginner's NEW cards drawn from each band. Weighted toward the
+# approachable end, but deliberately never zero on hard: seeing real
+# sentences from day one is how the ear gets built.
+BAND_MIX = {EASY: 0.45, MEDIUM: 0.35, HARD: 0.20}
+
+
+def _fetch_all_candidates(cursor, user_id, exclude_ids=()):
+    """Every vocabulary row this user has not yet seen, with any pooled
+    ease data from other learners."""
+    sql = _VOCAB_SELECT + """
+        LEFT JOIN (SELECT vocab_id, MIN(ease_factor) AS pooled_ease
+                   FROM vocab_progress GROUP BY vocab_id) agg
+               ON agg.vocab_id = v.id
+        WHERE (p.review_count IS NULL OR p.review_count = 0)
+    """
+    params = [user_id]
+    if exclude_ids:
+        ph = ",".join(["%s"] * len(exclude_ids))
+        sql += f" AND v.id NOT IN ({ph})"
+        params += list(exclude_ids)
+    # pooled_ease has to ride along in the projection
+    sql = sql.replace("COALESCE(p.priority_weight, 1) AS priority_weight",
+                      "COALESCE(p.priority_weight, 1) AS priority_weight,\n"
+                      "           agg.pooled_ease AS pooled_ease")
+    cursor.execute(sql, params)
+    return [dict(r) for r in cursor.fetchall()]
+
+
+def _balanced_new_cards(candidates, needed, rng):
+    """Sample `needed` unseen cards spread across difficulty bands, fully
+    random within each band."""
+    buckets = {EASY: [], MEDIUM: [], HARD: []}
+    for row in candidates:
+        buckets[_difficulty_band(row["chinese"], row.get("pooled_ease"))].append(row)
+    for b in buckets.values():
+        rng.shuffle(b)
+
+    picked = []
+    for band, share in BAND_MIX.items():
+        want = int(round(needed * share))
+        picked += buckets[band][:want]
+        buckets[band] = buckets[band][want:]
+    # top up from whatever is left if a band ran dry
+    leftovers = buckets[EASY] + buckets[MEDIUM] + buckets[HARD]
+    rng.shuffle(leftovers)
+    picked += leftovers[:max(0, needed - len(picked))]
+    return picked[:needed]
+
+
 def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
-                      random_pct=RANDOM_BREADTH_PCT):
+                      random_pct=RANDOM_BREADTH_PCT, mode=None):
+    """Build today's batch according to this user's session mode.
+
+    latest_mix      — newest words plus random breadth (original behaviour).
+    random_balanced — anything genuinely due comes first (real spaced
+                      repetition), then unseen words drawn at random but
+                      spread evenly across difficulty bands.
+    """
     import random as _random
-    random_count = int(round(total * random_pct))
-    latest_count = total - random_count
+    rng = _random.Random()
+    mode = mode or get_session_mode(user_id)
+
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
+    if mode in ("random_balanced", "srs_latest"):
+        today = date.today().isoformat()
+        # 1. everything actually due, oldest/most-urgent first
+        cursor.execute(_VOCAB_SELECT + """
+            WHERE p.review_count > 0 AND p.next_review_date <= %s
+            ORDER BY p.priority_weight DESC, p.next_review_date ASC
+            LIMIT %s
+        """, (user_id, today, total))
+        due = [dict(r) for r in cursor.fetchall()]
+
+        # 2. fill the rest with new cards, chosen this user's way
+        needed = max(0, total - len(due))
+        session = due
+        if needed:
+            exclude = [r["id"] for r in due]
+            if mode == "srs_latest":
+                # newest additions first — what you just put in the CSV
+                sql = _VOCAB_SELECT + \
+                    " WHERE (p.review_count IS NULL OR p.review_count = 0)"
+                params = [user_id]
+                if exclude:
+                    ph = ",".join(["%s"] * len(exclude))
+                    sql += f" AND v.id NOT IN ({ph})"
+                    params += exclude
+                sql += " ORDER BY v.id DESC LIMIT %s"
+                params.append(needed)
+                cursor.execute(sql, params)
+                session = due + [dict(r) for r in cursor.fetchall()]
+            else:
+                candidates = _fetch_all_candidates(
+                    cursor, user_id, exclude_ids=exclude)
+                session = due + _balanced_new_cards(candidates, needed, rng)
+        conn.close()
+        rng.shuffle(session)
+        return session
+
+    # ---- latest_mix (unchanged) ----
+    random_count = int(round(total * random_pct))
+    latest_count = total - random_count
     cursor.execute(_VOCAB_SELECT + " ORDER BY v.id DESC LIMIT %s",
                    (user_id, latest_count))
     latest_rows = [dict(r) for r in cursor.fetchall()]
@@ -483,7 +655,7 @@ def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
     random_rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     session = latest_rows + random_rows
-    _random.shuffle(session)
+    rng.shuffle(session)
     return session
 
 

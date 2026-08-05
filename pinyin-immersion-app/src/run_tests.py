@@ -451,12 +451,32 @@ def db_tests():
         assert cur.fetchone()[0] == 1, "vocab_progress must be user-scoped"
         conn.close()
 
+    @test("session modes: difficulty banding and balanced draw")
+    def t_session_modes():
+        assert db._difficulty_band("猫") == db.EASY
+        assert db._difficulty_band("恭喜发财") == db.MEDIUM
+        assert db._difficulty_band("这么早起来干嘛？") == db.HARD
+        assert db._difficulty_band("猫", ease=2.0) == db.MEDIUM
+        users = {u["username"]: u for u in db.list_users()}
+        if "jean" not in users:
+            return
+        jid = users["jean"]["id"]
+        db.set_session_mode(jid, "random_balanced")
+        batch = db.get_session_words(jid, total=20)
+        assert len(batch) > 0
+        bands = {db._difficulty_band(w["chinese"]) for w in batch}
+        assert len(bands) >= 2, "balanced draw should span difficulty bands"
+        a = {w["id"] for w in db.get_session_words(jid, total=20)}
+        b = {w["id"] for w in db.get_session_words(jid, total=20)}
+        assert a != b, "random draw should vary between sessions"
+
     t_bank()
     t_flags()
     t_hw_session()
     t_multiuser_vocab()
     t_multiuser_pins()
     t_legacy_backup()
+    t_session_modes()
 
 
 # ======================================================================

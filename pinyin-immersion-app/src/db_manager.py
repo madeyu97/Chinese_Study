@@ -231,12 +231,28 @@ def init_db():
 #                     across difficulty bands. Best for a new learner.
 DEFAULT_USERS = [
     ("matt", "玛德宇", "latest_mix"),
-    ("jean", "姚皢慧", "random_balanced"),
+    ("selina", "姚皢慧", "random_balanced"),
 ]
 
 
 def _seed_users(conn):
     cursor = conn.cursor()
+    # One-off rename: an early build seeded this user as "jean". Rename in
+    # place so her progress, PIN and session mode all carry over, rather
+    # than creating a second account alongside it.
+    try:
+        cursor.execute("SELECT 1 FROM users WHERE username = 'jean'")
+        has_old = cursor.fetchone() is not None
+        cursor.execute("SELECT 1 FROM users WHERE username = 'selina'")
+        has_new = cursor.fetchone() is not None
+        if has_old and not has_new:
+            cursor.execute("UPDATE users SET username = 'selina' "
+                           "WHERE username = 'jean'")
+            conn.commit()
+            logging.warning("[USERS] Renamed user 'jean' -> 'selina'.")
+    except Exception as e:
+        conn.rollback()
+        logging.warning(f"[USERS] Rename check skipped: {e}")
     for username, display, mode in DEFAULT_USERS:
         cursor.execute(
             "INSERT INTO users (username, display_name, session_mode) "

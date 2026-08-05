@@ -1,4 +1,11 @@
 streamlit
+# Pinned deliberately. Starlette 1.4.0 added a REQUIRED keyword-only
+# argument (thread_minimum_size) to GZipResponder.__init__, which
+# Streamlit's _MediaAwareGZipResponder subclass does not pass - so the
+# server returns 500 to every health check and the app never starts.
+# 1.3.1 is the last version without that argument, and is what earlier
+# working deploys used. Remove this pin once Streamlit ships a fix.
+starlette==1.3.1
 pandas
 groq
 edge-tts

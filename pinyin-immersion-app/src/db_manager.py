@@ -59,6 +59,10 @@ def init_db():
     # can apply each person's intended mode once, without ever overwriting a
     # choice they've since made themselves.
     cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_mode TEXT")
+    # 'vocab'     - characters drawn from words you have studied
+    # 'frequency' - the 500 most common characters, in frequency order
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                   "handwriting_source TEXT DEFAULT 'vocab'")
     # Vocabulary CONTENT is shared by everyone studying on this deployment.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vocab (
@@ -284,6 +288,25 @@ def set_session_mode(user_id, mode):
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET session_mode = %s WHERE id = %s",
                    (mode, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_handwriting_source(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT handwriting_source FROM users WHERE id = %s",
+                   (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return (row[0] if row and row[0] else "vocab")
+
+
+def set_handwriting_source(user_id, source):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET handwriting_source = %s WHERE id = %s",
+                   (source, user_id))
     conn.commit()
     conn.close()
 
@@ -856,6 +879,81 @@ def get_focus_session(user_id, text):
                          word_english=gloss)
         session.append(entry)
     return session
+
+
+def get_curriculum_session(user_id, new_count=5, limit_rank=500):
+    """Handwriting queue driven by character frequency rather than by which
+    words you happen to have studied.
+
+    Due reviews come first, then the next unseen characters in frequency
+    order. The recall cue still prefers a real vocabulary word containing
+    the character; where you have no such word, the character's own pinyin
+    and gloss are used instead, so nothing in the curriculum is unreachable.
+    """
+    from character_curriculum import CHARACTERS, INFO
+    today_str = date.today().isoformat()
+    wanted = CHARACTERS[:limit_rank]
+
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT chinese, pinyin, english, review_count
+                      FROM vocab v JOIN vocab_progress p
+                        ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE p.review_count > 0""", (user_id,))
+    vocab_rows = [dict(r) for r in cursor.fetchall()]
+
+    ph = ",".join(["%s"] * len(wanted))
+    cursor.execute(f"""SELECT * FROM handwriting_progress
+                       WHERE user_id = %s AND character IN ({ph})""",
+                   [user_id] + wanted)
+    progress = {r["character"]: dict(r) for r in cursor.fetchall()}
+    conn.close()
+
+    def build(ch, is_new):
+        entry = _hw_entry(ch, is_new, 1, progress.get(ch), vocab_rows)
+        # No studied word contains this character yet - fall back to the
+        # curriculum's own pinyin and meaning as the cue.
+        if entry["word"] == ch and not entry["word_english"]:
+            info = INFO.get(ch, {})
+            entry["word"] = ch
+            entry["word_pinyin"] = info.get("pinyin", entry["char_pinyin"])
+            entry["word_english"] = info.get("gloss", "")
+        entry["curriculum_rank"] = INFO.get(ch, {}).get("rank")
+        return entry
+
+    due = [build(ch, False) for ch in wanted
+           if ch in progress and progress[ch]["next_review_date"] <= today_str]
+    due.sort(key=lambda e: (e["next_review_date"], e["curriculum_rank"] or 0))
+
+    new = [build(ch, True) for ch in wanted if ch not in progress][:new_count]
+    return due + new
+
+
+def get_curriculum_progress(user_id, limit_rank=500):
+    """How far through the frequency curriculum this user has got."""
+    from character_curriculum import CHARACTERS, coverage_at
+    wanted = CHARACTERS[:limit_rank]
+    conn = get_connection()
+    cursor = conn.cursor()
+    ph = ",".join(["%s"] * len(wanted))
+    cursor.execute(f"""SELECT character, interval FROM handwriting_progress
+                       WHERE user_id = %s AND character IN ({ph})""",
+                   [user_id] + wanted)
+    rows = cursor.fetchall()
+    conn.close()
+    started = {r[0] for r in rows}
+    mastered = {r[0] for r in rows if (r[1] or 0) >= 21}
+    # furthest CONSECUTIVE position reached, which is what "working through
+    # them in order" actually means
+    furthest = 0
+    for i, ch in enumerate(wanted, 1):
+        if ch in started:
+            furthest = i
+        else:
+            break
+    return {"total": len(wanted), "started": len(started),
+            "mastered": len(mastered), "furthest_rank": furthest,
+            "text_coverage": round(coverage_at(furthest), 1)}
 
 
 def get_handwriting_counts(user_id):

@@ -280,6 +280,21 @@ def t_fullwidth_punct():
     assert not ap._is_locked_sentence("红色")
 
 
+@test("curriculum: 500 frequency-ordered characters, clean data")
+def t_curriculum():
+    import character_curriculum as cc
+    assert len(cc.CURRICULUM) == 500
+    assert len(set(cc.CHARACTERS)) == 500, "duplicates in curriculum"
+    assert all("\u4e00" <= c <= "\u9fff" for c in cc.CHARACTERS)
+    assert cc.CHARACTERS[0] == "的" and cc.RANK["的"] == 1
+    assert all(cc.INFO[c]["pinyin"] and cc.INFO[c]["gloss"]
+               for c in cc.CHARACTERS), "every character needs a cue"
+    # coverage rises monotonically and lands near the known ~76%
+    assert 74 < cc.coverage_at(500) < 78, cc.coverage_at(500)
+    assert cc.coverage_at(100) < cc.coverage_at(500)
+    assert cc.slice_for(3) == ["的", "一", "是"]
+
+
 # ======================================================================
 # HOKKIEN ROMANISATION ENGINE
 # ======================================================================
@@ -489,7 +504,7 @@ if __name__ == "__main__":
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
     t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
-    t_hw_quality(); t_hw_context()
+    t_hw_quality(); t_hw_context(); t_curriculum()
     print("Hokkien engine:")
     t_hk_tones(); t_hk_taiji(); t_hk_tone9(); t_hk_dblhyphen()
     t_hk_s2t(); t_hk_match()

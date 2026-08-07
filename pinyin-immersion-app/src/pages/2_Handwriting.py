@@ -22,6 +22,10 @@ import streamlit as st
 from auth import require_login, sidebar_user_badge
 from hanzi_component import hanzi_drill
 from db_manager import (
+    get_curriculum_session,
+    get_curriculum_progress,
+    get_handwriting_source,
+    set_handwriting_source,
     get_handwriting_session,
     get_focus_session,
     get_struggle_session,
@@ -43,6 +47,29 @@ USER_ID = USER["id"]
 with st.sidebar:
     sidebar_user_badge()
     st.header("✍️ Handwriting")
+
+    _SOURCES = {
+        "frequency": "500 most common characters",
+        "vocab": "Characters from my vocabulary",
+    }
+    _src = get_handwriting_source(USER_ID)
+    _pick = st.radio("Character source", options=list(_SOURCES),
+                     index=list(_SOURCES).index(_src) if _src in _SOURCES else 1,
+                     format_func=lambda k: _SOURCES[k], key="hw_source")
+    if _pick != _src:
+        set_handwriting_source(USER_ID, _pick)
+        for k in ("hw_payload", "hw_sid", "hw_processed", "hw_done",
+                  "hw_final", "hw_state_seed"):
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    if _pick == "frequency":
+        cp = get_curriculum_progress(USER_ID)
+        st.metric("Curriculum", f"{cp['furthest_rank']}/{cp['total']}")
+        st.progress(cp["furthest_rank"] / cp["total"])
+        st.caption(f"Covers ~{cp['text_coverage']}% of characters in running "
+                   f"text. {cp['started']} started, {cp['mastered']} mastered.")
+        st.markdown("---")
     hw_stats = get_handwriting_stats(USER_ID)
     total = hw_stats["total_chars_available"]
     st.metric("Characters in your vocab", total)

@@ -19,7 +19,8 @@ from config import (
 )
 from handwriting_engine import (score_character, get_stroke_count,
                                 compute_next_review, choose_context_word)
-from dictionary_engine import derive_pinyin, cedict_gloss
+from dictionary_engine import (derive_pinyin, cedict_gloss,
+                               character_info, frequency_label)
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -1012,7 +1013,7 @@ def _hw_entry(ch, is_new, personal_freq, progress, vocab_rows):
     and the character's own pinyin. The character itself is the ANSWER and
     is only ever rendered by HanziWriter inside the drill component."""
     ctx = choose_context_word(ch, vocab_rows) or {}
-    return {
+    entry = {
         "character": ch,
         "is_new": is_new,
         "personal_freq": personal_freq,
@@ -1027,6 +1028,15 @@ def _hw_entry(ch, is_new, personal_freq, progress, vocab_rows):
         "word_pinyin": ctx.get("pinyin", ""),
         "word_english": ctx.get("english", ""),
     }
+    # The character's OWN dictionary entry and how common it is. The word
+    # gives context; this gives the character's actual meaning, which a
+    # single word often doesn't reveal (e.g. 巴 in 巴刹 is a loanword
+    # transliteration and tells you nothing about the character).
+    info = character_info(ch)
+    entry["char_gloss"] = info["gloss"]
+    entry["freq_rank"] = info["rank"]
+    entry["freq_label"] = frequency_label(info["rank"])
+    return entry
 
 
 def get_focus_session(user_id, text):
@@ -1251,8 +1261,12 @@ def get_handwriting_session(user_id, new_count=5):
         else:
             new_candidates.append(ch)
 
-    # 5. Rank new candidates by priority score
-    new_candidates.sort(key=lambda ch: score_character(ch, char_freq[ch]))
+    # 5. Introduce new characters in order of how common they are in
+    #    written Chinese, so the most useful ones are learned first.
+    #    Characters outside the frequency list sort last.
+    new_candidates.sort(
+        key=lambda ch: (character_info(ch)["rank"] or 10**6,
+                        score_character(ch, char_freq[ch])))
     selected_new = new_candidates[:new_count]
     new_entries = [_hw_entry(ch, True, char_freq[ch], None, rows)
                    for ch in selected_new]

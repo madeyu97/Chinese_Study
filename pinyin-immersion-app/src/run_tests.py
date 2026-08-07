@@ -238,6 +238,20 @@ def t_distractor_dedupe():
 
 
 
+@test("character info: frequency rank and dictionary gloss")
+def t_char_info():
+    assert de.character_info("的")["rank"] == 1
+    assert de.character_info("我")["rank"] == 9
+    assert de.character_info("猫")["rank"] > 1000        # real but uncommon
+    assert de.character_info("的")["gloss"], "every common char needs a gloss"
+    assert de.frequency_label(1) == "#1 most common"
+    assert "top 100" in de.frequency_label(57)
+    assert "top 500" in de.frequency_label(300)
+    assert de.frequency_label(None) == "rare"
+    # unknown characters must not raise
+    de.character_info("\u9f98")
+
+
 # ======================================================================
 # HANDWRITING ENGINE
 # ======================================================================
@@ -510,7 +524,7 @@ if __name__ == "__main__":
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
     t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
-    t_hw_quality(); t_hw_context(); t_curriculum()
+    t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info()
     print("Hokkien engine:")
     t_hk_tones(); t_hk_taiji(); t_hk_tone9(); t_hk_dblhyphen()
     t_hk_s2t(); t_hk_match()

@@ -419,3 +419,70 @@ def build_breakdown(sentence, llm_breakdown=None, overrides=None,
 
 # Start preloading as soon as this module is imported.
 warm_up()
+
+
+# ======================================================================
+# PER-CHARACTER INFO (for the handwriting drill)
+# The drill cues recall with a word, but a learner also needs to know what
+# the CHARACTER itself means and how common it is. Both come from data
+# already bundled with the app, cached in-process because the drill asks
+# for them once per card.
+# ======================================================================
+_char_info_cache = {}
+
+
+def character_info(ch):
+    """{'rank': int|None, 'gloss': str, 'pinyin': str} for a single character.
+
+    rank is its position in a frequency count of modern written Chinese
+    (1 = most common, ~8,900 entries). None means it falls outside that
+    list, i.e. genuinely rare.
+    """
+    if ch in _char_info_cache:
+        return _char_info_cache[ch]
+
+    info = {"rank": None, "gloss": "", "pinyin": derive_pinyin(ch)}
+    try:
+        entry = _get_dictionary().get_character_frequency(ch)
+        if entry:
+            info["rank"] = int(entry.get("number")) or None
+    except Exception:
+        pass
+
+    # Prefer the CC-CEDICT gloss: cleaner and consistent with the
+    # dictionary breakdown shown elsewhere in the app.
+    try:
+        gloss, _all, _py = cedict_gloss(ch)
+        info["gloss"] = gloss
+    except Exception:
+        pass
+    if not info["gloss"]:
+        try:
+            entry = _get_dictionary().get_character_frequency(ch)
+            raw = (entry or {}).get("meaning", "")
+            info["gloss"] = " / ".join(
+                s.strip() for s in re.split(r"[/,]", raw) if s.strip())[:90]
+        except Exception:
+            pass
+
+    _char_info_cache[ch] = info
+    return info
+
+
+def frequency_label(rank):
+    """Human phrasing for a frequency rank."""
+    if not rank:
+        return "rare"
+    if rank == 1:
+        return "#1 most common"
+    if rank <= 10:
+        return f"#{rank} most common"
+    if rank <= 100:
+        return f"#{rank} - top 100"
+    if rank <= 500:
+        return f"#{rank} - top 500"
+    if rank <= 1000:
+        return f"#{rank} - top 1000"
+    if rank <= 3000:
+        return f"#{rank}"
+    return f"#{rank} - uncommon"

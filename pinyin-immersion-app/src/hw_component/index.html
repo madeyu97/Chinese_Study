@@ -64,6 +64,13 @@
     margin-top: 8px; font-size: 24px; color: var(--ink); font-weight: 600;
   }
   #char-pinyin small { color: var(--text-dim); font-weight: 400; font-size: 12px; }
+  #char-gloss {
+    margin-top: 6px; font-size: 13px; line-height: 1.4; color: var(--text);
+    background: var(--chip); border: 1px solid var(--card-edge);
+    border-radius: 10px; padding: 7px 11px; text-align: left;
+  }
+  #char-gloss b { color: var(--accent); font-weight: 600; }
+  .chip.freq { color: var(--ink); border-color: #4A3F1E; }
 
   /* ---- writing card ---- */
   #board-wrap { margin-top: 12px; display: flex; justify-content: center; }
@@ -128,6 +135,7 @@
       <div id="word-pinyin"></div>
       <div id="word-english"></div>
       <div id="char-pinyin"></div>
+      <div id="char-gloss"></div>
     </div>
 
     <div id="board-wrap">
@@ -268,6 +276,7 @@ function setChips(phaseLabel) {
   if (c.is_new) chips.push('<span class="chip new">NEW</span>');
   chips.push(`<span class="chip">${S.i + 1} / ${S.queue.length}</span>`);
   if (S.strokeTotal) chips.push(`<span class="chip">${S.strokeTotal} strokes</span>`);
+  if (c.freq_label) chips.push(`<span class="chip freq">${c.freq_label}</span>`);
   if (phaseLabel) chips.push(`<span class="chip phase">${phaseLabel}</span>`);
   document.getElementById("chips").innerHTML = chips.join("");
 }
@@ -284,6 +293,16 @@ function renderCue() {
   document.getElementById("word-english").textContent = c.word_english || "";
   document.getElementById("char-pinyin").innerHTML =
     (c.char_pinyin || "") + ' <small>← write this character</small>';
+  // The character's OWN dictionary entry. Safe to show before writing: a
+  // definition describes meaning, never the shape, so it aids recall
+  // without giving the answer away.
+  const gloss = document.getElementById("char-gloss");
+  if (c.char_gloss) {
+    gloss.style.display = "block";
+    gloss.innerHTML = "<b>This character:</b> " + c.char_gloss;
+  } else {
+    gloss.style.display = "none";
+  }
 }
 
 function setStrokeProgress() {

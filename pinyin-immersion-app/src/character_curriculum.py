@@ -527,6 +527,28 @@ def slice_for(count, start=0):
     return CHARACTERS[start:start + count]
 
 
+# Individual share of running text per character, derived from the
+# cumulative column. Needed because progress is not necessarily made in
+# strict order - a character studied at rank 300 still contributes its own
+# share whether or not ranks 3-299 have been done.
+_SHARE = {}
+_prev = 0.0
+for _row in CURRICULUM:
+    _SHARE[_row[1]] = max(0.0, _row[4] - _prev)
+    _prev = _row[4]
+
+
+def char_share(ch):
+    """Percentage of running text this single character accounts for."""
+    return _SHARE.get(ch, 0.0)
+
+
+def coverage_for(chars):
+    """Combined share of running text for any set of characters studied,
+    regardless of the order they were learned in."""
+    return sum(_SHARE.get(c, 0.0) for c in set(chars))
+
+
 def coverage_at(rank):
     """Share of running text covered by the first `rank` characters."""
     if rank <= 0:

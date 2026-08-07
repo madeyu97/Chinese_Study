@@ -65,10 +65,15 @@ with st.sidebar:
 
     if _pick == "frequency":
         cp = get_curriculum_progress(USER_ID)
-        st.metric("Curriculum", f"{cp['furthest_rank']}/{cp['total']}")
-        st.progress(cp["furthest_rank"] / cp["total"])
-        st.caption(f"Covers ~{cp['text_coverage']}% of characters in running "
-                   f"text. {cp['started']} started, {cp['mastered']} mastered.")
+        st.metric("Characters studied", f"{cp['started']}/{cp['total']}")
+        st.progress(cp["started"] / cp["total"])
+        st.caption(
+            f"Those characters make up ~**{cp['text_coverage']}%** of "
+            f"everything you'll read. {cp['mastered']} mastered "
+            f"(~{cp['mastered_coverage']}%).")
+        if cp["in_order"] < cp["started"]:
+            st.caption(f"Working strictly in order, you're at #{cp['in_order']} "
+                       f"- the rest came from vocabulary practice.")
         st.markdown("---")
     hw_stats = get_handwriting_stats(USER_ID)
     total = hw_stats["total_chars_available"]

@@ -362,6 +362,8 @@ def _cached(ttl=20):
 
 def clear_caches():
     """Drop cached summaries after anything that changes them."""
+    if not _in_streamlit():
+        return
     try:
         st.cache_data.clear()
     except Exception:
@@ -1115,8 +1117,16 @@ def get_curriculum_session(user_id, new_count=5, limit_rank=500):
 
 @_cached(ttl=20)
 def get_curriculum_progress(user_id, limit_rank=500):
-    """How far through the frequency curriculum this user has got."""
-    from character_curriculum import CHARACTERS, coverage_at
+    """How far through the frequency curriculum this user has got.
+
+    The headline number is how many of the 500 characters have actually
+    been studied, and coverage is the SUM of those characters' individual
+    frequencies. An earlier version reported the furthest CONSECUTIVE
+    position reached instead, which stuck at 2/500 for anyone who had
+    drilled characters from their vocabulary before switching modes: one
+    missing character near the top of the list hid all later progress.
+    """
+    from character_curriculum import CHARACTERS, coverage_for
     wanted = CHARACTERS[:limit_rank]
     conn = get_connection()
     cursor = conn.cursor()
@@ -1128,17 +1138,22 @@ def get_curriculum_progress(user_id, limit_rank=500):
     conn.close()
     started = {r[0] for r in rows}
     mastered = {r[0] for r in rows if (r[1] or 0) >= 21}
-    # furthest CONSECUTIVE position reached, which is what "working through
-    # them in order" actually means
-    furthest = 0
-    for i, ch in enumerate(wanted, 1):
+
+    # Secondary, kept for the "working through them in order" view.
+    in_order = 0
+    for ch in wanted:
         if ch in started:
-            furthest = i
+            in_order += 1
         else:
             break
-    return {"total": len(wanted), "started": len(started),
-            "mastered": len(mastered), "furthest_rank": furthest,
-            "text_coverage": round(coverage_at(furthest), 1)}
+
+    return {"total": len(wanted),
+            "started": len(started),
+            "mastered": len(mastered),
+            "in_order": in_order,
+            "furthest_rank": len(started),      # headline = real progress
+            "text_coverage": round(coverage_for(started), 1),
+            "mastered_coverage": round(coverage_for(mastered), 1)}
 
 
 @_cached(ttl=20)

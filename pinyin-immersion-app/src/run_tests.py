@@ -293,6 +293,12 @@ def t_curriculum():
     assert 74 < cc.coverage_at(500) < 78, cc.coverage_at(500)
     assert cc.coverage_at(100) < cc.coverage_at(500)
     assert cc.slice_for(3) == ["的", "一", "是"]
+    # individual shares must reconstruct the cumulative total
+    assert abs(cc.coverage_for(cc.CHARACTERS) - cc.coverage_at(500)) < 0.01
+    # BUG: progress must not be measured as "furthest consecutive rank" -
+    # a single gap near the top hid all later work (showed 2/500 for 62).
+    scattered = ["的", "一"] + cc.CHARACTERS[50:110]
+    assert cc.coverage_for(scattered) > cc.coverage_at(2)
 
 
 # ======================================================================

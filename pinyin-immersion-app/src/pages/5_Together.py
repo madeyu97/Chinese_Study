@@ -103,12 +103,12 @@ try:
                           (c2, other["display_name"], theirs)):
         with col:
             st.markdown(f"**{name}**")
-            st.progress(cp["furthest_rank"] / max(1, cp["total"]))
-            st.caption(f"{cp['furthest_rank']}/{cp['total']} characters - "
+            st.progress(cp["started"] / max(1, cp["total"]))
+            st.caption(f"{cp['started']}/{cp['total']} characters - "
                        f"~{cp['text_coverage']}% of running text")
-    st.caption("Only counts characters reached consecutively from the start "
-               "of the frequency list, so it reflects genuinely working "
-               "through them in order.")
+    st.caption("Counts every one of the 500 most common characters either "
+               "of you has practised, and what share of ordinary written "
+               "Chinese those characters account for.")
 except Exception:
     st.caption("Curriculum progress unavailable.")
 

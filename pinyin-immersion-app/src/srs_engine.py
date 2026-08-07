@@ -13,7 +13,8 @@ GRADE_HARD = 1
 GRADE_GOOD = 2
 GRADE_EASY = 3
 
-def process_review(user_id, word_id, current_interval, current_ease, grade):
+def process_review(user_id, word_id, current_interval, current_ease, grade,
+                   kind='listen', item=None):
     """
     Per-word SRS state is still maintained, even though the session-selection
     layer no longer uses next_review_date.
@@ -45,6 +46,13 @@ def process_review(user_id, word_id, current_interval, current_ease, grade):
     new_interval = min(new_interval, 365)
     next_review_date = (date.today() + timedelta(days=new_interval)).isoformat()
     update_word_progress(user_id, word_id, next_review_date, new_interval, round(new_ease, 2))
+    # kind distinguishes a spoken recall card from a listening card, so the
+    # progress page can report speaking and listening separately.
+    try:
+        from db_manager import log_activity
+        log_activity(user_id, kind, item, grade)
+    except Exception:
+        pass
     logging.info(f"Word {word_id} graded {grade}. New interval: {new_interval} days.")
     return next_review_date
 

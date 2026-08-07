@@ -163,7 +163,9 @@ def grade_word_and_next(grade):
         word_id=current_word['id'],
         current_interval=current_word['interval'],
         current_ease=current_word['ease_factor'],
-        grade=grade
+        grade=grade,
+        kind=('speak' if current_mode == 'recall' else 'listen'),
+        item=current_word.get('chinese'),
     )
     st.session_state.current_index += 1
     reset_card_state()
@@ -257,8 +259,28 @@ st.markdown("---")
 # ==========================================
 # 5.5 SIDEBAR
 # ==========================================
+# A nudge from the other person shows the moment you open the app, so it
+# actually lands rather than waiting to be discovered on another page.
+try:
+    _pending = db.unseen_nudges(USER_ID)
+    if _pending:
+        for _n in _pending:
+            st.info(f"💬 **{_n['display_name']}**: {_n['message']}")
+        if st.button("Got it 👍", key="ack_nudges"):
+            db.mark_nudges_seen(USER_ID)
+            st.rerun()
+except Exception:
+    pass
+
 with st.sidebar:
     sidebar_user_badge()
+    try:
+        _st = db.activity_streak(USER_ID)
+        _tot = db.activity_totals(USER_ID)
+        if _st or _tot["today"]:
+            st.caption(f"🔥 {_st}-day streak · {_tot['today']} cards today")
+    except Exception:
+        pass
 
     with st.expander("⚙️ Session style"):
         _MODES = {

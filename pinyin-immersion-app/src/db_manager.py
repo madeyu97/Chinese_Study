@@ -187,6 +187,32 @@ def init_db():
     # Per-user Hokkien SRS (the deck itself stays shared — verifications and
     # Tâi-lô corrections are curation work, not personal progress).
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            day DATE NOT NULL DEFAULT CURRENT_DATE,
+            ts TIMESTAMP DEFAULT NOW(),
+            kind TEXT NOT NULL,
+            item TEXT,
+            grade INTEGER,
+            mistakes INTEGER DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_activity_user_day
+        ON activity_log (user_id, day)
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS nudges (
+            id SERIAL PRIMARY KEY,
+            from_user INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            to_user INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            seen_at TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS hokkien_audio (
             cache_key TEXT PRIMARY KEY,
             entry_id INTEGER REFERENCES hokkien_deck(id) ON DELETE CASCADE,
@@ -1097,6 +1123,7 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
            today_str, mistakes, new_grades, new_mist, today_str))
     conn.commit()
     conn.close()
+    log_activity(user_id, "write", character, grade, mistakes)
     logging.info(f"[HW] {character} graded {grade} ({mistakes} mistakes) "
                  f"→ next review in {new_interval}d"
                  + (" [REQUEUED this session]" if requeue else ""))
@@ -1538,6 +1565,7 @@ def hokkien_grade(user_id, entry_id, grade, current_state):
     """, (user_id, entry_id, new_interval, new_ease, next_review))
     conn.commit()
     conn.close()
+    log_activity(user_id, "hokkien", str(entry_id), grade)
     return new_interval
 
 
@@ -1595,6 +1623,147 @@ def hokkien_audio_stats():
     n, total = cursor.fetchone()
     conn.close()
     return {"clips": n or 0, "bytes": int(total or 0)}
+
+
+
+# ==========================================
+# ACTIVITY LOG + FRIENDLY RIVALRY
+#
+# Deliberately compares EFFORT (cards done, streaks, consistency) rather
+# than lifetime totals. One of you started months earlier, so a raw
+# leaderboard would be permanently discouraging for the other and would
+# stop being motivating for either.
+# ==========================================
+ACTIVITY_KINDS = {"listen": "Listening", "speak": "Speaking",
+                  "write": "Handwriting", "hokkien": "Hokkien"}
+
+
+def log_activity(user_id, kind, item=None, grade=None, mistakes=0):
+    """Record one graded card. Never raises: a logging failure must not
+    interrupt someone's study session."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""INSERT INTO activity_log
+                          (user_id, kind, item, grade, mistakes)
+                          VALUES (%s, %s, %s, %s, %s)""",
+                       (user_id, kind, (item or "")[:80], grade, mistakes or 0))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.warning(f"[ACTIVITY] not logged: {e}")
+
+
+def activity_totals(user_id, days=7):
+    """Per-kind counts over the last `days` days, plus today's total."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT kind, COUNT(*) FROM activity_log
+                      WHERE user_id = %s AND day > CURRENT_DATE - %s::integer
+                      GROUP BY kind""", (user_id, days))
+    by_kind = {k: n for k, n in cursor.fetchall()}
+    cursor.execute("""SELECT COUNT(*) FROM activity_log
+                      WHERE user_id = %s AND day = CURRENT_DATE""", (user_id,))
+    today = cursor.fetchone()[0] or 0
+    cursor.execute("""SELECT COUNT(*) FILTER (WHERE grade >= 2), COUNT(*)
+                      FROM activity_log
+                      WHERE user_id = %s AND day > CURRENT_DATE - %s::integer
+                        AND grade IS NOT NULL""", (user_id, days))
+    good, total = cursor.fetchone()
+    conn.close()
+    return {"by_kind": by_kind, "today": today,
+            "week_total": sum(by_kind.values()),
+            "accuracy": round(100.0 * good / total) if total else None}
+
+
+def activity_streak(user_id):
+    """Consecutive days studied, counting back from today (or yesterday, so
+    the streak isn't shown as broken before you've studied today)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT DISTINCT day FROM activity_log
+                      WHERE user_id = %s ORDER BY day DESC LIMIT 400""",
+                   (user_id,))
+    days = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    if not days:
+        return 0
+    from datetime import timedelta
+    today = date.today()
+    cursor_day = today if days[0] == today else today - timedelta(days=1)
+    streak = 0
+    for d in days:
+        if d == cursor_day:
+            streak += 1
+            cursor_day -= timedelta(days=1)
+        elif d < cursor_day:
+            break
+    return streak
+
+
+def daily_series(user_id, days=14):
+    """[(day, count)] for a small activity chart, zero-filled."""
+    from datetime import timedelta
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT day, COUNT(*) FROM activity_log
+                      WHERE user_id = %s AND day > CURRENT_DATE - %s::integer
+                      GROUP BY day""", (user_id, days))
+    counts = {d: n for d, n in cursor.fetchall()}
+    conn.close()
+    today = date.today()
+    return [(today - timedelta(days=i), counts.get(today - timedelta(days=i), 0))
+            for i in range(days - 1, -1, -1)]
+
+
+def recent_activity(limit=12):
+    """Combined feed across everyone, for the 'what's she been up to' view."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT u.display_name, a.kind, a.day, COUNT(*) AS n
+                      FROM activity_log a JOIN users u ON u.id = a.user_id
+                      WHERE a.day > CURRENT_DATE - 14
+                      GROUP BY u.display_name, a.kind, a.day
+                      ORDER BY a.day DESC, n DESC LIMIT %s""", (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+# ---------- nudges ----------
+def send_nudge(from_user, to_user, message):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO nudges (from_user, to_user, message)
+                      VALUES (%s, %s, %s)""",
+                   (from_user, to_user, message[:280]))
+    conn.commit()
+    conn.close()
+
+
+def unseen_nudges(user_id):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT n.id, n.message, n.created_at, u.display_name
+                      FROM nudges n JOIN users u ON u.id = n.from_user
+                      WHERE n.to_user = %s AND n.seen_at IS NULL
+                      ORDER BY n.created_at""", (user_id,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def mark_nudges_seen(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""UPDATE nudges SET seen_at = NOW()
+                      WHERE to_user = %s AND seen_at IS NULL""", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def other_users(user_id):
+    return [u for u in list_users() if u["id"] != user_id]
 
 
 init_db()

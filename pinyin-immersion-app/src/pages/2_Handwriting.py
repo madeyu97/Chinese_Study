@@ -65,14 +65,26 @@ with st.sidebar:
 
     if _pick == "frequency":
         cp = get_curriculum_progress(USER_ID)
-        st.metric("Characters studied", f"{cp['started']}/{cp['total']}")
-        st.progress(cp["started"] / cp["total"])
-        st.caption(
-            f"Those characters make up ~**{cp['text_coverage']}%** of "
-            f"everything you'll read. {cp['mastered']} mastered "
-            f"(~{cp['mastered_coverage']}%).")
-        if cp["in_order"] < cp["started"]:
-            st.caption(f"Working strictly in order, you're at #{cp['in_order']} "
+        # Read defensively: a page and its data layer can briefly disagree
+        # after a partial deploy, and a missing key should degrade the
+        # display rather than take the whole page down.
+        _total = cp.get("total", 500) or 500
+        _started = cp.get("started", 0)
+        _mastered = cp.get("mastered", 0)
+        st.metric("Characters studied", f"{_started}/{_total}")
+        st.progress(min(1.0, _started / _total))
+        _cov = cp.get("text_coverage")
+        _mcov = cp.get("mastered_coverage")
+        _line = ""
+        if _cov is not None:
+            _line = (f"Those characters make up ~**{_cov}%** of everything "
+                     f"you'll read. ")
+        _line += f"{_mastered} mastered"
+        _line += f" (~{_mcov}%)." if _mcov is not None else "."
+        st.caption(_line)
+        _in_order = cp.get("in_order")
+        if _in_order is not None and _in_order < _started:
+            st.caption(f"Working strictly in order, you're at #{_in_order} "
                        f"- the rest came from vocabulary practice.")
         st.markdown("---")
     hw_stats = get_handwriting_stats(USER_ID)

@@ -103,9 +103,12 @@ try:
                           (c2, other["display_name"], theirs)):
         with col:
             st.markdown(f"**{name}**")
-            st.progress(cp["started"] / max(1, cp["total"]))
-            st.caption(f"{cp['started']}/{cp['total']} characters - "
-                       f"~{cp['text_coverage']}% of running text")
+            _tot = cp.get("total", 500) or 500
+            _st = cp.get("started", cp.get("furthest_rank", 0))
+            st.progress(min(1.0, _st / _tot))
+            _c = cp.get("text_coverage")
+            st.caption(f"{_st}/{_tot} characters"
+                       + (f" - ~{_c}% of running text" if _c is not None else ""))
     st.caption("Counts every one of the 500 most common characters either "
                "of you has practised, and what share of ordinary written "
                "Chinese those characters account for.")

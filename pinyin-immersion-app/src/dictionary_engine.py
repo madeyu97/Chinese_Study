@@ -11,6 +11,7 @@ otherwise the dictionary wins. This permanently removes the entire class of
 
 import logging
 import re
+import threading
 
 from pypinyin import pinyin as _pypinyin, Style as _PinyinStyle
 
@@ -19,13 +20,38 @@ import jieba
 jieba.setLogLevel(logging.WARNING)
 
 _dictionary = None
+_dict_lock = threading.Lock()
+
+
+def warm_up():
+    """Load the heavy dictionaries in the background.
+
+    PERFORMANCE: hanzipy's dictionary takes ~4s to load and jieba's prefix
+    dict ~1.4s. Both are lazy, so previously the FIRST new card of a
+    session stalled for five-and-a-half seconds while they loaded. Warming
+    them on a daemon thread at import time overlaps that cost with the
+    user logging in and picking a session, so by the time a card needs a
+    breakdown the work is already done.
+    """
+    def _load():
+        try:
+            _get_dictionary()
+            jieba.lcut("预热分词")      # forces jieba's prefix dict
+        except Exception as e:
+            logging.warning(f"[WARMUP] dictionary preload skipped: {e}")
+    t = threading.Thread(target=_load, daemon=True, name="dict-warmup")
+    t.start()
+    return t
 
 
 def _get_dictionary():
     global _dictionary
     if _dictionary is None:
-        from hanzipy.dictionary import HanziDictionary
-        _dictionary = HanziDictionary()
+        with _dict_lock:
+            if _dictionary is not None:
+                return _dictionary
+            from hanzipy.dictionary import HanziDictionary
+            _dictionary = HanziDictionary()
         # hanzipy turns on root DEBUG logging when it loads — undo that.
         logging.getLogger().setLevel(logging.INFO)
     return _dictionary
@@ -389,3 +415,7 @@ def build_breakdown(sentence, llm_breakdown=None, overrides=None,
         })
         prev_was_numeral = is_numeral
     return breakdown
+
+
+# Start preloading as soon as this module is imported.
+warm_up()

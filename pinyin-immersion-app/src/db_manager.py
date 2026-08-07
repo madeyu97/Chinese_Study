@@ -2,11 +2,13 @@
 
 import os
 import hashlib
+import threading
 import pandas as pd
 from datetime import datetime, date
 import logging
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool
 import streamlit as st
 
 from config import (
@@ -21,7 +23,11 @@ from dictionary_engine import derive_pinyin, cedict_gloss
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-def get_connection():
+_POOL = None
+_POOL_LOCK = threading.Lock()
+
+
+def _database_url():
     db_url = None
     try:
         if hasattr(st, "secrets") and "DATABASE_URL" in st.secrets:
@@ -32,12 +38,89 @@ def get_connection():
         db_url = os.environ["DATABASE_URL"]
     if not db_url:
         raise ValueError("CRITICAL ERROR: DATABASE_URL is missing!")
-    return psycopg2.connect(db_url)
+    return db_url
 
-# Two Streamlit deployments can share this database (one per person, each
-# with its own API key and resource allocation). If both boot at once they
-# would otherwise race on schema creation and the one-time migration, so
-# the whole of init_db runs under a Postgres advisory lock.
+
+class _PooledConnection:
+    """Looks like a psycopg2 connection, but close() returns it to the pool.
+
+    PERFORMANCE: every data function in this module opens a connection and
+    closes it, and Streamlit re-runs the whole script on every interaction -
+    so a single click used to mean 3-11 fresh TLS handshakes to Supabase.
+    Pooling keeps them open and reuses them, which removes most of the
+    per-click lag without touching any calling code.
+    """
+
+    def __init__(self, pool, conn):
+        self._pool = pool
+        self._conn = conn
+        self._returned = False
+
+    def close(self):
+        if self._returned:
+            return
+        self._returned = True
+        try:
+            if not self._conn.closed:
+                # Drop any transaction the caller left open, so the next
+                # borrower starts clean.
+                self._conn.rollback()
+                self._pool.putconn(self._conn)
+            else:
+                self._pool.putconn(self._conn, close=True)
+        except Exception:
+            try:
+                self._pool.putconn(self._conn, close=True)
+            except Exception:
+                pass
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def _get_pool():
+    global _POOL
+    if _POOL is None:
+        with _POOL_LOCK:
+            if _POOL is None:
+                _POOL = pool.ThreadedConnectionPool(
+                    minconn=1, maxconn=5, dsn=_database_url())
+    return _POOL
+
+
+def reset_pool():
+    """Drop every pooled connection. Used when the database has gone away
+    (Supabase closes idle connections, and apps here sleep for hours)."""
+    global _POOL
+    with _POOL_LOCK:
+        if _POOL is not None:
+            try:
+                _POOL.closeall()
+            except Exception:
+                pass
+            _POOL = None
+
+
+def get_connection():
+    """Borrow a connection from the pool, reconnecting if it has gone stale."""
+    for attempt in (1, 2):
+        try:
+            p = _get_pool()
+            raw = p.getconn()
+            if raw.closed:
+                p.putconn(raw, close=True)
+                raise psycopg2.OperationalError("stale pooled connection")
+            return _PooledConnection(p, raw)
+        except Exception as e:
+            if attempt == 2:
+                raise
+            logging.warning(f"[DB] pool reset after: {e}")
+            reset_pool()
+
+
+# Two Streamlit deployments can share this database (one per person). If
+# both boot at once they would otherwise race on schema creation and the
+# one-time migration, so init_db runs under a Postgres advisory lock.
 _INIT_LOCK_KEY = 728451903
 
 
@@ -245,6 +328,44 @@ def init_db():
         pass
     conn.close()
     logging.info("Supabase database initialized successfully.")
+
+
+# ==========================================
+# SHORT-LIVED READ CACHE
+# Streamlit re-runs the entire script on every interaction, so the sidebar
+# metrics alone used to re-query the database on each click. These are
+# read-only summaries where a few seconds of staleness is invisible, and
+# any write clears them immediately, so the numbers still update the
+# moment you grade a card.
+# ==========================================
+def _in_streamlit():
+    try:
+        from streamlit.runtime import exists
+        return exists()
+    except Exception:
+        return False
+
+
+def _cached(ttl=20):
+    """Cache only when actually running inside Streamlit. The offline
+    scripts (deck builders, tests) get the plain function, so they neither
+    cache stale data nor emit 'no runtime found' warnings."""
+    def wrap(fn):
+        if not _in_streamlit():
+            return fn
+        try:
+            return st.cache_data(ttl=ttl, show_spinner=False)(fn)
+        except Exception:
+            return fn
+    return wrap
+
+
+def clear_caches():
+    """Drop cached summaries after anything that changes them."""
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
 
 
 # ==========================================
@@ -513,42 +634,78 @@ _VOCAB_SELECT = """
 """
 
 
-def import_vocab_from_csv():
-    """Import the CSV into the SHARED vocabulary table. Progress is per-user
-    and is created lazily the first time someone studies a word."""
+def _csv_fingerprint():
+    """Cheap identity for the vocabulary CSV (size + mtime + row count)."""
+    try:
+        st_ = os.stat(VOCAB_CSV_PATH)
+        return f"{st_.st_size}:{int(st_.st_mtime)}"
+    except OSError:
+        return ""
+
+
+def import_vocab_from_csv(force=False):
+    """Import the CSV into the SHARED vocabulary table.
+
+    PERFORMANCE: this used to run one SELECT per row - about 1,400 network
+    round-trips to Supabase on every single app boot, which dominated
+    start-up time. Now it does two queries total (read existing keys, bulk
+    insert the rest), and skips the work altogether when the CSV hasn't
+    changed since the last import.
+    """
     if not VOCAB_CSV_PATH.exists():
         logging.warning("CSV file not found. Skipping import.")
         return
+
+    fingerprint = _csv_fingerprint()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""CREATE TABLE IF NOT EXISTS app_meta (
+                        key TEXT PRIMARY KEY, value TEXT)""")
+    conn.commit()
+    if not force and fingerprint:
+        cursor.execute("SELECT value FROM app_meta WHERE key = 'vocab_csv'")
+        row = cursor.fetchone()
+        if row and row[0] == fingerprint:
+            conn.close()
+            logging.info("Vocabulary CSV unchanged - import skipped.")
+            return
+
     df = pd.read_csv(VOCAB_CSV_PATH)
     df['Chinese'] = df['Chinese'].astype(str).str.strip()
     df['Pinyin'] = df['Pinyin'].astype(str).str.strip()
     df = df.replace('', pd.NA).replace('nan', pd.NA).dropna(subset=['Chinese', 'Pinyin'])
     df['English'] = df['English'].fillna('').astype(str).str.strip()
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    new_words_added = 0
-    skipped = 0
-    today_str = date.today().isoformat()
+    # 1 query: everything already stored
+    cursor.execute("SELECT chinese, pinyin FROM vocab")
+    existing = {(c, p) for c, p in cursor.fetchall()}
 
-    for _index, row in df.iterrows():
-        cursor.execute('SELECT id FROM vocab WHERE chinese = %s AND pinyin = %s',
-                       (row['Chinese'], row['Pinyin']))
-        if not cursor.fetchone():
-            cursor.execute("""
-                INSERT INTO vocab (chinese, pinyin, english, date_added)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (chinese, pinyin) DO NOTHING
-            """, (row['Chinese'], row['Pinyin'], row['English'], today_str))
-            new_words_added += 1
-        else:
-            skipped += 1
+    today_str = date.today().isoformat()
+    fresh = []
+    seen = set()
+    for _i, row in df.iterrows():
+        key = (row['Chinese'], row['Pinyin'])
+        if key in existing or key in seen:
+            continue
+        seen.add(key)
+        fresh.append((row['Chinese'], row['Pinyin'], row['English'], today_str))
+
+    # 1 query: bulk insert
+    if fresh:
+        psycopg2.extras.execute_values(
+            cursor,
+            "INSERT INTO vocab (chinese, pinyin, english, date_added) VALUES %s "
+            "ON CONFLICT (chinese, pinyin) DO NOTHING",
+            fresh, page_size=500)
+
+    if fingerprint:
+        cursor.execute("""INSERT INTO app_meta (key, value) VALUES ('vocab_csv', %s)
+                          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
+                       (fingerprint,))
     conn.commit()
     conn.close()
-    if new_words_added:
-        logging.info(f"Imported {new_words_added} new words.")
-    if skipped:
-        logging.info(f"Skipped {skipped} duplicates.")
+    logging.info(f"Vocabulary import: {len(fresh)} new, "
+                 f"{len(df) - len(fresh)} already present.")
 
 
 def _ensure_progress(cursor, user_id, vocab_id):
@@ -765,6 +922,7 @@ def update_word_progress(user_id, word_id, next_review_date, new_interval, new_e
     conn.close()
 
 
+@_cached(ttl=20)
 def get_progress_stats(user_id):
     conn = get_connection()
     cursor = conn.cursor()
@@ -955,6 +1113,7 @@ def get_curriculum_session(user_id, new_count=5, limit_rank=500):
     return due + new
 
 
+@_cached(ttl=20)
 def get_curriculum_progress(user_id, limit_rank=500):
     """How far through the frequency curriculum this user has got."""
     from character_curriculum import CHARACTERS, coverage_at
@@ -982,11 +1141,35 @@ def get_curriculum_progress(user_id, limit_rank=500):
             "text_coverage": round(coverage_at(furthest), 1)}
 
 
+@_cached(ttl=20)
 def get_handwriting_counts(user_id):
-    """(due_reviews, new_available) for the session setup screen."""
-    session = get_handwriting_session(user_id, new_count=10**6)
-    due = sum(1 for e in session if not e["is_new"])
-    new = sum(1 for e in session if e["is_new"])
+    """(due_reviews, new_available) for the session setup screen.
+
+    PERFORMANCE: this used to build an ENTIRE drill session with
+    new_count=1,000,000 just to count two numbers - deriving pinyin,
+    stroke counts and a context word for every character in the user's
+    vocabulary, on every page load. It now counts in SQL.
+    """
+    today_str = date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT v.chinese FROM vocab v JOIN vocab_progress p
+                        ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE p.review_count > 0""", (user_id,))
+    chars = {c for (text,) in cursor.fetchall() for c in text if _is_cjk(c)}
+    if not chars:
+        conn.close()
+        return 0, 0
+    ph = ",".join(["%s"] * len(chars))
+    chars = list(chars)
+    cursor.execute(f"""SELECT character, next_review_date
+                       FROM handwriting_progress
+                       WHERE user_id = %s AND character IN ({ph})""",
+                   [user_id] + chars)
+    seen = dict(cursor.fetchall())
+    conn.close()
+    due = sum(1 for c in chars if c in seen and seen[c] <= today_str)
+    new = sum(1 for c in chars if c not in seen)
     return due, new
 
 
@@ -1130,6 +1313,7 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
     return requeue
 
 
+@_cached(ttl=20)
 def get_handwriting_stats(user_id):
     """Counts for the handwriting sidebar widget."""
     conn = get_connection()
@@ -1257,6 +1441,7 @@ def get_recent_flags(limit=8):
     return rows
 
 
+@_cached(ttl=20)
 def bank_stats():
     conn = get_connection()
     cursor = conn.cursor()
@@ -1453,6 +1638,7 @@ def hokkien_add(mandarin, mandarin_full, english, hokkien_hanji, tailo,
     return added
 
 
+@_cached(ttl=20)
 def hokkien_stats(user_id=None):
     conn = get_connection()
     cursor = conn.cursor()
@@ -1650,10 +1836,12 @@ def log_activity(user_id, kind, item=None, grade=None, mistakes=0):
                        (user_id, kind, (item or "")[:80], grade, mistakes or 0))
         conn.commit()
         conn.close()
+        clear_caches()
     except Exception as e:
         logging.warning(f"[ACTIVITY] not logged: {e}")
 
 
+@_cached(ttl=20)
 def activity_totals(user_id, days=7):
     """Per-kind counts over the last `days` days, plus today's total."""
     conn = get_connection()
@@ -1676,6 +1864,7 @@ def activity_totals(user_id, days=7):
             "accuracy": round(100.0 * good / total) if total else None}
 
 
+@_cached(ttl=20)
 def activity_streak(user_id):
     """Consecutive days studied, counting back from today (or yesterday, so
     the streak isn't shown as broken before you've studied today)."""

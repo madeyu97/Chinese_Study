@@ -22,6 +22,9 @@ import streamlit as st
 from auth import require_login, sidebar_user_badge
 from hanzi_component import hanzi_drill
 from db_manager import (
+    get_herb_session,
+    herb_character_counts,
+    import_herbs_from_csv,
     list_studied_characters,
     get_curriculum_session,
     get_curriculum_progress,
@@ -52,6 +55,7 @@ with st.sidebar:
     _SOURCES = {
         "frequency": "500 most common characters",
         "vocab": "Characters from my vocabulary",
+        "herbs": "本草 Herb names",
     }
     _src = get_handwriting_source(USER_ID)
     _pick = st.radio("Character source", options=list(_SOURCES),

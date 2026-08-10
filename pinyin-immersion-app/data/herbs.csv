@@ -1,0 +1,218 @@
+﻿Chinese,Pinyin,English,Category,Tier,Latin,Alt_script
+麻黄,Má Huáng,"ephedra - Induces sweating, releases the exterior",jiebiao,1,Ephedrae Herba,麻黃
+桂枝,Guì Zhī,"cinnamon twig - Releases the muscle layer, harmonises ying and wei",jiebiao,1,Cinnamomi Ramulus,
+紫苏叶,Zǐ Sū Yè,"perilla leaf - Releases the exterior, scatters cold",jiebiao,1,Perillae Folium,紫蘇葉
+荆芥,Jīng Jiè,"schizonepeta - Releases the exterior, dispels wind",jiebiao,1,Schizonepetae Herba,荊芥
+防风,Fáng Fēng,"siler - Releases the exterior, expels wind",jiebiao,1,Saposhnikoviae Radix,防風
+羌活,Qiāng Huó,"notopterygium - Releases the exterior, scatters cold-damp",jiebiao,1,Notopterygii Rhizoma et Radix,
+白芷,Bái Zhǐ,"dahurian angelica - Dispels wind, relieves pain",jiebiao,1,Angelicae Dahuricae Radix,
+生姜,Shēng Jiāng,"fresh ginger - Releases the exterior, scatters cold",jiebiao,1,Zingiberis Rhizoma Recens,生薑
+薄荷,Bò Hé,"field mint - Disperses wind-heat, clears head and eyes",jiebiao,1,Menthae Haplocalycis Herba,
+桑叶,Sāng Yè,mulberry leaf - Disperses wind-heat,jiebiao,1,Mori Folium,桑葉
+菊花,Jú Huā,chrysanthemum flower - Disperses wind-heat,jiebiao,1,Chrysanthemi Flos,
+葛根,Gé Gēn,"kudzu root - Releases the muscle layer, discharges heat",jiebiao,1,Puerariae Lobatae Radix,
+柴胡,Chái Hú,"bupleurum - Harmonises shaoyang, discharges heat",jiebiao,1,Bupleuri Radix,
+石膏,Shí Gāo,"gypsum - Clears heat, drains fire",qingre,1,Gypsum Fibrosum,
+知母,Zhī Mǔ,"anemarrhena - Clears heat, drains fire",qingre,1,Anemarrhenae Rhizoma,
+栀子,Zhī Zǐ,"gardenia fruit - Drains fire, eliminates vexation",qingre,1,Gardeniae Fructus,梔子
+黄芩,Huáng Qín,"baical skullcap - Clears heat, dries dampness",qingre,1,Scutellariae Radix,黃芩
+黄连,Huáng Lián,"coptis - Clears heat, dries dampness",qingre,1,Coptidis Rhizoma,黃連
+黄柏,Huáng Bǎi,phellodendron bark - Clears damp-heat of the lower burner,qingre,1,Phellodendri Chinensis Cortex,黃柏
+金银花,Jīn Yín Huā,"honeysuckle flower - Clears heat, resolves toxin",qingre,1,Lonicerae Japonicae Flos,金銀花
+连翘,Lián Qiáo,"forsythia fruit - Clears heat, resolves toxin, dissipates clumps",qingre,1,Forsythiae Fructus,連翹
+生地黄,Shēng Dì Huáng,"rehmannia (unprocessed) - Clears heat, cools the blood",qingre,1,Rehmanniae Radix,生地黃
+牡丹皮,Mǔ Dān Pí,"tree peony root bark - Clears heat, cools the blood",qingre,1,Moutan Cortex,
+赤芍,Chì Sháo,"red peony root - Clears heat, cools the blood",qingre,1,Paeoniae Radix Rubra,
+大黄,Dà Huáng,"rhubarb root - Drains downward, purges accumulation",xiexia,1,Rhei Radix et Rhizoma,大黃
+独活,Dú Huó,"pubescent angelica - Dispels wind-damp, relieves painful obstruction",qufengshi,1,Angelicae Pubescentis Radix,獨活
+藿香,Huò Xiāng,patchouli - Aromatically transforms dampness,huashi,1,Pogostemonis Herba,
+苍术,Cāng Zhú,"black atractylodes - Dries dampness, fortifies the spleen",huashi,1,Atractylodis Rhizoma,蒼朮
+厚朴,Hòu Pò,"magnolia bark - Moves qi, transforms damp, disperses fullness",huashi,1,Magnoliae Officinalis Cortex,
+茯苓,Fú Líng,"poria sclerotium - Promotes urination, percolates dampness",lishui,1,Poria,
+泽泻,Zé Xiè,"alisma rhizome - Promotes urination, drains dampness",lishui,1,Alismatis Rhizoma,澤瀉
+薏苡仁,Yì Yǐ Rén,"coix seed - Promotes urination, fortifies the spleen",lishui,1,Coicis Semen,
+附子,Fù Zǐ,prepared aconite - Rescues devastated yang,wenli,1,Aconiti Lateralis Radix Praeparata,
+干姜,Gān Jiāng,"dried ginger - Warms the middle, scatters cold",wenli,1,Zingiberis Rhizoma,乾薑
+肉桂,Ròu Guì,"cinnamon bark - Tonifies fire, assists yang",wenli,1,Cinnamomi Cortex,
+陈皮,Chén Pí,"aged tangerine peel - Moves qi, harmonises the middle",liqi,1,Citri Reticulatae Pericarpium,陳皮
+枳实,Zhǐ Shí,"immature bitter orange - Breaks qi, disperses clumped accumulation",liqi,1,Aurantii Fructus Immaturus,枳實
+香附,Xiāng Fù,"cyperus rhizome - Soothes the liver, moves qi",liqi,1,Cyperi Rhizoma,
+山楂,Shān Zhā,hawthorn fruit - Reduces food stagnation,xiaoshi,1,Crataegi Fructus,
+三七,Sān Qī,notoginseng - Stops bleeding without retaining stasis,zhixue,1,Notoginseng Radix et Rhizoma,
+川芎,Chuān Xiōng,"Sichuan lovage - Invigorates blood, moves qi",huoxue,1,Chuanxiong Rhizoma,
+延胡索,Yán Hú Suǒ,"corydalis - Invigorates blood, moves qi, relieves pain",huoxue,1,Corydalis Rhizoma,
+丹参,Dān Shēn,"red sage root - Invigorates blood, dispels stasis, regulates menses",huoxue,1,Salviae Miltiorrhizae Radix et Rhizoma,丹參
+红花,Hóng Huā,"safflower - Invigorates blood, unblocks menses, dispels stasis, relieves pain",huoxue,1,Carthami Flos,紅花
+桃仁,Táo Rén,"peach kernel - Invigorates blood, dispels stasis",huoxue,1,Persicae Semen,
+半夏,Bàn Xià,"prepared pinellia - Dries dampness, transforms phlegm",huatan,1,Pinelliae Rhizoma Praeparatum,
+桔梗,Jié Gěng,"platycodon root - Opens and disseminates lung qi, expels phlegm",huatan,1,Platycodonis Radix,
+瓜蒌,Guā Lóu,"trichosanthes fruit - Clears heat, transforms phlegm",huatan,1,Trichosanthis Fructus,瓜蔞
+川贝母,Chuān Bèi Mǔ,"Sichuan fritillary bulb - Transforms phlegm, moistens the lung, stops cough",huatan,1,Fritillariae Cirrhosae Bulbus,川貝母
+苦杏仁,Xìng Rén,"bitter apricot kernel - Stops cough, calms wheezing",huatan,1,Armeniacae Semen Amarum,
+酸枣仁,Suān Zǎo Rén,"sour jujube seed - Nourishes heart and liver, calms the spirit",anshen,1,Ziziphi Spinosae Semen,酸棗仁
+龙骨,Lóng Gǔ,fossilised bone - Heavily settles and calms the spirit,anshen,1,Fossilia Ossis Mastodi,龍骨
+牡蛎,Mǔ Lì,oyster shell - Settles and calms the spirit,pinggan,1,Ostreae Concha,牡蠣
+钩藤,Gōu Téng,"uncaria hooks - Extinguishes wind, stops spasm",pinggan,1,Uncariae Ramulus cum Uncis,鉤藤
+天麻,Tiān Má,"gastrodia - Extinguishes wind, stops spasm",pinggan,1,Gastrodiae Rhizoma,
+五味子,Wǔ Wèi Zǐ,"schisandra - Constrains lung leakage, stops cough",shoushe,1,Schisandrae Chinensis Fructus,
+山茱萸,Shān Zhū Yú,cornelian cherry - Tonifies liver and kidney,shoushe,1,Corni Fructus,
+人参,Rén Shēn,ginseng - Powerfully tonifies original qi,buxu,1,Ginseng Radix et Rhizoma,人參
+党参,Dǎng Shēn,"codonopsis - Tonifies middle qi, fortifies spleen and lung",buxu,1,Codonopsis Radix,黨參
+黄耆,Huáng Qí,"astragalus - Tonifies qi, raises yang",buxu,1,Astragali Radix,黃耆
+白术,Bái Zhú,"white atractylodes - Tonifies spleen qi, dries dampness",buxu,1,Atractylodis Macrocephalae Rhizoma,白朮
+山药,Shān Yào,"Chinese yam - Tonifies spleen, lung and kidney qi and yin",buxu,1,Dioscoreae Rhizoma,山藥
+甘草,Gān Cǎo,"licorice root - Tonifies spleen, augments qi",buxu,1,Glycyrrhizae Radix et Rhizoma,
+当归,Dāng Guī,Chinese angelica - Tonifies the blood,buxu,1,Angelicae Sinensis Radix,當歸
+熟地黄,Shú Dì Huáng,prepared rehmannia - Nourishes the blood,buxu,1,Rehmanniae Radix Praeparata,熟地黃
+白芍,Bái Sháo,"white peony root - Nourishes blood, restrains yin, regulates menses",buxu,1,Paeoniae Radix Alba,
+麦门冬,Mài Mén Dōng,"ophiopogon tuber - Nourishes lung and stomach yin, generates fluids",buxu,1,Ophiopogonis Radix,麥門冬
+枸杞子,Gǒu Qǐ Zǐ,goji fruit - Nourishes liver and kidney yin and essence,buxu,1,Lycii Fructus,
+细辛,Xì Xīn,"asarum - Scatters cold, relieves pain",jiebiao,2,Asari Radix et Rhizoma,細辛
+牛蒡子,Niú Bàng Zǐ,"burdock fruit - Disperses wind-heat, benefits the throat",jiebiao,2,Arctii Fructus,
+蝉蜕,Chán Tuì,"cicada moulting - Disperses wind-heat, benefits throat and voice",jiebiao,2,Cicadae Periostracum,蟬蛻
+升麻,Shēng Má,"cimicifuga - Vents rashes, resolves fire toxin",jiebiao,2,Cimicifugae Rhizoma,
+夏枯草,Xià Kū Cǎo,"selfheal spike - Clears the liver, brightens the eyes",qingre,2,Prunellae Spica,
+龙胆,Lóng Dǎn Cǎo,Chinese gentian - Clears damp-heat of liver and gallbladder,qingre,2,Gentianae Radix et Rhizoma,龍膽
+蒲公英,Pú Gōng Yīng,"dandelion - Clears heat, resolves toxin, dissipates clumps",qingre,2,Taraxaci Herba,
+板蓝根,Bǎn Lán Gēn,"isatis root - Clears heat, resolves toxin, cools blood, benefits the throat",qingre,2,Isatidis Radix,板藍根
+玄参,Xuán Shēn,"figwort root - Clears heat, cools the blood",qingre,2,Scrophulariae Radix,玄參
+青蒿,Qīng Hāo,"sweet wormwood - Clears deficiency heat, vents lurking heat",qingre,2,Artemisiae Annuae Herba,
+地骨皮,Dì Gǔ Pí,"lycium root bark - Cools the blood, clears steaming",qingre,2,Lycii Cortex,
+芒硝,Máng Xiāo,"mirabilite - Softens hardness, moistens dryness, purges downward",xiexia,2,Natrii Sulfas,
+火麻仁,Huǒ Má Rén,"hemp seed - Moistens the intestines, unblocks the bowels",xiexia,2,Cannabis Semen,
+威灵仙,Wēi Líng Xiān,"clematis root - Dispels wind-damp, unblocks channels, relieves pain",qufengshi,2,Clematidis Radix et Rhizoma,威靈仙
+木瓜,Mù Guā,"Chinese quince - Relaxes the sinews, unblocks the collaterals",qufengshi,2,Chaenomelis Fructus,
+秦艽,Qín Jiāo,"large-leaf gentian - Dispels wind-damp, soothes the sinews",qufengshi,2,Gentianae Macrophyllae Radix,
+桑寄生,Sāng Jì Shēng,"mulberry mistletoe - Dispels wind-damp, tonifies liver and kidney, strengthens sinew and bone",qufengshi,2,Taxilli Herba,
+砂仁,Shā Rén,"amomum fruit - Transforms damp, moves qi",huashi,2,Amomi Fructus,
+猪苓,Zhū Líng,"polyporus sclerotium - Promotes urination, percolates dampness",lishui,2,Polyporus,豬苓
+车前子,Chē Qián Zǐ,"plantago seed - Promotes urination, unblocks lin",lishui,2,Plantaginis Semen,車前子
+茵陈,Yīn Chén Hāo,"virgate wormwood - Clears damp-heat, retreats jaundice",lishui,2,Artemisiae Scopariae Herba,茵陳
+吴茱萸,Wú Zhū Yú,"evodia fruit - Warms the liver channel, scatters cold, relieves pain",wenli,2,Euodiae Fructus,吳茱萸
+青皮,Qīng Pí,"green tangerine peel - Breaks qi stagnation, soothes the liver",liqi,2,Citri Reticulatae Pericarpium Viride,
+木香,Mù Xiāng,"costus root - Moves qi, relieves pain",liqi,2,Aucklandiae Radix,
+麦芽,Mài Yá,"sprouted barley - Reduces food stagnation, harmonises the middle",xiaoshi,2,Hordei Fructus Germinatus,麥芽
+莱菔子,Lái Fú Zǐ,"radish seed - Reduces food stagnation, disperses distension",xiaoshi,2,Raphani Semen,萊菔子
+鸡内金,Jī Nèi Jīn,chicken gizzard lining - Powerfully reduces food stagnation,xiaoshi,2,Galli Gigerii Endothelium Corneum,雞內金
+艾叶,Ài Yè,"mugwort leaf - Warms the channels, stops bleeding",zhixue,2,Artemisiae Argyi Folium,艾葉
+郁金,Yù Jīn,"curcuma tuber - Invigorates blood, moves qi, relieves constraint",huoxue,2,Curcumae Radix,鬱金
+益母草,Yì Mǔ Cǎo,"motherwort - Invigorates blood, regulates menses",huoxue,2,Leonuri Herba,
+牛膝,Niú Xī,"achyranthes root - Invigorates blood, conducts downward",huoxue,2,Achyranthis Bidentatae Radix,
+浙贝母,Zhè Bèi Mǔ,"Zhejiang fritillary bulb - Clears heat, transforms phlegm, stops cough",huatan,2,Fritillariae Thunbergii Bulbus,浙貝母
+竹茹,Zhú Rú,"bamboo shavings - Clears heat, transforms phlegm",huatan,2,Bambusae Caulis in Taenias,
+桑白皮,Sāng Bái Pí,"mulberry root bark - Drains the lung, calms wheezing",huatan,2,Mori Cortex,
+远志,Yuǎn Zhì,"polygala root - Calms the spirit, joins heart and kidney",anshen,2,Polygalae Radix,遠志
+石菖蒲,Shí Chāng Pú,"sweetflag rhizome - Opens the orifices, transforms phlegm, awakens the spirit",kaiqiao,2,Acori Tatarinowii Rhizoma,
+乌梅,Wū Méi,smoked plum - Astringes the lung,shoushe,2,Mume Fructus,烏梅
+大枣,Dà Zǎo,Chinese date - Tonifies middle qi,buxu,2,Jujubae Fructus,大棗
+杜仲,Dù Zhòng,"eucommia bark - Tonifies liver and kidney, strengthens sinew and bone",buxu,2,Eucommiae Cortex,
+淫羊藿,Yín Yáng Huò,epimedium - Tonifies kidney yang,buxu,2,Epimedii Folium,
+菟丝子,Tù Sī Zǐ,"dodder seed - Tonifies yang, nourishes yin, secures essence",buxu,2,Cuscutae Semen,菟絲子
+北沙参,Běi Shā Shēn,"glehnia root - Nourishes lung yin, clears lung heat",buxu,2,Glehniae Radix,北沙參
+百合,Bǎi Hé,"lily bulb - Nourishes yin, moistens the lung",buxu,2,Lilii Bulbus,
+芦根,Lú Gēn,"reed rhizome - Clears lung and stomach heat, generates fluids",qingre,3,Phragmitis Rhizoma,蘆根
+淡竹叶,Dàn Zhú Yè,"lophatherum leaf - Clears heat, eliminates vexation",qingre,3,Lophatheri Herba,淡竹葉
+淡豆豉,Dàn Dòu Chǐ,fermented soybean - Gently releases the exterior,jiebiao,3,Sojae Semen Praeparatum,
+西洋参,Xī Yáng Shēn,"American ginseng - Tonifies qi, nourishes yin",buxu,3,Panacis Quinquefolii Radix,西洋參
+太子参,Tài Zǐ Shēn,"pseudostellaria - Tonifies spleen and lung qi, generates fluids",buxu,3,Pseudostellariae Radix,太子參
+白扁豆,Bái Biǎn Dòu,"hyacinth bean - Fortifies the spleen, transforms dampness",buxu,3,Lablab Semen Album,
+肉苁蓉,Ròu Cōng Róng,"cistanche - Tonifies kidney yang, boosts essence and blood",buxu,3,Cistanches Herba,肉蓯蓉
+巴戟天,Bā Jǐ Tiān,"morinda root - Tonifies kidney yang, strengthens sinew and bone",buxu,3,Morindae Officinalis Radix,
+补骨脂,Bǔ Gǔ Zhī,"psoralea fruit - Tonifies kidney yang, secures essence",buxu,3,Psoraleae Fructus,補骨脂
+益智仁,Yì Zhì Rén,"black cardamom - Warms the kidney, secures essence and urine",buxu,3,Alpiniae Oxyphyllae Fructus,
+续断,Xù Duàn,"dipsacus root - Tonifies liver and kidney, strengthens sinew and bone",buxu,3,Dipsaci Radix,續斷
+何首乌,Hé Shǒu Wū,"fleeceflower root (prepared) - Tonifies liver and kidney, nourishes blood and essence",buxu,3,Polygoni Multiflori Radix Praeparata,何首烏
+阿胶,Ē Jiāo,donkey-hide gelatin - Nourishes the blood,buxu,3,Asini Corii Colla,阿膠
+龙眼肉,Lóng Yǎn Ròu,"longan flesh - Tonifies heart and spleen, nourishes blood, calms the spirit",buxu,3,Longan Arillus,龍眼肉
+南沙参,Nán Shā Shēn,"adenophora root - Nourishes lung yin, clears lung heat, transforms phlegm",buxu,3,Adenophorae Radix,南沙參
+石斛,Shí Hú,"dendrobium - Nourishes stomach yin, generates fluids",buxu,3,Dendrobii Caulis,
+玉竹,Yù Zhú,"solomon's seal - Nourishes lung and stomach yin, moistens dryness",buxu,3,Polygonati Odorati Rhizoma,
+黄精,Huáng Jīng,"siberian solomon's seal - Tonifies qi and nourishes yin of spleen, lung and kidney",buxu,3,Polygonati Rhizoma,黃精
+女贞子,Nǚ Zhēn Zǐ,privet fruit - Tonifies liver and kidney yin,buxu,3,Ligustri Lucidi Fructus,女貞子
+墨旱莲,Mò Hàn Lián,eclipta - Nourishes liver and kidney yin,buxu,3,Ecliptae Herba,墨旱蓮
+龟甲,Guī Bǎn,"tortoise shell - Nourishes yin, subdues yang",buxu,3,Testudinis Carapax et Plastrum,龜甲
+鳖甲,Biē Jiǎ,"soft-shelled turtle shell - Nourishes yin, subdues yang",buxu,3,Trionycis Carapax,鱉甲
+乳香,Rǔ Xiāng,"frankincense - Invigorates blood, moves qi, relieves pain",huoxue,3,Olibanum,
+没药,Mò Yào,"myrrh - Invigorates blood, dispels stasis, relieves pain",huoxue,3,Myrrha,沒藥
+鸡血藤,Jī Xuè Téng,"spatholobus vine - Invigorates and nourishes the blood, regulates menses",huoxue,3,Spatholobi Caulis,雞血藤
+三棱,Sān Léng,"sparganium - Strongly breaks blood, moves qi, relieves pain",huoxue,3,Sparganii Rhizoma,
+莪术,É Zhú,"zedoary - Breaks blood, moves qi, relieves pain",huoxue,3,Curcumae Rhizoma,莪朮
+泽兰,Zé Lán,"bugleweed - Invigorates blood, regulates menses",huoxue,3,Lycopi Herba,澤蘭
+大蓟,Dà Jì,"Japanese thistle - Cools the blood, stops bleeding",zhixue,3,Cirsii Japonici Herba,大薊
+小蓟,Xiǎo Jì,"field thistle - Cools the blood, stops bleeding",zhixue,3,Cirsii Herba,小薊
+地榆,Dì Yú,"sanguisorba root - Cools the blood, stops bleeding in the lower burner",zhixue,3,Sanguisorbae Radix,
+白及,Bái Jí,bletilla - Astringes bleeding,zhixue,3,Bletillae Rhizoma,
+仙鹤草,Xiān Hè Cǎo,agrimony - Astringes bleeding across patterns,zhixue,3,Agrimoniae Herba,仙鶴草
+白茅根,Bái Máo Gēn,"imperata rhizome - Cools the blood, stops bleeding",zhixue,3,Imperatae Rhizoma,
+蒲黄,Pú Huáng,cattail pollen - Stops bleeding,zhixue,3,Typhae Pollen,蒲黃
+神曲,Shén Qū,"medicated leaven - Reduces food stagnation, harmonises the stomach",xiaoshi,3,Massa Medicata Fermentata,神麴
+枳壳,Zhǐ Ké,"mature bitter orange - Moves qi, broadens the chest, disperses distension",liqi,3,Aurantii Fructus,枳殼
+花椒,Huā Jiāo,"Sichuan pepper - Warms the middle, scatters cold, relieves pain",wenli,3,Zanthoxyli Pericarpium,
+木通,Mù Tōng,"akebia stem - Promotes urination, drains heat through the urine",lishui,3,Akebiae Caulis,
+石决明,Shí Jué Míng,"abalone shell - Subdues liver yang, anchors what rises",pinggan,3,Haliotidis Concha,石決明
+地龙,Dì Lóng,"earthworm - Clears heat, extinguishes wind, stops spasm",pinggan,3,Pheretima,地龍
+夜交藤,Yè Jiāo Téng,"fleeceflower stem - Nourishes the heart, calms the spirit",anshen,3,Polygoni Multiflori Caulis,
+白芥子,Bái Jiè Zǐ,"white mustard seed - Warms the lung, expels cold phlegm",huatan,3,Sinapis Semen,
+旋覆花,Xuán Fù Huā,"inula flower - Descends qi, transforms phlegm",huatan,3,Inulae Flos,
+前胡,Qián Hú,"peucedanum root - Descends qi, transforms phlegm-heat",huatan,3,Peucedani Radix,
+海藻,Hǎi Zǎo,"sargassum seaweed - Transforms phlegm, softens hardness, dissipates nodules",huatan,3,Sargassum,
+昆布,Kūn Bù,"kelp - Transforms phlegm, softens hardness, dissipates nodules",huatan,3,Laminariae Thallus,
+紫菀,Zǐ Wǎn,"aster root - Moistens the lung, descends qi, transforms phlegm, stops cough",huatan,3,Asteris Radix et Rhizoma,
+款冬花,Kuǎn Dōng Huā,"coltsfoot flower - Moistens the lung, descends qi, stops cough, transforms phlegm",huatan,3,Farfarae Flos,
+枇杷叶,Pí Pá Yè,"loquat leaf - Clears the lung, descends qi, stops cough",huatan,3,Eriobotryae Folium,枇杷葉
+葶苈子,Tíng Lì Zǐ,"tingli seed - Drains the lung, calms wheezing",huatan,3,Descurainiae Semen,葶藶子
+百部,Bǎi Bù,"stemona root - Moistens the lung, descends qi, stops cough",huatan,3,Stemonae Radix,
+天花粉,Tiān Huā Fěn,"trichosanthes root - Clears heat, generates fluids",qingre,3,Trichosanthis Radix,
+苦参,Kǔ Shēn,"flavescent sophora - Clears heat, dries dampness",qingre,3,Sophorae Flavescentis Radix,苦參
+秦皮,Qín Pí,"ash bark - Clears heat, dries dampness, astringes",qingre,3,Fraxini Cortex,
+白头翁,Bái Tóu Wēng,"pulsatilla root - Clears heat, resolves toxin, cools the blood, checks dysentery",qingre,3,Pulsatillae Radix,白頭翁
+射干,Shè Gān,"belamcanda rhizome - Clears heat, resolves toxin, benefits the throat",qingre,3,Belamcandae Rhizoma,
+决明子,Jué Míng Zǐ,"cassia seed - Clears the liver, brightens the eyes",qingre,3,Cassiae Semen,決明子
+紫草,Zǐ Cǎo,"arnebia / gromwell root - Cools and invigorates the blood, resolves toxin, vents rashes",qingre,3,Arnebiae Radix,
+土茯苓,Tǔ Fú Líng,"glabrous greenbrier rhizome - Resolves toxin, dispels dampness",qingre,3,Smilacis Glabrae Rhizoma,
+苍耳子,Cāng Ěr Zǐ,"xanthium fruit - Dispels wind, unblocks the nose, relieves pain",jiebiao,3,Xanthii Fructus,蒼耳子
+辛夷,Xīn Yí,"magnolia flower - Dispels wind-cold, unblocks the nose",jiebiao,3,Magnoliae Flos,
+蔓荆子,Màn Jīng Zǐ,"vitex fruit - Disperses wind-heat, clears the head and eyes",jiebiao,3,Viticis Fructus,蔓荊子
+郁李仁,Yù Lǐ Rén,"bush cherry pit - Moistens the intestines, unblocks the bowels",xiexia,3,Pruni Semen,
+番泻叶,Fān Xiè Yè,"senna leaf - Purges heat, drives out accumulation, unblocks the bowels",xiexia,3,Sennae Folium,番瀉葉
+冰片,Bīng Piàn,"borneol - Opens the orifices, awakens the spirit",kaiqiao,3,Borneolum Syntheticum,
+佩兰,Pèi Lán,"eupatorium - Aromatically transforms dampness, awakens the spleen",huashi,3,Eupatorii Herba,佩蘭
+白豆蔻,Bái Dòu Kòu,"round cardamom - Transforms dampness, moves qi, warms the middle",huashi,3,Amomi Fructus Rotundus,
+草果,Cǎo Guǒ,"tsaoko fruit - Dries dampness, warms the middle",huashi,3,Tsaoko Fructus,
+滑石,Huá Shí,"talc - Promotes urination, clears damp-heat",lishui,3,Talcum,
+金钱草,Jīn Qián Cǎo,"lysimachia - Clears damp-heat, expels stones",lishui,3,Lysimachiae Herba,金錢草
+石韦,Shí Wéi,"pyrrosia leaf - Promotes urination, unblocks lin, stops bleeding",lishui,3,Pyrrosiae Folium,石韋
+灯心草,Dēng Xīn Cǎo,"juncus / rush pith - Promotes urination, drains heart heat",lishui,3,Junci Medulla,燈心草
+川乌,Chuān Wū,"prepared aconite main root - Dispels wind-damp, scatters cold, relieves severe pain",qufengshi,3,Aconiti Radix Praeparata,川烏
+五加皮,Wǔ Jiā Pí,"acanthopanax bark - Dispels wind-damp, strengthens sinew and bone",qufengshi,3,Acanthopanacis Cortex,
+蚕砂,Cán Shā,"silkworm droppings - Dispels wind-damp, harmonises the middle, transforms turbidity",qufengshi,3,Bombycis Faeces,蠶砂
+高良姜,Gāo Liáng Jiāng,"galangal - Warms the stomach, scatters cold, relieves pain",wenli,3,Alpiniae Officinarum Rhizoma,高良薑
+丁香,Dīng Xiāng,"clove - Warms the middle, descends rebellion",wenli,3,Caryophylli Flos,
+小茴香,Xiǎo Huí Xiāng,"fennel fruit - Warms the liver and kidney, scatters cold, relieves pain",wenli,3,Foeniculi Fructus,
+沉香,Chén Xiāng,"aquilaria wood - Moves qi, relieves pain, descends rebellion",liqi,3,Aquilariae Lignum Resinatum,
+川楝子,Chuān Liàn Zǐ,"toosendan fruit - Moves qi, relieves pain, clears liver heat",liqi,3,Toosendan Fructus,
+大腹皮,Dà Fù Pí,"areca husk - Moves qi, reduces distension",liqi,3,Arecae Pericarpium,
+佛手,Fó Shǒu,"buddha's hand citron - Soothes the liver, moves qi, harmonises the stomach",liqi,3,Citri Sarcodactylis Fructus,
+全蝎,Quán Xiē,"scorpion - Extinguishes wind, stops spasm",pinggan,3,Scorpio,全蠍
+蜈蚣,Wú Gōng,"centipede - Extinguishes wind, stops spasm",pinggan,3,Scolopendra,
+僵蚕,Jiāng Cán,"stiff silkworm - Extinguishes wind, stops spasm",pinggan,3,Bombyx Batryticatus,僵蠶
+刺蒺藜,Cì Jí Lí,"tribulus fruit - Calms the liver, subdues yang",pinggan,3,Tribuli Fructus,
+磁石,Cí Shí,"magnetite - Heavily settles the spirit, calms fright",anshen,3,Magnetitum,
+合欢皮,Hé Huān Pí,"albizia bark - Calms the spirit, relieves constraint",anshen,3,Albiziae Cortex,合歡皮
+柏子仁,Bǎi Zǐ Rén,"arborvitae seed - Nourishes the heart, calms the spirit",anshen,3,Platycladi Semen,
+浮小麦,Fú Xiǎo Mài,light wheat grain - Stops sweating,shoushe,3,Tritici Fructus Levis,浮小麥
+麻黄根,Má Huáng Gēn,ephedra root - Astringes and stops sweating,shoushe,3,Ephedrae Radix et Rhizoma,麻黃根
+赤石脂,Chì Shí Zhī,"halloysite / red clay - Binds the intestines, stops chronic diarrhoea",shoushe,3,Halloysitum Rubrum,
+肉豆蔻,Ròu Dòu Kòu,"nutmeg - Binds the intestines, stops diarrhoea",shoushe,3,Myristicae Semen,
+金樱子,Jīn Yīng Zǐ,"cherokee rose hip - Secures essence, stems urinary leakage",shoushe,3,Rosae Laevigatae Fructus,金櫻子
+芡实,Qiàn Shí,"euryale seed - Fortifies the spleen, stops diarrhoea",shoushe,3,Euryales Semen,芡實
+五倍子,Wǔ Bèi Zǐ,"chinese gallnut - Astringes the lung, stops cough and sweat",shoushe,3,Galla Chinensis,
+谷芽,Gǔ Yá,"sprouted millet - Reduces food stagnation, harmonises the middle, awakens the appetite",xiaoshi,3,Setariae Fructus Germinatus,穀芽
+使君子,Shǐ Jūn Zǐ,"quisqualis fruit - Kills worms, reduces childhood accumulation",quchong,3,Quisqualis Fructus,
+莲子,Lián Zǐ,"lotus seed - Fortifies the spleen, stops diarrhoea",shoushe,3,Nelumbinis Semen,蓮子
+五灵脂,Wǔ Líng Zhī,"flying squirrel faeces - Invigorates blood, dispels stasis, relieves pain",huoxue,3,Trogopteri Faeces,五靈脂
+胆南星,Dǎn Nán Xīng,"bile-processed arisaema - Clears heat, transforms stubborn phlegm",huatan,3,Arisaema cum Bile,膽南星
+槟榔,Bīng Láng,"areca nut - Kills worms, drives out accumulation",quchong,3,Arecae Semen,檳榔
+瞿麦,Qú Mài,"dianthus - Promotes urination, unblocks lin",lishui,3,Dianthi Herba,瞿麥
+萹蓄,Biǎn Xù,"knotweed - Promotes urination, clears damp-heat, unblocks lin",lishui,3,Polygoni Avicularis Herba,
+通草,Tōng Cǎo,"rice-paper plant pith - Promotes urination, drains damp-heat",lishui,3,Tetrapanacis Medulla,

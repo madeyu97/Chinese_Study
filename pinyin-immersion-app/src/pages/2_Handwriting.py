@@ -140,6 +140,28 @@ def launch(chars, mode):
     st.rerun()
 
 
+def _review_from_vocab():
+    """Session built from characters in the words you've studied."""
+    due, new_available = get_handwriting_counts(USER_ID)
+    c1, c2 = st.columns(2)
+    c1.metric("Due for review", due)
+    c2.metric("New available", new_available)
+    new_count = st.slider("New characters this session", 0, 15, 5)
+    st.caption(
+        "Cue = word, pinyin and meaning — never the character itself. "
+        "New characters run watch → trace → write; reviews go straight to "
+        "writing. Miss a character more than 3× and it comes back later in "
+        "the session, with its next review pulled to tomorrow.")
+    if st.button("▶️ Start review", type="primary", use_container_width=True,
+                 disabled=(due + min(new_count, new_available) == 0)):
+        chars = get_handwriting_session(USER_ID, new_count=new_count)
+        if chars:
+            launch(chars, "standard")
+        else:
+            st.info("Nothing to drill yet — study some vocabulary first.")
+
+
+
 # ----------------------------------------------------------------------
 # CHARACTER BROWSER - reached by clicking a sidebar counter
 # ----------------------------------------------------------------------
@@ -219,23 +241,84 @@ if "hw_payload" not in st.session_state:
 
     # --- standard review session ---
     with tab_review:
-        due, new_available = get_handwriting_counts(USER_ID)
-        c1, c2 = st.columns(2)
-        c1.metric("Due for review", due)
-        c2.metric("New available", new_available)
-        new_count = st.slider("New characters this session", 0, 15, 5)
-        st.caption(
-            "Cue = word, pinyin and meaning — never the character itself. "
-            "New characters run watch → trace → write; reviews go straight to "
-            "writing. Miss a character more than 3× and it comes back later in "
-            "the session, with its next review pulled to tomorrow.")
-        if st.button("▶️ Start review", type="primary", use_container_width=True,
-                     disabled=(due + min(new_count, new_available) == 0)):
-            chars = get_handwriting_session(USER_ID, new_count=new_count)
-            if chars:
-                launch(chars, "standard")
+        _source = get_handwriting_source(USER_ID)
+
+        # ---- 本草 herb characters ----
+        if _source == "herbs":
+            hc = herb_character_counts(USER_ID)
+            if not hc["herbs"]:
+                st.warning("No herb list loaded yet.")
+                st.markdown(
+                    "Export your Herb Dojo list to "
+                    "`pinyin-immersion-app/data/herbs.csv` with at least a "
+                    "**Chinese** column (Pinyin, English and Category are "
+                    "used if present), then press the button below.")
+                if st.button("🔄 Load herbs.csv", use_container_width=True):
+                    added, skipped, err = import_herbs_from_csv()
+                    if err:
+                        st.error(err)
+                    else:
+                        st.success(f"Imported {added} herbs.")
+                        st.rerun()
             else:
-                st.info("Nothing to drill yet — study some vocabulary first.")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Herbs", hc["herbs"])
+                c2.metric("Characters", hc["characters"])
+                c3.metric("Due", hc["due"])
+                if hc.get("tier1_characters"):
+                    st.caption(f"Tier-1 herbs alone account for "
+                               f"**{hc['tier1_characters']}** characters - "
+                               f"the ones worth knowing first.")
+                new_count = st.slider("New characters this session", 0, 15, 5,
+                                      key="herb_new")
+                st.caption(
+                    "Characters from your herb names, tier-1 herbs first. "
+                    "Each card shows the herb it comes from and breaks the "
+                    "character into radicals — which for herbs is unusually "
+                    "informative: 艹 marks a plant, 木 something woody, "
+                    "虫 an insect, 石 a mineral.")
+                if st.button("▶️ Start herb session", type="primary",
+                             use_container_width=True):
+                    chars = get_herb_session(USER_ID, new_count=new_count)
+                    if chars:
+                        launch(chars, "standard")
+                    else:
+                        st.success("Nothing due right now.")
+                with st.expander("Reload herb list"):
+                    if st.button("🔄 Re-import herbs.csv",
+                                 use_container_width=True):
+                        added, skipped, err = import_herbs_from_csv()
+                        if err:
+                            st.error(err)
+                        else:
+                            st.success(f"Imported {added} new herbs.")
+
+        # ---- 500 most common characters ----
+        elif _source == "frequency":
+            cp = get_curriculum_progress(USER_ID)
+            preview = get_curriculum_session(USER_ID, new_count=0)
+            c1, c2 = st.columns(2)
+            c1.metric("Due for review", len(preview))
+            c2.metric("Not yet started",
+                      cp.get("total", 500) - cp.get("started", 0))
+            new_count = st.slider("New characters this session", 0, 15, 5,
+                                  key="freq_new")
+            st.caption(
+                "Working through the 500 most common characters in frequency "
+                "order. Anything due comes first, then the next new ones. "
+                "Where no word of yours contains a character, its own pinyin "
+                "and meaning are used as the cue.")
+            if st.button("▶️ Start review", type="primary",
+                         use_container_width=True):
+                chars = get_curriculum_session(USER_ID, new_count=new_count)
+                if chars:
+                    launch(chars, "standard")
+                else:
+                    st.success("Nothing due, and the curriculum is complete!")
+
+        # ---- characters from my vocabulary ----
+        else:
+            _review_from_vocab()
 
     # --- weakness drill ---
     with tab_weak:

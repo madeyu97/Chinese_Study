@@ -71,6 +71,7 @@
   }
   #char-gloss b { color: var(--accent); font-weight: 600; }
   .chip.freq { color: var(--ink); border-color: #4A3F1E; }
+  .chip.prec { color: var(--good); border-color: #1E4A34; }
 
   /* ---- writing card ---- */
   #board-wrap { margin-top: 12px; display: flex; justify-content: center; }
@@ -277,6 +278,11 @@ function setChips(phaseLabel) {
   chips.push(`<span class="chip">${S.i + 1} / ${S.queue.length}</span>`);
   if (S.strokeTotal) chips.push(`<span class="chip">${S.strokeTotal} strokes</span>`);
   if (c.freq_label) chips.push(`<span class="chip freq">${c.freq_label}</span>`);
+  if (typeof c.precision_level === "number" && c.precision_level > 0) {
+    chips.push(`<span class="chip prec" title="Accuracy required, `
+      + `earned by writing this character cleanly">`
+      + `◎ precision ${c.precision_level}/10</span>`);
+  }
   if (phaseLabel) chips.push(`<span class="chip phase">${phaseLabel}</span>`);
   document.getElementById("chips").innerHTML = chips.join("");
 }
@@ -372,8 +378,12 @@ function phaseWrite() {
   setButtons({ hint: true, reveal: true });
   setStrokeProgress();
   makeWriter(false);
+  // Precision earned on THIS character: every flawless write tightens it a
+  // little, down to a floor set in config.py. Trace and copy phases stay
+  // forgiving - they're for learning the shape, not testing it.
+  const lenience = (typeof cur().leniency === "number") ? cur().leniency : 1.0;
   S.writer.quiz({
-    leniency: 1.0, showHintAfterMisses: 3, highlightOnComplete: true,
+    leniency: lenience, showHintAfterMisses: 3, highlightOnComplete: true,
     onCorrectStroke: (info) => {
       S.strokesDone = S.strokeTotal - info.strokesRemaining;
       setStrokeProgress();
@@ -459,6 +469,9 @@ function finishChar(wasRevealed) {
     } else {
       toast = "Graduated ✓";
     }
+  } else if (clean && !c.is_new && typeof c.precision_level === "number"
+             && c.precision_level < 10) {
+    toast = "Clean - precision tightened";
   } else if (S.mistakes >= REQUEUE_MISTAKES) {
     // standard mode: struggled badly -> see it again a few cards later
     const at = Math.min(S.i + REQUEUE_GAP, S.queue.length);

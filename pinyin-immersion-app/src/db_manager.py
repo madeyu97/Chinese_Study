@@ -275,6 +275,19 @@ def init_db():
     # Per-user Hokkien SRS (the deck itself stays shared — verifications and
     # Tâi-lô corrections are curation work, not personal progress).
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS herbs (
+            id SERIAL PRIMARY KEY,
+            chinese TEXT NOT NULL UNIQUE,
+            pinyin TEXT,
+            english TEXT,
+            category TEXT,
+            tier INTEGER DEFAULT 9,
+            latin TEXT,
+            alt_script TEXT,
+            date_added TEXT
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS activity_log (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -2066,6 +2079,201 @@ def mark_nudges_seen(user_id):
 
 def other_users(user_id):
     return [u for u in list_users() if u["id"] != user_id]
+
+
+
+# ==========================================
+# HERBS (for the Chinese-medicine handwriting set)
+# Loaded from data/herbs.csv - export your Herb Dojo list to that file.
+# Column names are matched loosely, so most exports work unchanged.
+# ==========================================
+HERB_CSV_PATH = VOCAB_CSV_PATH.parent / "herbs.csv"
+
+_HERB_COLUMNS = {
+    "chinese": ["chinese", "hanzi", "characters", "herb", "name_cn",
+                "chinese_name", "中文", "药名", "hanzi_name"],
+    "pinyin": ["pinyin", "py", "romanisation", "romanization", "pin_yin",
+               "pinyin_name", "拼音"],
+    "english": ["english", "meaning", "translation", "en", "common_name",
+                "english_name", "gloss", "function", "actions"],
+    "category": ["category", "class", "group", "chapter", "type", "family"],
+    "tier": ["tier", "level", "priority", "importance", "rank"],
+    "latin": ["latin", "pharmaceutical", "lat", "botanical"],
+    "alt_script": ["alt_script", "traditional", "simplified", "alt", "other"],
+}
+
+
+def _match_herb_columns(df_columns):
+    """Map a Herb Dojo export's columns onto what we need, case- and
+    separator-insensitively."""
+    norm = {c.strip().lower().replace(" ", "_").replace("-", "_"): c
+            for c in df_columns}
+    found = {}
+    for key, options in _HERB_COLUMNS.items():
+        for opt in options:
+            if opt in norm:
+                found[key] = norm[opt]
+                break
+    return found
+
+
+def import_herbs_from_csv(path=None, force=False):
+    """Import the herb list. Returns (added, skipped, error_message)."""
+    csv_path = path or HERB_CSV_PATH
+    if not os.path.exists(csv_path):
+        return 0, 0, (f"No herb list found at {csv_path}. Export your herbs "
+                      f"to that file with a Chinese column.")
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as e:
+        return 0, 0, f"Could not read {csv_path}: {e}"
+
+    cols = _match_herb_columns(df.columns)
+    if "chinese" not in cols:
+        return 0, 0, (f"Couldn't find a Chinese column in {list(df.columns)}. "
+                      f"Rename one to 'Chinese'.")
+
+    today_str = date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT chinese FROM herbs")
+    existing = {r[0] for r in cursor.fetchall()}
+
+    fresh, seen = [], set()
+    for _i, row in df.iterrows():
+        ch = str(row.get(cols["chinese"], "")).strip()
+        if not ch or ch.lower() == "nan" or ch in existing or ch in seen:
+            continue
+        if not any(_is_cjk(c) for c in ch):
+            continue
+        seen.add(ch)
+        def val(key):
+            c = cols.get(key)
+            if not c:
+                return ""
+            v = str(row.get(c, "")).strip()
+            return "" if v.lower() == "nan" else v
+        try:
+            tier = int(float(val("tier") or 9))
+        except ValueError:
+            tier = 9
+        fresh.append((ch, val("pinyin"), val("english"), val("category"),
+                      tier, val("latin"), val("alt_script"), today_str))
+
+    if fresh:
+        psycopg2.extras.execute_values(
+            cursor,
+            "INSERT INTO herbs (chinese, pinyin, english, category, tier, "
+            "latin, alt_script, date_added) VALUES %s "
+            "ON CONFLICT (chinese) DO NOTHING", fresh, page_size=200)
+    conn.commit()
+    conn.close()
+    clear_caches()
+    logging.info(f"Herb import: {len(fresh)} new, {len(df) - len(fresh)} skipped.")
+    return len(fresh), len(df) - len(fresh), ""
+
+
+def herb_count():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM herbs")
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n or 0
+
+
+def herb_characters():
+    """Every distinct character used across the herb names, with the herbs
+    it appears in."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT chinese, pinyin, english, tier, latin, alt_script
+                      FROM herbs ORDER BY COALESCE(tier, 9), id""")
+    herbs = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    by_char = {}
+    for h in herbs:
+        for ch in h["chinese"]:
+            if _is_cjk(ch):
+                by_char.setdefault(ch, []).append(h)
+    # herbs already arrive in tier order, so entry [0] is the most
+    # important herb containing that character - the right one to cue with
+    return by_char, herbs
+
+
+def get_herb_session(user_id, new_count=5):
+    """Handwriting queue built from the characters in your herb list.
+
+    The cue is the herb itself - its name, pinyin and what it does - and
+    each card carries the radical breakdown, because herb characters are
+    unusually readable: the radical often tells you whether the substance
+    is a plant, a mineral or an animal product.
+    """
+    from radical_engine import describe_word
+    today_str = date.today().isoformat()
+    by_char, _herbs = herb_characters()
+    if not by_char:
+        return []
+    chars = list(by_char)
+
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    ph = ",".join(["%s"] * len(chars))
+    cursor.execute(f"""SELECT * FROM handwriting_progress
+                       WHERE user_id = %s AND character IN ({ph})""",
+                   [user_id] + chars)
+    progress = {r["character"]: dict(r) for r in cursor.fetchall()}
+    conn.close()
+
+    def build(ch, is_new):
+        herb = by_char[ch][0]
+        entry = _hw_entry(ch, is_new, len(by_char[ch]), progress.get(ch), [])
+        entry["word"] = herb["chinese"]
+        entry["word_pinyin"] = herb.get("pinyin") or ""
+        entry["word_english"] = herb.get("english") or ""
+        rad = describe_word(ch)
+        char_info_ = rad["characters"][0] if rad["characters"] else {}
+        entry["radicals"] = char_info_.get("components", [])
+        entry["radical_note"] = char_info_.get("substance_note") or ""
+        entry["substance"] = char_info_.get("substance") or ""
+        entry["other_herbs"] = [h["chinese"] for h in by_char[ch][1:4]]
+        entry["herb_tier"] = min((h.get("tier") or 9) for h in by_char[ch])
+        entry["herb_latin"] = herb.get("latin") or ""
+        alt = herb.get("alt_script") or ""
+        entry["herb_alt"] = alt
+        return entry
+
+    due = [build(ch, False) for ch in chars
+           if ch in progress and progress[ch]["next_review_date"] <= today_str]
+    due.sort(key=lambda e: e["next_review_date"] or "")
+    new = [build(ch, True) for ch in chars if ch not in progress]
+    # Herb Dojo grades herbs 1-3 by clinical importance. Learn the
+    # characters of tier-1 herbs first; within a tier, characters that
+    # appear in several herbs earn their keep soonest.
+    new.sort(key=lambda e: (e["herb_tier"], -(e["personal_freq"] or 0)))
+    return due + new[:new_count]
+
+
+def herb_character_counts(user_id):
+    by_char, herbs = herb_characters()
+    if not by_char:
+        return {"herbs": 0, "characters": 0, "due": 0, "new": 0}
+    chars = list(by_char)
+    today_str = date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    ph = ",".join(["%s"] * len(chars))
+    cursor.execute(f"""SELECT character, next_review_date FROM handwriting_progress
+                       WHERE user_id = %s AND character IN ({ph})""",
+                   [user_id] + chars)
+    seen = dict(cursor.fetchall())
+    conn.close()
+    tier1 = {c for h in herbs if (h.get("tier") or 9) == 1
+             for c in h["chinese"] if _is_cjk(c)}
+    return {"herbs": len(herbs), "characters": len(chars),
+            "tier1_characters": len(tier1),
+            "due": sum(1 for c in chars if c in seen and seen[c] <= today_str),
+            "new": sum(1 for c in chars if c not in seen)}
 
 
 init_db()

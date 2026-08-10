@@ -1,3 +1,4 @@
+from config import PRECISION_START, PRECISION_STEP, PRECISION_FLOOR
 # src/handwriting_engine.py
 """
 Scoring and SRS logic for character-level handwriting drills.
@@ -162,3 +163,24 @@ def choose_context_word(char: str, candidates):
         if best is None or key < best[0]:
             best = (key, w)
     return best[1] if best else None
+
+
+def precision_for(clean_writes):
+    """HanziWriter leniency for a character, given how many times it has
+    been written without a single mistake.
+
+    Lower = stricter. Starts generous for an unfamiliar character and
+    tightens with each clean write, but stops at a floor: nobody hand-writes
+    a glyph to font precision, and demanding it would just be dispiriting.
+    """
+    n = max(0, int(clean_writes or 0))
+    return round(max(PRECISION_FLOOR, PRECISION_START - n * PRECISION_STEP), 3)
+
+
+def precision_level(clean_writes):
+    """0-10 display scale for how strict this character currently is."""
+    span = PRECISION_START - PRECISION_FLOOR
+    if span <= 0:
+        return 10
+    got = PRECISION_START - precision_for(clean_writes)
+    return int(round(10 * got / span))

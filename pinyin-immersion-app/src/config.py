@@ -82,6 +82,23 @@ WHISPER_MODEL = "whisper-large-v3"
 # Penang accent. Audio is cached in the database after first use.
 HOKKIEN_TTS_PROVIDER = ""
 
+# ==========================================
+# 6c. HANDWRITING PRECISION RAMP
+# ==========================================
+# Each error-free write of a character tightens how closely your strokes
+# must match, so a character you know well demands better placement than
+# one you've just met.
+#
+# These are HanziWriter "leniency" values: HIGHER is more forgiving, 1.0 is
+# the library default. Tune to taste - if the drill starts feeling unfair
+# raise PRECISION_FLOOR; if it stays too easy, lower it.
+PRECISION_START = 1.25   # a brand-new character: generous
+PRECISION_STEP  = 0.04   # tightened by this much per clean write
+PRECISION_FLOOR = 0.75   # never stricter than this, however well you know it
+# Mistakes ease the requirement back off, so a bad day doesn't leave a
+# character permanently unwritable.
+PRECISION_RELAPSE = 2    # clean-writes forfeited when you fail a character
+
 
 # ==========================================
 # 7. SRS MULTIPLIERS

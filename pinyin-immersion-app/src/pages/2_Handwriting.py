@@ -22,6 +22,7 @@ import streamlit as st
 from auth import require_login, sidebar_user_badge
 from hanzi_component import hanzi_drill
 from db_manager import (
+    list_studied_characters,
     get_curriculum_session,
     get_curriculum_progress,
     get_handwriting_source,
@@ -92,9 +93,17 @@ with st.sidebar:
     st.metric("Characters in your vocab", total)
     if total:
         st.write(f"**✏️ Practiced:** {hw_stats['practiced']}")
-        st.progress(hw_stats["practiced"] / total)
+        st.progress(min(1.0, hw_stats["practiced"] / total))
+        if st.button("View / drill these", key="browse_practiced",
+                     use_container_width=True):
+            st.session_state.hw_browse = "all"
+            st.rerun()
         st.write(f"**🏆 Mastered:** {hw_stats['mastered']}")
-        st.progress(hw_stats["mastered"] / total)
+        st.progress(min(1.0, hw_stats["mastered"] / total))
+        if st.button("View / drill these", key="browse_mastered",
+                     use_container_width=True):
+            st.session_state.hw_browse = "mastered"
+            st.rerun()
         st.caption("Mastered = review pushed 21+ days out.")
 
 
@@ -130,6 +139,74 @@ def launch(chars, mode):
     st.session_state.hw_state_seed = {c["character"]: c for c in chars}
     st.rerun()
 
+
+# ----------------------------------------------------------------------
+# CHARACTER BROWSER - reached by clicking a sidebar counter
+# ----------------------------------------------------------------------
+if st.session_state.get("hw_browse") and "hw_payload" not in st.session_state:
+    SCOPES = {
+        "all": "Everything I've practised",
+        "learning": "Still learning",
+        "mastered": "Mastered",
+        "due": "Due for review",
+        "weak": "Giving me trouble",
+    }
+    scope = st.session_state.hw_browse
+    st.title("📖 My characters")
+
+    scope = st.selectbox("Show", list(SCOPES), format_func=lambda k: SCOPES[k],
+                         index=list(SCOPES).index(scope)
+                         if scope in SCOPES else 0)
+    st.session_state.hw_browse = scope
+
+    chars = list_studied_characters(USER_ID, scope)
+    if not chars:
+        st.info("Nothing here yet.")
+    else:
+        sort_by = st.radio(
+            "Order", ["Most common first", "Most mistakes first",
+                      "Least precise first", "Due soonest"],
+            horizontal=True)
+        if sort_by == "Most mistakes first":
+            chars.sort(key=lambda e: (-e["total_mistakes"], e["rank"] or 10**6))
+        elif sort_by == "Least precise first":
+            chars.sort(key=lambda e: (e["precision_level"], e["rank"] or 10**6))
+        elif sort_by == "Due soonest":
+            chars.sort(key=lambda e: (e["next_review_date"] or "9999"))
+
+        st.caption(f"{len(chars)} characters. Tick any to drill them together.")
+        st.dataframe(
+            [{"": e["character"], "Pinyin": e["pinyin"],
+              "Frequency": e["freq_label"], "Precision": f"{e['precision_level']}/10",
+              "Reviews": e["review_count"], "Mistakes": e["total_mistakes"],
+              "Due": e["next_review_date"] or "-",
+              "Meaning": e["gloss"][:60]} for e in chars],
+            hide_index=True, use_container_width=True, height=340)
+
+        labels = {e["character"]: f"{e['character']}  {e['pinyin']}  "
+                                  f"({e['gloss'][:28]})" for e in chars}
+        picked = st.multiselect("Characters to drill",
+                                options=[e["character"] for e in chars],
+                                format_func=lambda c: labels.get(c, c))
+        c1, c2 = st.columns(2)
+        if c1.button(f"✍️ Drill selected ({len(picked)})", type="primary",
+                     use_container_width=True, disabled=not picked):
+            session_chars = get_struggle_session(USER_ID, picked)
+            if session_chars:
+                st.session_state.pop("hw_browse", None)
+                launch(session_chars, "standard")
+        if c2.button(f"🔁 Drill all {len(chars)} in this list",
+                     use_container_width=True, disabled=not chars):
+            session_chars = get_struggle_session(
+                USER_ID, [e["character"] for e in chars][:60])
+            if session_chars:
+                st.session_state.pop("hw_browse", None)
+                launch(session_chars, "standard")
+
+    if st.button("← Back", use_container_width=True):
+        st.session_state.pop("hw_browse", None)
+        st.rerun()
+    st.stop()
 
 # ----------------------------------------------------------------------
 # SETUP SCREEN

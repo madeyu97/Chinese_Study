@@ -12,12 +12,14 @@ from psycopg2 import pool
 import streamlit as st
 
 from config import (
+    PRECISION_RELAPSE,
     VOCAB_CSV_PATH,
     MAX_REVIEWS_PER_DAY,
     NEW_WORDS_PER_DAY,
     RANDOM_BREADTH_PCT,
 )
-from handwriting_engine import (score_character, get_stroke_count,
+from handwriting_engine import (precision_for, precision_level,
+                                score_character, get_stroke_count,
                                 compute_next_review, choose_context_word)
 from dictionary_engine import (derive_pinyin, cedict_gloss,
                                character_info, frequency_label)
@@ -202,7 +204,8 @@ def init_db():
             total_mistakes INTEGER DEFAULT 0,
             recent_grades TEXT DEFAULT '',
             recent_mistakes TEXT DEFAULT '',
-            last_reviewed TEXT
+            last_reviewed TEXT,
+            clean_writes INTEGER DEFAULT 0
         )
     ''')
     # Backfill struggle-tracking columns on databases created before this
@@ -211,7 +214,8 @@ def init_db():
                     "total_mistakes INTEGER DEFAULT 0",
                     "recent_grades TEXT DEFAULT ''",
                     "recent_mistakes TEXT DEFAULT ''",
-                    "last_reviewed TEXT"):
+                    "last_reviewed TEXT",
+                    "clean_writes INTEGER DEFAULT 0"):
         cursor.execute(
             "ALTER TABLE handwriting_progress "
             "ADD COLUMN IF NOT EXISTS " + _coldef)
@@ -1036,6 +1040,10 @@ def _hw_entry(ch, is_new, personal_freq, progress, vocab_rows):
     entry["char_gloss"] = info["gloss"]
     entry["freq_rank"] = info["rank"]
     entry["freq_label"] = frequency_label(info["rank"])
+    clean = (progress or {}).get("clean_writes", 0)
+    entry["clean_writes"] = clean or 0
+    entry["leniency"] = precision_for(clean)
+    entry["precision_level"] = precision_level(clean)
     return entry
 
 
@@ -1075,6 +1083,70 @@ def get_focus_session(user_id, text):
                          word_english=gloss)
         session.append(entry)
     return session
+
+
+def list_studied_characters(user_id, scope="all"):
+    """Every character this user has drilled, with enough detail to pick
+    from: how it's going, how common it is, and what it means.
+
+    scope: 'all' | 'mastered' | 'learning' | 'due' | 'weak'
+    Definitions match the sidebar counters exactly - 'practiced' is any
+    character with a progress row, 'mastered' is one pushed 21+ days out.
+    """
+    today_str = date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT character, interval, ease_factor, review_count,
+                             total_mistakes, recent_mistakes, next_review_date,
+                             clean_writes
+                      FROM handwriting_progress WHERE user_id = %s""",
+                   (user_id,))
+    rows = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT v.chinese, v.pinyin, v.english, p.review_count
+                      FROM vocab v JOIN vocab_progress p
+                        ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE p.review_count > 0""", (user_id,))
+    vocab_rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    out = []
+    for r in rows:
+        ch = r["character"]
+        interval = r.get("interval") or 0
+        mastered = interval >= 21
+        due = (r.get("next_review_date") or "9999") <= today_str
+        rate = _recent_mistake_rate(r.get("recent_mistakes"))
+        if scope == "mastered" and not mastered:
+            continue
+        if scope == "learning" and mastered:
+            continue
+        if scope == "due" and not due:
+            continue
+        if scope == "weak" and rate <= 0:
+            continue
+        info = character_info(ch)
+        ctx = choose_context_word(ch, vocab_rows) or {}
+        out.append({
+            "character": ch,
+            "pinyin": info["pinyin"],
+            "gloss": info["gloss"],
+            "rank": info["rank"],
+            "freq_label": frequency_label(info["rank"]),
+            "interval": interval,
+            "review_count": r.get("review_count") or 0,
+            "total_mistakes": r.get("total_mistakes") or 0,
+            "recent_mistake_rate": round(rate, 2),
+            "clean_writes": r.get("clean_writes") or 0,
+            "precision_level": precision_level(r.get("clean_writes") or 0),
+            "next_review_date": r.get("next_review_date"),
+            "mastered": mastered,
+            "due": due,
+            "word": ctx.get("chinese", ""),
+            "word_english": ctx.get("english", ""),
+        })
+    out.sort(key=lambda e: (e["rank"] or 10**6))
+    return out
 
 
 def get_curriculum_session(user_id, new_count=5, limit_rank=500):
@@ -1309,6 +1381,17 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
         next_review_date = (date.today() + timedelta(days=1)).isoformat()
         new_interval = min(new_interval, 1)
 
+    # A clean write - no mistakes, no reveal - earns one step of extra
+    # precision on this character. A failure gives some back, so a bad
+    # session can't leave a character permanently at maximum strictness.
+    prev_clean = int(current_state.get('clean_writes', 0) or 0)
+    if mistakes == 0 and grade >= 2:
+        new_clean = prev_clean + 1
+    elif grade == 0:
+        new_clean = max(0, prev_clean - PRECISION_RELAPSE)
+    else:
+        new_clean = prev_clean
+
     prev_grades = current_state.get('recent_grades', '') or ''
     prev_mist = current_state.get('recent_mistakes', '') or ''
     new_grades = _push_recent(prev_grades, grade)
@@ -1320,8 +1403,8 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
         INSERT INTO handwriting_progress
             (character, user_id, next_review_date, interval, ease_factor,
              review_count, first_seen_date, total_mistakes, recent_grades,
-             recent_mistakes, last_reviewed)
-        VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
+             recent_mistakes, last_reviewed, clean_writes)
+        VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (user_id, character) DO UPDATE SET
             next_review_date = EXCLUDED.next_review_date,
             interval = EXCLUDED.interval,
@@ -1330,9 +1413,10 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
             total_mistakes = handwriting_progress.total_mistakes + EXCLUDED.total_mistakes,
             recent_grades = EXCLUDED.recent_grades,
             recent_mistakes = EXCLUDED.recent_mistakes,
-            last_reviewed = EXCLUDED.last_reviewed
+            last_reviewed = EXCLUDED.last_reviewed,
+            clean_writes = EXCLUDED.clean_writes
     ''', (character, user_id, next_review_date, new_interval, new_ease,
-           today_str, mistakes, new_grades, new_mist, today_str))
+           today_str, mistakes, new_grades, new_mist, today_str, new_clean))
     conn.commit()
     conn.close()
     log_activity(user_id, "write", character, grade, mistakes)

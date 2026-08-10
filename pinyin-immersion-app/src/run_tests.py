@@ -315,6 +315,26 @@ def t_curriculum():
     assert cc.coverage_for(scattered) > cc.coverage_at(2)
 
 
+@test("precision ramp: tightens on clean writes, floors, eases on failure")
+def t_precision():
+    from config import PRECISION_START, PRECISION_FLOOR, PRECISION_STEP
+    assert hw.precision_for(0) == PRECISION_START
+    assert hw.precision_for(1) < hw.precision_for(0)          # tightens
+    assert hw.precision_for(5) < hw.precision_for(1)
+    # never stricter than the floor, however many clean writes
+    assert hw.precision_for(500) == PRECISION_FLOOR
+    assert hw.precision_for(50) == PRECISION_FLOOR
+    # monotonic all the way down
+    vals = [hw.precision_for(n) for n in range(0, 30)]
+    assert all(b <= a for a, b in zip(vals, vals[1:]))
+    # display scale stays in range
+    assert hw.precision_level(0) == 0
+    assert hw.precision_level(500) == 10
+    assert 0 <= hw.precision_level(6) <= 10
+    # a relapse must genuinely relax the requirement mid-ramp
+    assert hw.precision_for(4) > hw.precision_for(6)
+
+
 # ======================================================================
 # HOKKIEN ROMANISATION ENGINE
 # ======================================================================
@@ -505,6 +525,22 @@ def db_tests():
         b = {w["id"] for w in db.get_session_words(jid, total=20)}
         assert a != b, "random draw should vary between sessions"
 
+    @test("character lists match the sidebar counters and support all scopes")
+    def t_char_lists():
+        uid = db.list_users()[0]["id"]
+        stats = db.get_handwriting_stats(uid)
+        all_c = db.list_studied_characters(uid)
+        mast = db.list_studied_characters(uid, "mastered")
+        learn = db.list_studied_characters(uid, "learning")
+        assert len(all_c) == stats["practiced"], "practiced list must match counter"
+        assert len(mast) == stats["mastered"], "mastered list must match counter"
+        assert len(mast) + len(learn) == len(all_c), "scopes must partition"
+        for scope in ("all", "learning", "mastered", "due", "weak"):
+            for row in db.list_studied_characters(uid, scope):
+                for key in ("character", "pinyin", "gloss", "freq_label",
+                            "precision_level", "total_mistakes"):
+                    assert key in row, f"{scope} missing {key}"
+
     t_bank()
     t_flags()
     t_hw_session()
@@ -512,6 +548,7 @@ def db_tests():
     t_multiuser_pins()
     t_legacy_backup()
     t_session_modes()
+    t_char_lists()
 
 
 # ======================================================================
@@ -524,7 +561,7 @@ if __name__ == "__main__":
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
     t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
-    t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info()
+    t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision()
     print("Hokkien engine:")
     t_hk_tones(); t_hk_taiji(); t_hk_tone9(); t_hk_dblhyphen()
     t_hk_s2t(); t_hk_match()

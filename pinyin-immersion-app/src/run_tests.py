@@ -335,6 +335,26 @@ def t_precision():
     assert hw.precision_for(4) > hw.precision_for(6)
 
 
+@test("radicals: herb substance identified from the head-final character")
+def t_radicals():
+    import radical_engine as rg
+    def kind(word):
+        d = rg.describe_word(word)
+        return next((c["substance"] for c in reversed(d["characters"])
+                     if c["substance"]), None)
+    assert kind("茯苓") == "plant"        # 艹 twice
+    assert kind("桂枝") == "wood"         # 木 twice
+    assert kind("水蛭") == "animal"       # 虫
+    assert kind("石膏") == "mineral"      # 石 itself is the radical
+    assert kind("龙骨") == "animal"       # 骨 itself is the radical
+    # head-final: 金银花 is a flower, not a metal
+    assert kind("金银花") == "plant"
+    # 月 must not be treated as "meat": it wrongly tagged minerals as animal
+    assert "月" not in rg.SUBSTANCE_HINTS
+    # decomposition of a plain character must not raise
+    rg.decompose("一")
+
+
 # ======================================================================
 # HOKKIEN ROMANISATION ENGINE
 # ======================================================================
@@ -525,6 +545,38 @@ def db_tests():
         b = {w["id"] for w in db.get_session_words(jid, total=20)}
         assert a != b, "random draw should vary between sessions"
 
+    @test("character lists match the sidebar counters and support all scopes")
+    def t_char_lists():
+        uid = db.list_users()[0]["id"]
+        stats = db.get_handwriting_stats(uid)
+        all_c = db.list_studied_characters(uid)
+        mast = db.list_studied_characters(uid, "mastered")
+        learn = db.list_studied_characters(uid, "learning")
+        assert len(all_c) == stats["practiced"], "practiced list must match counter"
+        assert len(mast) == stats["mastered"], "mastered list must match counter"
+        assert len(mast) + len(learn) == len(all_c), "scopes must partition"
+        for scope in ("all", "learning", "mastered", "due", "weak"):
+            for row in db.list_studied_characters(uid, scope):
+                for key in ("character", "pinyin", "gloss", "freq_label",
+                            "precision_level", "total_mistakes"):
+                    assert key in row, f"{scope} missing {key}"
+
+    @test("herbs: import, tier ordering and radical cues")
+    def t_herbs():
+        if db.herb_count() == 0:
+            return                     # no herbs.csv in this environment
+        uid = db.list_users()[0]["id"]
+        counts = db.herb_character_counts(uid)
+        assert counts["herbs"] > 0 and counts["characters"] > 0
+        sess = db.get_herb_session(uid, new_count=6)
+        if not sess:
+            return
+        for e in sess:
+            assert e["word"], "every herb card needs the herb as its cue"
+            assert "radicals" in e and "herb_tier" in e
+        tiers = [e["herb_tier"] for e in sess if e["is_new"]]
+        assert tiers == sorted(tiers), "new characters must come tier-1 first"
+
     t_bank()
     t_flags()
     t_hw_session()
@@ -532,6 +584,8 @@ def db_tests():
     t_multiuser_pins()
     t_legacy_backup()
     t_session_modes()
+    t_char_lists()
+    t_herbs()
 
 
 # ======================================================================
@@ -544,7 +598,7 @@ if __name__ == "__main__":
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
     t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
-    t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision()
+    t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals()
     print("Hokkien engine:")
     t_hk_tones(); t_hk_taiji(); t_hk_tone9(); t_hk_dblhyphen()
     t_hk_s2t(); t_hk_match()

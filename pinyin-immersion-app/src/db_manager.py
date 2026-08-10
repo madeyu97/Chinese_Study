@@ -2202,56 +2202,80 @@ def herb_characters():
 
 
 def get_herb_session(user_id, new_count=5):
-    """Handwriting queue built from the characters in your herb list.
+    """Handwriting queue built HERB BY HERB rather than character by character.
 
-    The cue is the herb itself - its name, pinyin and what it does - and
-    each card carries the radical breakdown, because herb characters are
-    unusually readable: the radical often tells you whether the substance
-    is a plant, a mineral or an animal product.
+    A herb name is learned as a unit: 麻黃 is drilled as 麻 immediately
+    followed by 黃, with the whole name on screen throughout and each
+    character revealed as you write it. Practising 黃 in isolation, weeks
+    away from 麻, never teaches you the herb.
+
+    SRS is still tracked per character, so a character met in one herb
+    counts towards every other herb containing it.
     """
     from radical_engine import describe_word
     today_str = date.today().isoformat()
-    by_char, _herbs = herb_characters()
-    if not by_char:
+    _by_char, herbs = herb_characters()
+    if not herbs:
         return []
-    chars = list(by_char)
 
+    all_chars = sorted({c for h in herbs for c in h["chinese"] if _is_cjk(c)})
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    ph = ",".join(["%s"] * len(chars))
+    ph = ",".join(["%s"] * len(all_chars))
     cursor.execute(f"""SELECT * FROM handwriting_progress
                        WHERE user_id = %s AND character IN ({ph})""",
-                   [user_id] + chars)
+                   [user_id] + all_chars)
     progress = {r["character"]: dict(r) for r in cursor.fetchall()}
     conn.close()
 
-    def build(ch, is_new):
-        herb = by_char[ch][0]
-        entry = _hw_entry(ch, is_new, len(by_char[ch]), progress.get(ch), [])
-        entry["word"] = herb["chinese"]
-        entry["word_pinyin"] = herb.get("pinyin") or ""
-        entry["word_english"] = herb.get("english") or ""
-        rad = describe_word(ch)
-        char_info_ = rad["characters"][0] if rad["characters"] else {}
-        entry["radicals"] = char_info_.get("components", [])
-        entry["radical_note"] = char_info_.get("substance_note") or ""
-        entry["substance"] = char_info_.get("substance") or ""
-        entry["other_herbs"] = [h["chinese"] for h in by_char[ch][1:4]]
-        entry["herb_tier"] = min((h.get("tier") or 9) for h in by_char[ch])
-        entry["herb_latin"] = herb.get("latin") or ""
-        alt = herb.get("alt_script") or ""
-        entry["herb_alt"] = alt
-        return entry
+    def herb_cards(herb):
+        """One card per character, carrying the herb as shared context."""
+        chars = [c for c in herb["chinese"] if _is_cjk(c)]
+        cards = []
+        for i, ch in enumerate(chars):
+            is_new = ch not in progress
+            entry = _hw_entry(ch, is_new, 1, progress.get(ch), [])
+            # Cue is the herb, not a vocabulary word
+            entry["word"] = herb["chinese"]
+            entry["word_pinyin"] = herb.get("pinyin") or ""
+            entry["word_english"] = herb.get("english") or ""
+            # Where this character sits within the name
+            entry["group_word"] = herb["chinese"]
+            entry["group_index"] = i
+            entry["group_total"] = len(chars)
+            entry["group_written"] = chars[:i]      # already written, show them
+            entry["herb_tier"] = herb.get("tier") or 9
+            entry["herb_latin"] = herb.get("latin") or ""
+            entry["herb_alt"] = herb.get("alt_script") or ""
+            rad = describe_word(ch)
+            first = rad["characters"][0] if rad["characters"] else {}
+            entry["radicals"] = first.get("components", [])
+            entry["radical_note"] = first.get("substance_note") or ""
+            entry["substance"] = first.get("substance") or ""
+            cards.append(entry)
+        return cards
 
-    due = [build(ch, False) for ch in chars
-           if ch in progress and progress[ch]["next_review_date"] <= today_str]
-    due.sort(key=lambda e: e["next_review_date"] or "")
-    new = [build(ch, True) for ch in chars if ch not in progress]
-    # Herb Dojo grades herbs 1-3 by clinical importance. Learn the
-    # characters of tier-1 herbs first; within a tier, characters that
-    # appear in several herbs earn their keep soonest.
-    new.sort(key=lambda e: (e["herb_tier"], -(e["personal_freq"] or 0)))
-    return due + new[:new_count]
+    def herb_is_due(herb):
+        chars = [c for c in herb["chinese"] if _is_cjk(c)]
+        seen = [c for c in chars if c in progress]
+        if not seen:
+            return False
+        return any(progress[c]["next_review_date"] <= today_str for c in seen)
+
+    def herb_is_new(herb):
+        chars = [c for c in herb["chinese"] if _is_cjk(c)]
+        return any(c not in progress for c in chars)
+
+    due_herbs = [h for h in herbs if herb_is_due(h)]
+    new_herbs = [h for h in herbs if herb_is_new(h) and h not in due_herbs]
+    # herbs already arrive in tier order, so the most clinically important
+    # names are introduced first
+    new_herbs = new_herbs[:max(0, new_count)]
+
+    session = []
+    for h in due_herbs + new_herbs:
+        session.extend(herb_cards(h))
+    return session
 
 
 def herb_character_counts(user_id):

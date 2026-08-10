@@ -273,10 +273,12 @@ if "hw_payload" not in st.session_state:
                     st.caption(f"Tier-1 herbs alone account for "
                                f"**{hc['tier1_characters']}** characters - "
                                f"the ones worth knowing first.")
-                new_count = st.slider("New characters this session", 0, 15, 5,
+                new_count = st.slider("New herbs this session", 0, 12, 4,
                                       key="herb_new")
                 st.caption(
-                    "Characters from your herb names, tier-1 herbs first. "
+                    "Whole herb names, tier-1 herbs first: you write 麻 then "
+                    "黃 with 麻黃 on screen throughout, so the name sticks "
+                    "rather than two unrelated characters. "
                     "Each card shows the herb it comes from and breaks the "
                     "character into radicals — which for herbs is unusually "
                     "informative: 艹 marks a plant, 木 something woody, "

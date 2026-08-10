@@ -574,8 +574,17 @@ def db_tests():
         for e in sess:
             assert e["word"], "every herb card needs the herb as its cue"
             assert "radicals" in e and "herb_tier" in e
-        tiers = [e["herb_tier"] for e in sess if e["is_new"]]
-        assert tiers == sorted(tiers), "new characters must come tier-1 first"
+        # characters of one herb must appear consecutively, in written order
+        groups = []
+        for e in sess:
+            if not groups or groups[-1][0] != e["group_word"]:
+                groups.append((e["group_word"], []))
+            groups[-1][1].append(e["character"])
+        for word, chars in groups:
+            expected = [c for c in word if "\u4e00" <= c <= "\u9fff"]
+            assert chars == expected, (word, chars)
+        for e in sess:
+            assert e["group_total"] >= 1 and 0 <= e["group_index"] < e["group_total"]
 
     t_bank()
     t_flags()

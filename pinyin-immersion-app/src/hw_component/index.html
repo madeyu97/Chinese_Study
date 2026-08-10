@@ -54,6 +54,8 @@
     font-size: 40px; line-height: 1.15; font-family: "Noto Serif SC", serif;
     letter-spacing: 4px; margin: 2px 0 4px;
   }
+  #masked-word .done { color: var(--stroke-done); opacity: .95; }
+  #masked-word .pending { color: var(--card-edge); }
   #masked-word .blank {
     display: inline-block; width: 1.05em; height: 1.05em; vertical-align: -0.14em;
     border: 2px dashed var(--ink); border-radius: 8px; opacity: .9;
@@ -277,7 +279,13 @@ function setChips(phaseLabel) {
   if (c.is_new) chips.push('<span class="chip new">NEW</span>');
   chips.push(`<span class="chip">${S.i + 1} / ${S.queue.length}</span>`);
   if (S.strokeTotal) chips.push(`<span class="chip">${S.strokeTotal} strokes</span>`);
-  if (c.freq_label) chips.push(`<span class="chip freq">${c.freq_label}</span>`);
+  if (c.group_total > 1)
+    chips.push('<span class="chip phase">character ' + (c.group_index + 1)
+               + ' of ' + c.group_total + '</span>');
+  if (c.herb_tier)
+    chips.push('<span class="chip freq">tier ' + c.herb_tier + '</span>');
+  if (c.freq_label && !c.group_word)
+    chips.push('<span class="chip freq">' + c.freq_label + '</span>');
   if (typeof c.precision_level === "number" && c.precision_level > 0) {
     chips.push(`<span class="chip prec" title="Accuracy required, `
       + `earned by writing this character cleanly">`
@@ -291,9 +299,25 @@ function renderCue() {
   const c = cur();
   // The character under test must NEVER appear as text. Mask every
   // occurrence of it inside the context word.
-  const masked = Array.from(c.word || c.character).map(ch =>
-    ch === c.character ? '<span class="blank"></span>'
-                       : ch).join("");
+  // Herb cards arrive as a group - the characters of one name, in order -
+  // so the whole name stays on screen while you write it: characters
+  // already written show normally, the current one is a blank box, and
+  // ones still to come are dimmed. Writing 麻黃 you see [ ]黃 then 麻[ ],
+  // which teaches the NAME rather than two unrelated glyphs.
+  let masked;
+  if (c.group_word && typeof c.group_index === "number") {
+    let idx = -1;
+    masked = Array.from(c.group_word).map(ch => {
+      if (!/[\u4e00-\u9fff]/.test(ch)) return ch;
+      idx += 1;
+      if (idx < c.group_index) return '<span class="done">' + ch + '</span>';
+      if (idx === c.group_index) return '<span class="blank"></span>';
+      return '<span class="pending">' + ch + '</span>';
+    }).join("");
+  } else {
+    masked = Array.from(c.word || c.character).map(ch =>
+      ch === c.character ? '<span class="blank"></span>' : ch).join("");
+  }
   document.getElementById("masked-word").innerHTML = masked;
   document.getElementById("word-pinyin").textContent = c.word_pinyin || "";
   document.getElementById("word-english").textContent = c.word_english || "";

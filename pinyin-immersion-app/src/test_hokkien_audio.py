@@ -19,11 +19,13 @@ never wait on a network call:
     python src/test_hokkien_audio.py --warm 200
 """
 
+import time
 import argparse
 import os
 import sys
 
-from hokkien_audio import PROVIDERS, synthesize, audio_key
+from hokkien_audio import (PROVIDERS, synthesize, audio_key,
+                           RATE_LIMIT_SECONDS)
 from hokkien_engine import tailo_to_numeric
 
 SAMPLES = [
@@ -74,7 +76,14 @@ def probe():
 
 
 def warm(limit, provider):
-    """Pre-generate and cache audio for verified deck entries."""
+    """Pre-generate and cache audio for verified deck entries.
+
+    The service allows about 3 clips per IP per minute, so this deliberately
+    waits between requests. It is slow by design - roughly 20 seconds per
+    clip - but it only ever has to happen once per phrase, and the clips
+    land in your database where BOTH apps can serve them without ever
+    calling the service again. Leave it running and come back later.
+    """
     import db_manager as db
     conn = db.get_connection()
     cur = conn.cursor()
@@ -94,11 +103,17 @@ def warm(limit, provider):
         data, mime, used = synthesize(hanji, tailo, provider)
         if not data:
             failed += 1
+            if failed >= 5 and made == 0:
+                print("  Five failures in a row and nothing generated - "
+                      "stopping rather than hammering the service.")
+                break
             continue
         db.hokkien_audio_put(key, entry_id, data, mime, used)
         made += 1
-        if made % 20 == 0:
-            print(f"  {made} generated…")
+        eta = (len(rows) - made - skipped) * RATE_LIMIT_SECONDS / 60
+        print(f"  {made}/{len(rows)}  {hanji or tailo}   "
+              f"(~{eta:.0f} min remaining)")
+        time.sleep(RATE_LIMIT_SECONDS)
     print(f"Done. {made} new, {skipped} already cached, {failed} failed.")
     print("Cache:", db.hokkien_audio_stats())
 
@@ -106,7 +121,8 @@ def warm(limit, provider):
 def main():
     ap = argparse.ArgumentParser(description="Test/warm Hokkien TTS")
     ap.add_argument("--warm", type=int, default=0,
-                    help="pre-generate audio for N verified entries")
+                    help="pre-generate audio for N verified entries "
+                         "(slow: the service permits ~3 clips per minute)")
     ap.add_argument("--provider", default="",
                     help="force one provider (default: try all in order)")
     args = ap.parse_args()

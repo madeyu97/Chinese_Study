@@ -246,9 +246,28 @@ with tab_verify:
         "what's right, correct what isn't, reject what Penang wouldn't say. "
         "Only confirmed entries enter the study rotation.")
     tier_filter = st.selectbox(
-        "Show tier", ["all", "malaysian", "penang", "consensus", "core", "single", "composed"], index=0)
+        "Show tier",
+        ["malaysian", "penang", "consensus", "core", "single", "composed", "all"],
+        index=0,
+        help="Malaysian entries come from the northern-Malaysian dataset - "
+             "the closest thing here to Penang usage, so they're the most "
+             "worthwhile to verify first.")
     rows = db.hokkien_queue(limit=20,
                             tier=None if tier_filter == "all" else tier_filter)
+
+    if tier_filter in ("malaysian", "penang") and rows:
+        with st.expander(f"⚡ Confirm these {len(rows)} in one go"):
+            st.caption(
+                "For the Malaysian and Penang-tagged entries you may prefer "
+                "to skim the list above and accept the batch, rather than "
+                "tapping through one at a time. Anything you later find "
+                "wrong can still be corrected or rejected from Browse.")
+            if st.button(f"✅ Confirm all {len(rows)} shown",
+                         use_container_width=True):
+                for r in rows:
+                    db.hokkien_set_status(r["id"], "verified")
+                st.success(f"Confirmed {len(rows)}. Next batch loaded.")
+                st.rerun()
     if not rows:
         st.success("Verification queue is empty. 好势!")
 

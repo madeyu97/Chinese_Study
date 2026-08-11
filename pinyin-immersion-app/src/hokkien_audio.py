@@ -57,37 +57,49 @@ def _http_get(url):
     return data, mime
 
 
-def _provider_ithuan(hanji, tailo):
-    """意傳科技 (ithuan.tw) — Taiwanese TTS over hàn-lô text."""
-    text = hanji if hanji and hanji != "—" else tailo
-    url = "https://hokbu.ithuan.tw/tts?" + urllib.parse.urlencode({"taibun": text})
+def _provider_ithuan_tailo(hanji, tailo):
+    """意傳科技 hap-sing - the audio service behind 鬥拍字 (suisiann.ithuan.tw).
+
+    Endpoint taken from the project's own frontend
+    (github.com/i3thuan5/TauPhahJi-BangTsam), which builds
+        https://hapsing.ithuan.tw/bangtsam?taibun=<KIP romanisation>
+    Diacritic Tâi-lô is what the site displays and passes, so it is tried
+    first.
+    """
+    url = "https://hapsing.ithuan.tw/bangtsam?" + \
+        urllib.parse.urlencode({"taibun": tailo})
     return _http_get(url)
 
 
-def _provider_ntut_tailo(hanji, tailo):
-    """NTUT 台語 TTS, romanisation input (numeric tones)."""
-    url = "http://tts001.iptcloud.net:8804/synthesize_TL?" + \
-        urllib.parse.urlencode({"text1": tailo_to_numeric(tailo)})
+def _provider_ithuan_numeric(hanji, tailo):
+    """Same service, numeric tones (tsiah8-png7) in case it prefers them."""
+    url = "https://hapsing.ithuan.tw/bangtsam?" + \
+        urllib.parse.urlencode({"taibun": tailo_to_numeric(tailo)})
     return _http_get(url)
 
 
-def _provider_ntut_hanji(hanji, tailo):
-    """NTUT 台語 TTS, hàn-jī input."""
+def _provider_ithuan_hanji(hanji, tailo):
+    """Same service given hàn-jī instead of romanisation."""
     if not hanji or hanji == "—":
         raise ValueError("no hanji for this entry")
-    url = "http://tts001.iptcloud.net:8804/synthesize_SL?" + \
-        urllib.parse.urlencode({"text1": hanji})
+    url = "https://hapsing.ithuan.tw/bangtsam?" + \
+        urllib.parse.urlencode({"taibun": hanji})
     return _http_get(url)
 
 
 PROVIDERS = {
-    "ithuan": _provider_ithuan,
-    "ntut_tailo": _provider_ntut_tailo,
-    "ntut_hanji": _provider_ntut_hanji,
+    "ithuan_tailo": _provider_ithuan_tailo,
+    "ithuan_numeric": _provider_ithuan_numeric,
+    "ithuan_hanji": _provider_ithuan_hanji,
 }
 
 # Order tried when the configured provider fails.
-FALLBACK_ORDER = ["ithuan", "ntut_tailo", "ntut_hanji"]
+FALLBACK_ORDER = ["ithuan_tailo", "ithuan_numeric", "ithuan_hanji"]
+
+# The service asks for no more than 3 clips per IP per minute
+# ("1 IP 1分鐘內上 tsē 下載 3 句音檔"). It is run by a small non-profit and
+# costs them real money, so the warm-up path honours this strictly.
+RATE_LIMIT_SECONDS = 21
 
 
 def audio_key(hanji, tailo, provider):

@@ -304,6 +304,27 @@ def init_db():
         ON activity_log (user_id, day)
     ''')
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reading_bank (
+            id SERIAL PRIMARY KEY,
+            chinese TEXT NOT NULL UNIQUE,
+            english TEXT,
+            char_set TEXT NOT NULL,
+            char_count INTEGER DEFAULT 0,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reading_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            sentence_id INTEGER NOT NULL REFERENCES reading_bank(id) ON DELETE CASCADE,
+            seen_count INTEGER DEFAULT 0,
+            last_seen TEXT,
+            UNIQUE (user_id, sentence_id)
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS nudges (
             id SERIAL PRIMARY KEY,
             from_user INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -1024,12 +1045,49 @@ def _is_cjk(ch):
     return '\u4e00' <= ch <= '\u9fff'
 
 
+_HERB_CONTEXT_CACHE = {"map": None}
+
+
+def _herb_context_map():
+    """character -> the most important herb containing it.
+
+    Cached per process: the drill asks for this once per card, and the herb
+    list only changes on import (which clears it).
+    """
+    if _HERB_CONTEXT_CACHE["map"] is None:
+        out = {}
+        try:
+            conn = get_connection()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute("""SELECT chinese, pinyin, english, tier
+                           FROM herbs ORDER BY COALESCE(tier, 9), id""")
+            for row in cur.fetchall():
+                for ch in row["chinese"]:
+                    if _is_cjk(ch) and ch not in out:
+                        out[ch] = dict(row)
+            conn.close()
+        except Exception as e:
+            logging.warning(f"[HERB] context map unavailable: {e}")
+        _HERB_CONTEXT_CACHE["map"] = out
+    return _HERB_CONTEXT_CACHE["map"]
+
+
 def _hw_entry(ch, is_new, personal_freq, progress, vocab_rows):
     """Build one drill-queue entry, including the semantic recall cue: the
     best-known vocab word containing this character, its pinyin and meaning,
     and the character's own pinyin. The character itself is the ANSWER and
     is only ever rendered by HanziWriter inside the drill component."""
     ctx = choose_context_word(ch, vocab_rows) or {}
+    # Fall back to a herb. Without this, a herb character reached through
+    # the character browser, a weak-character drill or a focus session
+    # arrived with no cue at all - just "20 strokes, rare" - because no
+    # word in the user's vocabulary contains it.
+    if not ctx:
+        herb = _herb_context_map().get(ch)
+        if herb:
+            ctx = {"chinese": herb["chinese"],
+                   "pinyin": herb.get("pinyin") or "",
+                   "english": herb.get("english") or ""}
     entry = {
         "character": ch,
         "is_new": is_new,
@@ -2168,6 +2226,7 @@ def import_herbs_from_csv(path=None, force=False):
             "ON CONFLICT (chinese) DO NOTHING", fresh, page_size=200)
     conn.commit()
     conn.close()
+    _HERB_CONTEXT_CACHE["map"] = None
     clear_caches()
     logging.info(f"Herb import: {len(fresh)} new, {len(df) - len(fresh)} skipped.")
     return len(fresh), len(df) - len(fresh), ""
@@ -2298,6 +2357,138 @@ def herb_character_counts(user_id):
             "tier1_characters": len(tier1),
             "due": sum(1 for c in chars if c in seen and seen[c] <= today_str),
             "new": sum(1 for c in chars if c not in seen)}
+
+
+
+# ==========================================
+# READING - sentences bounded by what you can write
+# ==========================================
+def known_characters(user_id):
+    """Characters this user has drilled in the handwriting section.
+
+    Deliberately the same set the handwriting counters report, so
+    "65 characters studied" and what the reading section will use are
+    always the same number.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT character FROM handwriting_progress WHERE user_id = %s",
+                   (user_id,))
+    chars = {r[0] for r in cursor.fetchall()}
+    conn.close()
+    return chars
+
+
+def recent_characters(user_id, limit=12):
+    """The characters this user has most recently started writing.
+
+    Reading practice should pull on what you have just learned, not only on
+    what you learned months ago - so these are offered to the generator as
+    characters to build around, and used to rank stored sentences.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT character FROM handwriting_progress
+                      WHERE user_id = %s
+                      ORDER BY COALESCE(last_reviewed, first_seen_date) DESC,
+                               id DESC
+                      LIMIT %s""", (user_id, limit))
+    chars = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return chars
+
+
+def due_characters(user_id):
+    """Characters whose handwriting review is due - worth seeing in print."""
+    today_str = date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT character FROM handwriting_progress
+                      WHERE user_id = %s AND next_review_date <= %s""",
+                   (user_id, today_str))
+    chars = {r[0] for r in cursor.fetchall()}
+    conn.close()
+    return chars
+
+
+def reading_bank_add(chinese, english, char_set, user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO reading_bank
+                        (chinese, english, char_set, char_count, created_by)
+                      VALUES (%s, %s, %s, %s, %s)
+                      ON CONFLICT (chinese) DO NOTHING""",
+                   (chinese, english, "".join(sorted(char_set)),
+                    len([c for c in chinese if _is_cjk(c)]), user_id))
+    added = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return added
+
+
+def reading_bank_for(user_id, known, max_unknown=3, limit=20,
+                     focus=None):
+    """Stored sentences this user can read now.
+
+    A sentence generated for one person is reusable by the other as soon
+    as they know enough characters, so the bank fills up for both of you.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT b.id, b.chinese, b.english,
+                             COALESCE(p.seen_count, 0) AS seen_count
+                      FROM reading_bank b
+                      LEFT JOIN reading_progress p
+                             ON p.sentence_id = b.id AND p.user_id = %s
+                      ORDER BY COALESCE(p.seen_count, 0), b.id""", (user_id,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    focus = set(focus or [])
+    out = []
+    for r in rows:
+        chars = {c for c in r["chinese"] if _is_cjk(c)}
+        unknown = {c for c in chars if c not in known}
+        if len(unknown) <= max_unknown:
+            r["unknown"] = sorted(unknown)
+            # how much of what you are currently working on this exercises
+            r["focus_hits"] = len(chars & focus)
+            out.append(r)
+    # unseen first, then sentences that drill your current characters
+    out.sort(key=lambda r: (r["seen_count"], -r["focus_hits"], r["id"]))
+    return out[:limit]
+
+
+def reading_mark_seen(user_id, sentence_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO reading_progress
+                        (user_id, sentence_id, seen_count, last_seen)
+                      VALUES (%s, %s, 1, %s)
+                      ON CONFLICT (user_id, sentence_id) DO UPDATE SET
+                        seen_count = reading_progress.seen_count + 1,
+                        last_seen = EXCLUDED.last_seen""",
+                   (user_id, sentence_id, date.today().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def reading_stats(user_id):
+    known = known_characters(user_id)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM reading_bank")
+    total = cursor.fetchone()[0] or 0
+    cursor.execute("""SELECT COUNT(*) FROM reading_progress
+                      WHERE user_id = %s AND seen_count > 0""", (user_id,))
+    read = cursor.fetchone()[0] or 0
+    conn.close()
+    try:
+        from character_curriculum import coverage_for
+        coverage = round(coverage_for(known), 1)
+    except Exception:
+        coverage = 0.0
+    return {"known_characters": len(known), "coverage": coverage,
+            "sentences_in_bank": total, "sentences_read": read}
 
 
 init_db()

@@ -355,6 +355,43 @@ def t_radicals():
     rg.decompose("一")
 
 
+@test("reading: sentences verified against the learner's character set")
+def t_reading():
+    import reading_engine as rd
+    known = set("我你他的是不了在人有这那个好吃饭水去来天今大小")
+    a = rd.analyse("我今天去吃饭。", known)
+    assert a["unknown_count"] == 0
+    b = rd.analyse("我购买脚踏车。", known)
+    assert b["unknown_count"] == 5, b   # 购买脚踏车
+    # annotation: unknown characters are flagged, known ones are not
+    ann = rd.annotate("我去看書。", known)
+    assert [x["known"] for x in ann if x["char"] == "我"] == [True]
+    assert [x["known"] for x in ann if x["char"] == "書"] == [False]
+    # punctuation never counts as unknown
+    assert all(x["known"] for x in ann if x["char"] in "。")
+    # a model that ignores the character limit is rejected and retried
+    import json
+    from unittest.mock import MagicMock
+    def fr(p):
+        r = MagicMock(); r.choices = [MagicMock()]
+        r.choices[0].message.content = json.dumps(p); return r
+    seq = iter([fr({"chinese": "购买崭新脚踏车辆", "english": "x"}),
+                fr({"chinese": "你有水吗？", "english": "y"})])
+    c = MagicMock(); c.chat.completions.create = lambda **k: next(seq)
+    sent, _eng, _rep = rd.generate_sentence(c, "m", known, max_unknown=3)
+    assert sent == "你有水吗？", sent
+    # recently-learned characters are offered to the generator, so practice
+    # follows what you are working on rather than only old material
+    seen = []
+    c2 = MagicMock()
+    c2.chat.completions.create = lambda **k: (
+        seen.append(k["messages"][0]["content"]),
+        fr({"chinese": "我今天吃饭。", "english": "z"}))[1]
+    _s, _e, rep = rd.generate_sentence(c2, "m", known, focus=["今", "天"])
+    assert "今天" in seen[0], "focus characters must reach the prompt"
+    assert "practising" in rep
+
+
 # ======================================================================
 # HOKKIEN ROMANISATION ENGINE
 # ======================================================================
@@ -607,7 +644,7 @@ if __name__ == "__main__":
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
     t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
-    t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals()
+    t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
     print("Hokkien engine:")
     t_hk_tones(); t_hk_taiji(); t_hk_tone9(); t_hk_dblhyphen()
     t_hk_s2t(); t_hk_match()

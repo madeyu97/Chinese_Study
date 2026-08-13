@@ -623,6 +623,29 @@ def db_tests():
         for e in sess:
             assert e["group_total"] >= 1 and 0 <= e["group_index"] < e["group_total"]
 
+    @test("reading: next-sentence never repeats the current one")
+    def t_reading_rotation():
+        uid = db.list_users()[0]["id"]
+        known = db.known_characters(uid)
+        if len(known) < 5:
+            return
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM reading_progress WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        made = []
+        for i in range(4):
+            zh = f"测试句子{i}。"
+            db.reading_bank_add(zh, "t", known, uid)
+            made.append(zh)
+        pool = db.reading_bank_for(uid, known, 99, limit=50)
+        assert len(pool) >= 4, "bank should hold the added sentences"
+        # marking one as seen must push it down the queue
+        first = pool[0]
+        db.reading_mark_seen(uid, first["id"])
+        pool2 = db.reading_bank_for(uid, known, 99, limit=50)
+        assert pool2[0]["id"] != first["id"], (
+            "a sentence just read must not be served again immediately")
+
     t_bank()
     t_flags()
     t_hw_session()
@@ -632,6 +655,7 @@ def db_tests():
     t_session_modes()
     t_char_lists()
     t_herbs()
+    t_reading_rotation()
 
 
 # ======================================================================

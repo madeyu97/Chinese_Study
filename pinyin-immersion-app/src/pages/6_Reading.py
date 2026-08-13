@@ -20,6 +20,10 @@ from auth import require_login, sidebar_user_badge
 from reading_engine import annotate, generate_sentence, analyse
 from config import GENERATION_MODEL
 
+# How many readable sentences must exist before the page starts revisiting
+# old ones instead of generating something new.
+REVISIT_AFTER = 15
+
 st.set_page_config(page_title="Reading", page_icon="📖", layout="centered")
 
 USER = require_login()
@@ -61,6 +65,18 @@ if "reading_current" not in st.session_state:
     st.session_state.reading_current = None
     st.session_state.reading_revealed = set()
 
+# Changing the allowance should visibly change what you get, so drop a
+# sentence that no longer fits the new setting.
+if st.session_state.get("reading_allowance") != max_unknown:
+    st.session_state.reading_allowance = max_unknown
+    cur_card = st.session_state.get("reading_current")
+    if isinstance(cur_card, dict):
+        still_ok = len([c for c in cur_card["chinese"]
+                        if c not in known and "\u4e00" <= c <= "\u9fff"]
+                       ) <= max_unknown
+        if not still_ok:
+            st.session_state.reading_current = None
+
 if focus:
     st.caption("Recently learned, so sentences will lean on these: "
                + " ".join(focus[:10]))
@@ -69,16 +85,39 @@ col1, col2 = st.columns(2)
 if col1.button("📖 Next sentence", type="primary", use_container_width=True):
     pool = db.reading_bank_for(USER_ID, known, max_unknown, limit=30,
                                focus=focus)
-    if pool:
-        st.session_state.reading_current = pool[0]
+    current = st.session_state.get("reading_current")
+    current_id = current.get("id") if isinstance(current, dict) else None
+    # Don't serve back the sentence already on screen.
+    fresh = [p_ for p_ in pool if p_["id"] != current_id]
+
+    # Generate when there is nothing NEW to read - not merely when the bank
+    # is empty. Previously the bank only had to contain one sentence for
+    # this branch to keep serving that same sentence forever.
+    unseen = [p_ for p_ in fresh if p_["seen_count"] == 0]
+    if unseen:
+        chosen = unseen[0]
+    elif len(fresh) >= REVISIT_AFTER:
+        # A decent library exists, so revisit the least-seen rather than
+        # spending an API call. Below this, keep writing new material -
+        # re-reading the same four sentences isn't practice.
+        chosen = fresh[0]
+    else:
+        chosen = None
+
+    if chosen:
+        st.session_state.reading_current = chosen
         st.session_state.reading_revealed = set()
-        db.reading_mark_seen(USER_ID, pool[0]["id"])
+        db.reading_mark_seen(USER_ID, chosen["id"])
         st.rerun()
     else:
         st.session_state.reading_current = "GENERATE"
         st.rerun()
 
 topic = col2.text_input("Topic (optional)", placeholder="food, weather…")
+
+if st.button("✨ Write me a new one", use_container_width=True):
+    st.session_state.reading_current = "GENERATE"
+    st.rerun()
 
 if st.session_state.reading_current == "GENERATE":
     with st.spinner("Writing a sentence from your characters…"):

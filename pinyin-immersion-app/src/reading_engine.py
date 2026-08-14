@@ -93,13 +93,21 @@ ALLOWED CHARACTERS ({len(known_chars)} of them):
 
 Write ONE natural, everyday Chinese sentence.
 
+HOW TO USE THE LIST:
+The list is a PREFERENCE, not a cage. A natural sentence that borrows a
+couple of characters is useful practice; a sentence that obeys the list but
+means nothing is worthless and will be rejected.
+
 RULES:
-1. Use the allowed characters above wherever possible.
-2. You may use AT MOST {max_unknown} characters from outside that list, and
-   only if the sentence would be impossible otherwise. Fewer is better.
-3. The sentence must be grammatical, natural modern Mandarin that a real
-   person would say. Never string characters together just to satisfy the
-   list - a nonsense sentence is worse than an extra unknown character.
+1. Prefer the allowed characters. Aim to build the sentence from them.
+2. You may use up to {max_unknown} characters from outside the list. If the
+   only way to say something natural needs one or two more than that, say
+   the natural thing anyway and keep it as short as possible - a rejected
+   sentence helps nobody.
+3. MEANING COMES FIRST. The sentence must be something a real person would
+   actually say. If you cannot say anything natural with these characters,
+   USE MORE UNKNOWN CHARACTERS - that is far better than nonsense. A
+   reviewer will reject strings of characters that do not form real words.
 4. Between 4 and 14 characters long.
 5. Simplified characters only.
 6. Punctuation is free - it doesn't count.
@@ -108,6 +116,62 @@ RULES:
 Return ONLY raw JSON:
 {{"chinese": "<the sentence>", "english": "<natural translation>"}}
 """.strip()
+
+
+def segments_ok(sentence):
+    """Retired.
+
+    This tried to spot gibberish by checking whether jieba found real
+    multi-character words. Measured against actual cases it was wrong in
+    both directions: jieba happily segments 我天, 不个 and 水天 as "words"
+    (so nonsense passed), while a perfectly natural short sentence like
+    你有水吗？ contains no multi-character word at all (so it failed).
+
+    Judging whether a sentence means anything needs a language model, not a
+    segmentation heuristic - review_sentence does that job. Kept as a
+    no-op so callers and tests stay valid.
+    """
+    return True, ""
+
+
+def review_sentence(client, model, sentence, english):
+    """Second-pass native-speaker check, mirroring the main app's reviewer.
+
+    Restricting the character set pushes hard against natural phrasing, so
+    a model will happily produce grammatical-looking nonsense to satisfy
+    the constraint. Verifying the CONSTRAINT is not the same as verifying
+    the SENTENCE, which is what this does.
+    """
+    prompt = f"""
+You are a strict native speaker of Mandarin reviewing material written for
+a learner.
+
+SENTENCE: {sentence}
+CLAIMED MEANING: {english}
+
+Answer honestly - this sentence was produced under a restricted character
+set, so it may well be unnatural.
+
+Reject it if ANY of these is true:
+- it is not something a real person would say
+- the words do not combine into a coherent statement
+- it is grammatically broken
+- it reads as characters strung together to fill a quota
+- the English does not match the Chinese
+
+Return ONLY raw JSON:
+{{"ok": true/false, "why": "<short reason if not ok>"}}
+""".strip()
+    try:
+        resp = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model=model, response_format={"type": "json_object"},
+            temperature=0)
+        v = json.loads(resp.choices[0].message.content)
+        return bool(v.get("ok", True)), str(v.get("why", "") or "")
+    except Exception as e:
+        logging.warning(f"[READ] review unavailable ({e}) - accepting")
+        return True, ""
 
 
 def generate_sentence(client, model, known_chars, topic="",
@@ -146,10 +210,21 @@ def generate_sentence(client, model, known_chars, topic="",
         if stats["total"] < 3:
             problem = "sentence too short"
             continue
-        if stats["unknown_count"] <= max_unknown:
+        # A natural sentence one character over the allowance beats a
+        # compliant sentence that means nothing, so allow a small overshoot
+        # on the final attempt - but only if it survives review.
+        tolerance = max_unknown + (1 if attempt == attempts else 0)
+        if stats["unknown_count"] <= tolerance:
+            ok_sense, why = review_sentence(client, model, sentence, english)
+            if not ok_sense:
+                problem = f"a native speaker rejected it: {why}"
+                logging.info(f"[READ] attempt {attempt} rejected: {why}")
+                continue
             used = [c for c in (focus or []) if c in sentence]
             note = (f"{stats['total']} characters, "
                     f"{stats['unknown_count']} outside your set")
+            if stats["unknown_count"] > max_unknown:
+                note += " (one over, to keep it natural)"
             if used:
                 note += f" - practising {''.join(used)}"
             return sentence, english, note
@@ -163,7 +238,14 @@ def generate_sentence(client, model, known_chars, topic="",
 
     if best:
         sentence, english, stats = best
-        return sentence, english, (
-            f"Closest attempt: {stats['unknown_count']} characters outside "
-            f"your set. Learn a few more and these get easier.")
-    return None, None, "Couldn't build a sentence from those characters yet."
+        # Only offer a near-miss if it is at least real Chinese; a sentence
+        # that failed the sense check must never be shown as practice.
+        ok_sense, _ = review_sentence(client, model, sentence, english)
+        if ok_sense:
+            return sentence, english, (
+                f"Closest attempt: {stats['unknown_count']} characters "
+                f"outside your set. Learn a few more and these get easier.")
+    return None, None, (
+        "Couldn't write a natural sentence from those characters yet. "
+        "Try allowing a few more new characters, or learn a handful more "
+        "first - very small character sets make natural Chinese hard.")

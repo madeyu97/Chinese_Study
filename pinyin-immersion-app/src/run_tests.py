@@ -390,6 +390,22 @@ def t_reading():
     _s, _e, rep = rd.generate_sentence(c2, "m", known, focus=["今", "天"])
     assert "今天" in seen[0], "focus characters must reach the prompt"
     assert "practising" in rep
+    # BUG: a sentence can satisfy the character rule and still be nonsense.
+    # Verifying the CONSTRAINT is not verifying the SENTENCE, so a
+    # native-speaker review must reject gibberish and try again.
+    seq3 = iter([fr({"chinese": "我天人好去大小。", "english": "x"}),
+                 fr({"ok": False, "why": "not a real sentence"}),
+                 fr({"chinese": "我今天去吃饭。", "english": "I eat today."}),
+                 fr({"ok": True, "why": ""})])
+    c3 = MagicMock(); c3.chat.completions.create = lambda **k: next(seq3)
+    good, _e3, _r3 = rd.generate_sentence(c3, "m", known)
+    assert good == "我今天去吃饭。", good
+    # and if everything is nonsense, show NOTHING rather than teach it
+    seq4 = iter([fr({"chinese": "我天人好。", "english": "x"}),
+                 fr({"ok": False, "why": "nonsense"})] * 4)
+    c4 = MagicMock(); c4.chat.completions.create = lambda **k: next(seq4)
+    none, _e4, msg = rd.generate_sentence(c4, "m", known)
+    assert none is None and "natural" in msg
 
 
 # ======================================================================

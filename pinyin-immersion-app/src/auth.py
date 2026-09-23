@@ -2,10 +2,9 @@
 """
 Who is studying?
 
-Vocabulary, sentence banks and Hokkien verifications are shared by everyone
-on this deployment; SRS progress is private to each person. A short PIN
-keeps the two apart so neither of you can accidentally study — and corrupt —
-the other's schedule.
+Vocabulary and sentence banks are shared by everyone on this deployment;
+SRS progress is private to each person. A short PIN keeps the two apart so
+neither of you can accidentally study — and corrupt — the other's schedule.
 
 The PIN is a convenience lock, not real security: it stops mis-taps, not
 determined strangers. Don't reuse a PIN that matters.
@@ -24,8 +23,8 @@ def _pinned_username():
     Running two Streamlit deployments off this same repo — one for each of
     you, sharing the same DATABASE_URL but with separate GROQ_API_KEYs —
     gives each person their own 1GB resource allocation and their own API
-    rate limits, while vocabulary, sentence banks, Hokkien verifications
-    and cached audio stay shared through the database.
+    rate limits, while vocabulary and sentence banks stay shared through
+    the database.
 
     Set in that app's secrets:
         APP_USER = "matt"     # or "jean"

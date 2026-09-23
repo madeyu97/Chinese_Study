@@ -409,96 +409,6 @@ def t_reading():
 
 
 # ======================================================================
-# HOKKIEN ROMANISATION ENGINE
-# ======================================================================
-import hokkien_engine as hk
-
-
-@test("Tâi-lô tone classes")
-def t_hk_tones():
-    for syl, tone in {"tsia̍h": 8, "pn̄g": 7, "kóng": 2, "sio": 1,
-                      "bah": 4, "tsài": 3, "lâm": 5}.items():
-        assert hk.tone_of(syl) == tone, (syl, hk.tone_of(syl), tone)
-
-
-@test("Tâi-lô -> Taiji matches Tye's published examples")
-def t_hk_taiji():
-    # From penang-traveltips.com: tsia̍h = ciak1, pn̄g = png33
-    assert hk.tailo_to_taiji("tsia̍h") == "ciak1"
-    assert hk.tailo_to_taiji("pn̄g") == "png33"
-    assert hk.tailo_to_taiji("tsia̍h-pn̄g") == "ciak1 png33"
-
-
-@test("Tâi-lô tone 9 (double acute) does not leak into Taiji output")
-def t_hk_tone9():
-    assert hk.tone_of("tsha\u030bi") == 9
-    out = hk.tailo_to_taiji("tsha\u030bi")
-    assert "\u030b" not in out and out == "chai1", out
-
-
-@test("Tâi-lô double-hyphen (neutral tone marker) parses")
-def t_hk_dblhyphen():
-    assert hk.tailo_to_taiji("lo\u0304o--li\u0301") == "lo33 li4"
-
-
-@test("simplified vocabulary converts for traditional dictionary lookup")
-def t_hk_s2t():
-    from zhconv import convert
-    assert convert("吃饭", "zh-tw") == "吃飯"
-    assert convert("头发", "zh-tw") == "頭髮"
-
-
-@test("romanisation answer matching is tone/hyphen/case tolerant")
-def t_hk_match():
-    assert hk.answers_match("tsiah png", "tsia̍h-pn̄g")
-    assert hk.answers_match("TSIAH-PNG", "tsia̍h-pn̄g")
-    assert hk.answers_match("tsiah8 png7", "tsia̍h-pn̄g")
-    assert not hk.answers_match("chiah png", "tsia̍h-pn̄g")
-
-
-@test("Hokkien TTS: numeric tone conversion for TTS endpoints")
-def t_hk_numeric():
-    assert hk.tailo_to_numeric("tsia̍h-pn̄g") == "tsiah8-png7"
-    assert hk.tailo_to_numeric("kóng-uē") == "kong2-ue7"
-    assert hk.tailo_to_numeric("") == ""
-    rt = hk.numeric_to_tailo("tsiah8-png7")
-    assert hk.tailo_to_numeric(rt) == "tsiah8-png7"   # lossless round trip
-
-
-@test("Hokkien TTS: dead endpoints degrade gracefully, never raise")
-def t_hk_tts_fallback():
-    import hokkien_audio as ha
-    original = ha._http_get
-    try:
-        ha._http_get = lambda url: (_ for _ in ()).throw(ConnectionError("down"))
-        assert ha.synthesize("食飯", "tsia̍h-pn̄g") == (None, None, None)
-        # an HTML error page must not be mistaken for audio
-        ha._http_get = lambda url: (b"<html>oops</html>", "text/html")
-        assert ha.synthesize("食飯", "tsia̍h-pn̄g")[0] is None
-        # first provider dead -> falls through to another
-        state = {"n": 0}
-        def flaky(url):
-            state["n"] += 1
-            if state["n"] == 1:
-                raise ConnectionError("down")
-            return b"RIFF" + b"\x00" * 4000, "audio/wav"
-        ha._http_get = flaky
-        data, _mime, used = ha.synthesize("食飯", "tsia̍h-pn̄g", "ithuan")
-        assert data and used != "ithuan"
-    finally:
-        ha._http_get = original
-
-
-@test("Hokkien TTS: cache keys stable per (text, provider)")
-def t_hk_audio_keys():
-    import hokkien_audio as ha
-    k1 = ha.audio_key("食飯", "tsia̍h-pn̄g", "ithuan")
-    assert k1 == ha.audio_key("食飯", "tsia̍h-pn̄g", "ithuan")
-    assert k1 != ha.audio_key("食飯", "tsia̍h-pn̄g", "ntut_tailo")
-    assert k1 != ha.audio_key("巴剎", "pa-sat", "ithuan")
-
-
-# ======================================================================
 # DATABASE (only when DATABASE_URL is set)
 # ======================================================================
 def db_tests():
@@ -685,10 +595,6 @@ if __name__ == "__main__":
     t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
-    print("Hokkien engine:")
-    t_hk_tones(); t_hk_taiji(); t_hk_tone9(); t_hk_dblhyphen()
-    t_hk_s2t(); t_hk_match()
-    t_hk_numeric(); t_hk_tts_fallback(); t_hk_audio_keys()
     if os.environ.get("DATABASE_URL"):
         print("Database (DATABASE_URL detected):")
         db_tests()

@@ -235,45 +235,12 @@ def init_db():
         ON sentence_bank (vocab_chinese, status)
     ''')
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS hokkien_deck (
-            id SERIAL PRIMARY KEY,
-            mandarin TEXT NOT NULL,
-            mandarin_full TEXT,
-            english TEXT,
-            hokkien_hanji TEXT NOT NULL,
-            tailo TEXT NOT NULL,
-            taiji TEXT,
-            tier TEXT DEFAULT 'single',
-            sources TEXT,
-            alternatives INTEGER DEFAULT 1,
-            status TEXT DEFAULT 'unverified',
-            note TEXT,
-            next_review_date TEXT,
-            interval INTEGER DEFAULT 0,
-            ease_factor REAL DEFAULT 2.5,
-            review_count INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT NOW(),
-            learn_rank INTEGER DEFAULT 9999,
-            UNIQUE (mandarin, hokkien_hanji)
-        )
-    ''')
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_hokkien_status
-        ON hokkien_deck (status, next_review_date)
-    ''')
-    cursor.execute("ALTER TABLE hokkien_deck "
-                   "ADD COLUMN IF NOT EXISTS learn_rank INTEGER DEFAULT 9999")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hokkien_rank "
-                   "ON hokkien_deck (status, learn_rank)")
-    cursor.execute('''
         CREATE TABLE IF NOT EXISTS sentence_blocklist (
             chinese TEXT PRIMARY KEY,
             reason TEXT,
             flagged_at TIMESTAMP DEFAULT NOW()
         )
     ''')
-    # Per-user Hokkien SRS (the deck itself stays shared — verifications and
-    # Tâi-lô corrections are curation work, not personal progress).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS herbs (
             id SERIAL PRIMARY KEY,
@@ -332,28 +299,6 @@ def init_db():
             message TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT NOW(),
             seen_at TIMESTAMP
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS hokkien_audio (
-            cache_key TEXT PRIMARY KEY,
-            entry_id INTEGER REFERENCES hokkien_deck(id) ON DELETE CASCADE,
-            audio BYTEA NOT NULL,
-            mime TEXT DEFAULT 'audio/wav',
-            provider TEXT,
-            created_at TIMESTAMP DEFAULT NOW()
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS hokkien_progress (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            entry_id INTEGER NOT NULL REFERENCES hokkien_deck(id) ON DELETE CASCADE,
-            next_review_date TEXT,
-            interval INTEGER DEFAULT 0,
-            ease_factor REAL DEFAULT 2.5,
-            review_count INTEGER DEFAULT 0,
-            UNIQUE (user_id, entry_id)
         )
     ''')
     conn.commit()
@@ -618,8 +563,8 @@ def _split_legacy_vocab(conn):
             raise
 
 def _migrate_progress_tables(conn):
-    """Phase 2: attach existing handwriting and Hokkien progress to the
-    first user, once all tables exist."""
+    """Phase 2: attach existing handwriting progress to the first user,
+    once all tables exist."""
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM users ORDER BY id LIMIT 1")
     owner = cursor.fetchone()
@@ -643,21 +588,6 @@ def _migrate_progress_tables(conn):
     except Exception as e:
         conn.rollback()
         logging.error(f"[MIGRATE] Handwriting migration issue: {e}")
-
-    # hokkien: move any existing SRS state onto the first user
-    try:
-        cursor.execute("""
-            INSERT INTO hokkien_progress
-                (user_id, entry_id, next_review_date, interval,
-                 ease_factor, review_count)
-            SELECT %s, id, next_review_date, interval, ease_factor, review_count
-            FROM hokkien_deck WHERE review_count > 0
-            ON CONFLICT (user_id, entry_id) DO NOTHING
-        """, (owner_id,))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        logging.error(f"[MIGRATE] Hokkien migration issue: {e}")
 
 # Shared projection: vocabulary content LEFT JOINed to one user's progress,
 # so a word with no progress row yet simply reads as unseen (review_count 0).
@@ -1799,204 +1729,6 @@ def get_char_state(user_id, character):
 
 
 # ==========================================
-# PENANG HOKKIEN DECK
-# Built offline from licensed dictionaries (see build_hokkien_deck.py).
-# Entries stay 'unverified' — and undrillable — until the learner confirms
-# them, because no open Penang Hokkien lexicon exists to trust blindly.
-# ==========================================
-def hokkien_add(mandarin, mandarin_full, english, hokkien_hanji, tailo,
-                taiji, tier, sources, alternatives, learn_rank=9999):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO hokkien_deck
-            (mandarin, mandarin_full, english, hokkien_hanji, tailo, taiji,
-             tier, sources, alternatives, next_review_date, learn_rank)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (mandarin, hokkien_hanji) DO NOTHING
-    """, (mandarin, mandarin_full, english, hokkien_hanji, tailo, taiji,
-          tier, sources, alternatives, date.today().isoformat(), learn_rank))
-    added = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    return added
-
-
-@_cached(ttl=20)
-def hokkien_stats(user_id=None):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT COUNT(*),
-               COUNT(*) FILTER (WHERE status = 'verified'),
-               COUNT(*) FILTER (WHERE status = 'unverified'),
-               COUNT(*) FILTER (WHERE status = 'rejected'),
-               COUNT(*) FILTER (WHERE tier = 'penang'),
-               COUNT(*) FILTER (WHERE tier = 'consensus')
-        FROM hokkien_deck
-    """)
-    t, v, u, r, p, c = cursor.fetchone()
-    studied = 0
-    if user_id is not None:
-        cursor.execute("SELECT COUNT(*) FROM hokkien_progress "
-                       "WHERE user_id = %s AND review_count > 0", (user_id,))
-        studied = cursor.fetchone()[0] or 0
-    conn.close()
-    return {"total": t or 0, "verified": v or 0, "unverified": u or 0,
-            "rejected": r or 0, "penang": p or 0, "consensus": c or 0,
-            "studied": studied}
-
-
-def hokkien_queue(limit=25, tier=None):
-    """Unverified entries for the verification queue, best-evidence first."""
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    if tier:
-        cursor.execute("""SELECT * FROM hokkien_deck
-                          WHERE status = 'unverified' AND tier = %s
-                          ORDER BY learn_rank ASC, alternatives ASC, id
-                          LIMIT %s""", (tier, limit))
-    else:
-        cursor.execute("""SELECT * FROM hokkien_deck
-                          WHERE status = 'unverified'
-                          ORDER BY learn_rank ASC, alternatives ASC, id
-                          LIMIT %s""", (limit,))
-    rows = [dict(r) for r in cursor.fetchall()]
-    conn.close()
-    return rows
-
-
-def hokkien_set_status(entry_id, status, tailo=None, taiji=None, note=None):
-    """Verify / reject an entry, optionally correcting its romanisation."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    fields, params = ["status = %s"], [status]
-    if tailo is not None:
-        fields.append("tailo = %s"); params.append(tailo)
-    if taiji is not None:
-        fields.append("taiji = %s"); params.append(taiji)
-    if note is not None:
-        fields.append("note = %s"); params.append(note)
-    params.append(entry_id)
-    cursor.execute(f"UPDATE hokkien_deck SET {', '.join(fields)} WHERE id = %s",
-                   params)
-    conn.commit()
-    conn.close()
-
-
-def hokkien_session(user_id, limit=20):
-    """Verified entries due for THIS user, easiest/most useful first.
-
-    The deck and its verifications are shared; only the SRS state in
-    hokkien_progress is personal, so a card verified by one person is
-    immediately available to the other as unseen.
-    """
-    today = date.today().isoformat()
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("""
-        SELECT d.*,
-               COALESCE(hp.interval, 0)      AS interval,
-               COALESCE(hp.ease_factor, 2.5) AS ease_factor,
-               COALESCE(hp.review_count, 0)  AS review_count,
-               hp.next_review_date           AS next_review_date
-        FROM hokkien_deck d
-        LEFT JOIN hokkien_progress hp
-               ON hp.entry_id = d.id AND hp.user_id = %s
-        WHERE d.status = 'verified'
-          AND (hp.next_review_date IS NULL OR hp.next_review_date <= %s)
-        ORDER BY COALESCE(hp.review_count, 0) ASC, d.learn_rank ASC,
-                 hp.next_review_date NULLS FIRST
-        LIMIT %s
-    """, (user_id, today, limit))
-    rows = [dict(r) for r in cursor.fetchall()]
-    conn.close()
-    return rows
-
-
-def hokkien_grade(user_id, entry_id, grade, current_state):
-    """Apply an SRS grade for one user (same engine as handwriting)."""
-    new_interval, new_ease, next_review = compute_next_review(
-        current_interval=current_state.get("interval", 0) or 0,
-        current_ease=float(current_state.get("ease_factor", 2.5) or 2.5),
-        grade=grade)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO hokkien_progress
-            (user_id, entry_id, interval, ease_factor, next_review_date,
-             review_count)
-        VALUES (%s, %s, %s, %s, %s, 1)
-        ON CONFLICT (user_id, entry_id) DO UPDATE SET
-            interval = EXCLUDED.interval,
-            ease_factor = EXCLUDED.ease_factor,
-            next_review_date = EXCLUDED.next_review_date,
-            review_count = hokkien_progress.review_count + 1
-    """, (user_id, entry_id, new_interval, new_ease, next_review))
-    conn.commit()
-    conn.close()
-    log_activity(user_id, "hokkien", str(entry_id), grade)
-    return new_interval
-
-
-def hokkien_search(term, limit=30):
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    like = f"%{term}%"
-    cursor.execute("""
-        SELECT * FROM hokkien_deck
-        WHERE mandarin ILIKE %s OR english ILIKE %s
-           OR hokkien_hanji ILIKE %s OR tailo ILIKE %s
-        ORDER BY status DESC, id LIMIT %s
-    """, (like, like, like, like, limit))
-    rows = [dict(r) for r in cursor.fetchall()]
-    conn.close()
-    return rows
-
-
-
-# ==========================================
-# HOKKIEN AUDIO CACHE
-# Clips live in the database, not on disk: Streamlit Cloud wipes the
-# filesystem on reboot, and these come from small volunteer-run TTS
-# services we shouldn't hammer. Synthesised once, then reused forever.
-# ==========================================
-def hokkien_audio_get(cache_key):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT audio, mime FROM hokkien_audio WHERE cache_key = %s",
-                   (cache_key,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        return None, None
-    return bytes(row[0]), row[1]
-
-
-def hokkien_audio_put(cache_key, entry_id, audio, mime, provider):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO hokkien_audio (cache_key, entry_id, audio, mime, provider)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (cache_key) DO NOTHING
-    """, (cache_key, entry_id, psycopg2.Binary(audio), mime, provider))
-    conn.commit()
-    conn.close()
-
-
-def hokkien_audio_stats():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*), COALESCE(SUM(LENGTH(audio)), 0) "
-                   "FROM hokkien_audio")
-    n, total = cursor.fetchone()
-    conn.close()
-    return {"clips": n or 0, "bytes": int(total or 0)}
-
-
-
-# ==========================================
 # ACTIVITY LOG + FRIENDLY RIVALRY
 #
 # Deliberately compares EFFORT (cards done, streaks, consistency) rather
@@ -2005,7 +1737,7 @@ def hokkien_audio_stats():
 # stop being motivating for either.
 # ==========================================
 ACTIVITY_KINDS = {"listen": "Listening", "speak": "Speaking",
-                  "write": "Handwriting", "hokkien": "Hokkien"}
+                  "write": "Handwriting"}
 
 
 def log_activity(user_id, kind, item=None, grade=None, mistakes=0):

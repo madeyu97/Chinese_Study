@@ -1,0 +1,271 @@
+# src/pages/8_Games.py
+"""
+🎮 Games - picture games for when you're too tired for a full session.
+
+Four quick games linking pictures to words (body, clothing, food, home,
+places, nature, animals, TCM clinic). Words can be shown with pinyin or as
+characters only. Answers register on tap; scores, streaks and best scores
+keep it light.
+"""
+
+import random
+
+import streamlit as st
+
+import db_manager as db
+import game_items as gi
+import games as gm
+from audio_engine import create_audio_file
+from auth import require_login, sidebar_user_badge
+from game_images import credit_lines, img_tag
+
+st.set_page_config(page_title="Games", page_icon="🎮", layout="centered")
+USER = require_login()
+USER_ID = USER["id"]
+S = st.session_state
+LETTERS = ["A", "B", "C", "D"]
+
+
+def reset():
+    for k in [k for k in S if k.startswith("gm_")]:
+        del S[k]
+
+
+with st.sidebar:
+    sidebar_user_badge()
+    st.header("🎮 Games")
+    show_pinyin = st.radio("Show words as", ["Characters + pinyin", "Characters only"],
+                           key="games_show") == "Characters + pinyin"
+    cats = st.multiselect("Topics", list(gi.CATEGORIES), default=list(gi.CATEGORIES),
+                          format_func=lambda c: f"{gi.CATEGORIES[c][2]} {gi.CATEGORIES[c][1]}",
+                          key="games_cats", disabled="gm_game" in S)
+    only_met = st.radio("Words", ["All — learn new ones too", "Only words I've met"],
+                        key="games_words", disabled="gm_game" in S) == "Only words I've met"
+    if "gm_game" in S and st.button("End game", width="stretch"):
+        reset()
+        st.rerun()
+
+st.title("🎮 Games")
+
+
+# ----------------------------------------------------------------------
+# helpers
+# ----------------------------------------------------------------------
+def play(text, autoplay=False):
+    cache = S.setdefault("games_audio", {})
+    if text not in cache:
+        cache[text] = create_audio_file(text)
+    if cache[text]:
+        st.audio(cache[text], format="audio/mp3", autoplay=autoplay)
+
+
+def html(markup):
+    st.markdown(markup, unsafe_allow_html=True)
+
+
+def word_html(item, size="2.2rem"):
+    py = (f"<div style='font-size:1rem;color:#78909c'>{item['pinyin']}</div>"
+          if show_pinyin else "")
+    return f"<div style='font-size:{size};line-height:1.3'>{item['chinese']}</div>{py}"
+
+
+def picture_grid(items):
+    """Pictures in a 2x2 grid that stays a grid on a phone, lettered A-D."""
+    cells = "".join(
+        f"<div style='text-align:center;border:1px solid #e0e0e0;border-radius:12px;padding:6px'>"
+        f"<div style='font-weight:600;color:#546e7a'>{LETTERS[n]}</div>{img_tag(i['image'], 96)}</div>"
+        for n, i in enumerate(items))
+    html(f"<div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>{cells}</div>")
+
+
+def record(item, correct, game):
+    vid = S.gm_vocab.get(item["chinese"])
+    if vid:
+        db.log_word_attempt(USER_ID, vid, "recognition", f"game_{game}",
+                            "correct" if correct else "wrong", {"kind": "game"})
+    try:
+        db.log_activity(USER_ID, "games", item["chinese"], 2 if correct else 0)
+    except Exception:
+        pass
+
+
+def start(game):
+    reset()
+    met = {w["chinese"] for w in db.introduced_words(USER_ID)} if only_met else None
+    pool, topped = gm.word_pool(cats or list(gi.CATEGORIES), met, only_met)
+    S.gm_game, S.gm_topped = game, topped
+    S.gm_vocab = db.vocab_ids_for([i["chinese"] for i in pool])
+    if game == "memory":
+        S.gm_cards, S.gm_up, S.gm_matched, S.gm_moves = gm.memory_board(pool), [], set(), 0
+    else:
+        S.gm_rounds, S.gm_i, S.gm_score, S.gm_streak, S.gm_best_streak = \
+            gm.quiz_rounds(pool), 0, 0, 0, 0
+        S.gm_missed = []
+
+
+# ----------------------------------------------------------------------
+# game picker
+# ----------------------------------------------------------------------
+if "gm_game" not in S:
+    st.caption("Quick picture games for tired days — still linking words to meaning.")
+    best = db.game_scores(USER_ID)
+    for key, (icon, name, blurb) in gm.GAMES.items():
+        b = best.get(key)
+        sub = f" · best {b['best']}" if b else ""
+        if st.button(f"{icon}  {name}{sub}", key=f"pick_{key}", width="stretch"):
+            start(key)
+            st.rerun()
+        st.caption(blurb)
+    with st.expander("Picture credits"):
+        st.markdown("Emoji pictures: [Twemoji](https://github.com/jdecked/twemoji) © Twitter, Inc "
+                    "and other contributors, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).\n\n"
+                    "Photos and illustrations from [Wikimedia Commons](https://commons.wikimedia.org), "
+                    "shared under the same licence as the original:\n\n" + "\n".join(credit_lines(gi.ITEMS)))
+    st.stop()
+
+game = S.gm_game
+if S.get("gm_topped"):
+    st.caption("Not enough words you've met in these topics yet — a few new ones are mixed in.")
+
+
+def finish(score):
+    if "gm_saved" not in S:
+        S.gm_saved = db.save_game_score(USER_ID, game, score)
+    return S.gm_saved
+
+
+# ----------------------------------------------------------------------
+# memory match
+# ----------------------------------------------------------------------
+if game == "memory":
+    cards, up, matched = S.gm_cards, S.gm_up, S.gm_matched
+    if len(matched) == len(cards):
+        score = gm.memory_score(len(cards) // 2, S.gm_moves)
+        new_best = finish(score)
+        st.success(f"All matched in {S.gm_moves} turns — {score} points"
+                   + (" · new best! 🎉" if new_best else ""))
+        if S.gm_moves == len(cards) // 2:
+            st.balloons()
+        c1, c2 = st.columns(2)
+        if c1.button("▶️ Play again", type="primary", width="stretch"):
+            start(game)
+            st.rerun()
+        if c2.button("Choose another game", width="stretch"):
+            reset()
+            st.rerun()
+        st.stop()
+    st.caption(f"Turns: {S.gm_moves} · pairs found: {len(matched) // 2} of {len(cards) // 2}")
+    cells = []
+    for n, c in enumerate(cards):
+        face_up = n in up or n in matched
+        if not face_up:
+            inner = (f"<div style='height:100%;display:flex;align-items:center;justify-content:center;"
+                     f"font-size:1.6rem;font-weight:700;color:#ffffff'>{n + 1}</div>")
+            style = "background:#5c6bc0"
+        elif c["face"] == "image":
+            inner = img_tag(c["item"]["image"], 80)
+            style = "background:#ffffff"
+        else:
+            inner = word_html(c["item"], "1.5rem")
+            style = "background:#ffffff"
+        if n in matched:
+            style += ";opacity:0.35"
+        cells.append(f"<div style='{style};border:1px solid #c5cae9;border-radius:12px;height:104px;"
+                     f"display:flex;flex-direction:column;align-items:center;justify-content:center;"
+                     f"text-align:center'>{inner}</div>")
+    html(f"<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:8px'>{''.join(cells)}</div>")
+    choices = [str(n + 1) for n in range(len(cards)) if n not in matched and n not in up]
+    pick = st.pills("Turn over a card", choices, selection_mode="single",
+                    key=f"gm_mem_{S.gm_moves}_{len(up)}_{len(matched)}")
+    if pick:
+        n = int(pick) - 1
+        if len(up) == 2:                       # the last pair didn't match: turn them back
+            up.clear()
+        up.append(n)
+        if len(up) == 2:
+            S.gm_moves += 1
+            a, b = cards[up[0]], cards[up[1]]
+            if gm.is_match(a, b):
+                matched.update(up)
+                record(a["item"], True, game)
+                st.toast(f"✅ {a['item']['chinese']} — {a['item']['english']}")
+                up.clear()
+        st.rerun()
+    if len(up) == 2:
+        st.caption("Not a pair — turn over another card to continue.")
+    st.stop()
+
+
+# ----------------------------------------------------------------------
+# quiz games: picture → word, word → picture, listen → picture
+# ----------------------------------------------------------------------
+rounds, i = S.gm_rounds, S.gm_i
+if i >= len(rounds):
+    new_best = finish(S.gm_score)
+    right = len(rounds) - len(S.gm_missed)
+    st.success(f"{right} of {len(rounds)} · {S.gm_score} points · best streak {S.gm_best_streak}"
+               + (" · new best! 🎉" if new_best else ""))
+    if right == len(rounds):
+        st.balloons()
+    if S.gm_missed:
+        st.caption("Worth another look:")
+        html("<div style='display:flex;flex-wrap:wrap;gap:14px'>" + "".join(
+            f"<div style='text-align:center'>{img_tag(m['image'], 60)}{word_html(m, '1.2rem')}</div>"
+            for m in S.gm_missed) + "</div>")
+    c1, c2 = st.columns(2)
+    if c1.button("▶️ Play again", type="primary", width="stretch"):
+        start(game)
+        st.rerun()
+    if c2.button("Choose another game", width="stretch"):
+        reset()
+        st.rerun()
+    st.stop()
+
+rnd = rounds[i]
+target, options = rnd["target"], rnd["options"]
+st.progress(i / len(rounds), text=f"Round {i + 1} of {len(rounds)} · {S.gm_score} points"
+            + (f" · 🔥 {S.gm_streak}" if S.gm_streak >= 2 else ""))
+ans = S.get("gm_ans")
+
+if game == "picture":
+    html(f"<div style='text-align:center'>{img_tag(target['image'], 170)}</div>")
+    labels = [gm.label(o, show_pinyin) for o in options]
+    pick = st.pills("Which word?", labels, selection_mode="single", key=f"gm_pick_{i}",
+                    disabled=ans is not None)
+    chosen = options[labels.index(pick)] if pick else None
+else:
+    if game == "word":
+        html(f"<div style='text-align:center'>{word_html(target, '2.6rem')}</div>")
+    else:
+        st.caption("🔊 Listen, then pick the picture.")
+        play(target["chinese"], autoplay=ans is None)
+    picture_grid(options)
+    pick = st.segmented_control("Which picture?", LETTERS[:len(options)], key=f"gm_pick_{i}",
+                                disabled=ans is not None)
+    chosen = options[LETTERS.index(pick)] if pick else None
+
+if ans is None and chosen is not None:
+    correct = chosen["chinese"] == target["chinese"]
+    S.gm_streak = S.gm_streak + 1 if correct else 0
+    S.gm_best_streak = max(S.gm_best_streak, S.gm_streak)
+    S.gm_score += gm.points(correct, S.gm_streak - 1 if correct else 0)
+    if not correct:
+        S.gm_missed.append(target)
+    record(target, correct, game)
+    S.gm_ans = {"correct": correct}
+    st.rerun()
+
+if ans is not None:
+    if ans["correct"]:
+        st.markdown("✅ **Right!**")
+    else:
+        st.markdown("❌ It was:")
+    html("<div style='display:flex;gap:16px;align-items:center'>"
+         f"{img_tag(target['image'], 70)}<div>{word_html(target, '1.8rem')}"
+         f"<div style='color:#78909c'>{target['english']}</div></div></div>")
+    if game != "listen":
+        play(target["chinese"])
+    if st.button("Next ▶️", type="primary", width="stretch"):
+        S.gm_i += 1
+        S.pop("gm_ans", None)
+        st.rerun()

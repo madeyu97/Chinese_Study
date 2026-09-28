@@ -99,13 +99,13 @@ with st.sidebar:
         st.write(f"**✏️ Practiced:** {hw_stats['practiced']}")
         st.progress(min(1.0, hw_stats["practiced"] / total))
         if st.button("View / drill these", key="browse_practiced",
-                     use_container_width=True):
+                     width="stretch"):
             st.session_state.hw_browse = "all"
             st.rerun()
         st.write(f"**🏆 Mastered:** {hw_stats['mastered']}")
         st.progress(min(1.0, hw_stats["mastered"] / total))
         if st.button("View / drill these", key="browse_mastered",
-                     use_container_width=True):
+                     width="stretch"):
             st.session_state.hw_browse = "mastered"
             st.rerun()
         st.caption("Mastered = review pushed 21+ days out.")
@@ -156,7 +156,7 @@ def _review_from_vocab():
         "New characters run watch → trace → write; reviews go straight to "
         "writing. Miss a character more than 3× and it comes back later in "
         "the session, with its next review pulled to tomorrow.")
-    if st.button("▶️ Start review", type="primary", use_container_width=True,
+    if st.button("▶️ Start review", type="primary", width="stretch",
                  disabled=(due + min(new_count, new_available) == 0)):
         chars = get_handwriting_session(USER_ID, new_count=new_count)
         if chars:
@@ -207,7 +207,7 @@ if st.session_state.get("hw_browse") and "hw_payload" not in st.session_state:
               "Reviews": e["review_count"], "Mistakes": e["total_mistakes"],
               "Due": e["next_review_date"] or "-",
               "Meaning": e["gloss"][:60]} for e in chars],
-            hide_index=True, use_container_width=True, height=340)
+            hide_index=True, width="stretch", height=340)
 
         labels = {e["character"]: f"{e['character']}  {e['pinyin']}  "
                                   f"({e['gloss'][:28]})" for e in chars}
@@ -216,20 +216,20 @@ if st.session_state.get("hw_browse") and "hw_payload" not in st.session_state:
                                 format_func=lambda c: labels.get(c, c))
         c1, c2 = st.columns(2)
         if c1.button(f"✍️ Drill selected ({len(picked)})", type="primary",
-                     use_container_width=True, disabled=not picked):
+                     width="stretch", disabled=not picked):
             session_chars = get_struggle_session(USER_ID, picked)
             if session_chars:
                 st.session_state.pop("hw_browse", None)
                 launch(session_chars, "standard")
         if c2.button(f"🔁 Drill all {len(chars)} in this list",
-                     use_container_width=True, disabled=not chars):
+                     width="stretch", disabled=not chars):
             session_chars = get_struggle_session(
                 USER_ID, [e["character"] for e in chars][:60])
             if session_chars:
                 st.session_state.pop("hw_browse", None)
                 launch(session_chars, "standard")
 
-    if st.button("← Back", use_container_width=True):
+    if st.button("← Back", width="stretch"):
         st.session_state.pop("hw_browse", None)
         st.rerun()
     st.stop()
@@ -257,7 +257,7 @@ if "hw_payload" not in st.session_state:
                     "`pinyin-immersion-app/data/herbs.csv` with at least a "
                     "**Chinese** column (Pinyin, English and Category are "
                     "used if present), then press the button below.")
-                if st.button("🔄 Load herbs.csv", use_container_width=True):
+                if st.button("🔄 Load herbs.csv", width="stretch"):
                     added, skipped, err = import_herbs_from_csv()
                     if err:
                         st.error(err)
@@ -284,7 +284,7 @@ if "hw_payload" not in st.session_state:
                     "informative: 艹 marks a plant, 木 something woody, "
                     "虫 an insect, 石 a mineral.")
                 if st.button("▶️ Start herb session", type="primary",
-                             use_container_width=True):
+                             width="stretch"):
                     chars = get_herb_session(USER_ID, new_count=new_count)
                     if chars:
                         launch(chars, "standard")
@@ -292,7 +292,7 @@ if "hw_payload" not in st.session_state:
                         st.success("Nothing due right now.")
                 with st.expander("Reload herb list"):
                     if st.button("🔄 Re-import herbs.csv",
-                                 use_container_width=True):
+                                 width="stretch"):
                         added, skipped, err = import_herbs_from_csv()
                         if err:
                             st.error(err)
@@ -315,7 +315,7 @@ if "hw_payload" not in st.session_state:
                 "Where no word of yours contains a character, its own pinyin "
                 "and meaning are used as the cue.")
             if st.button("▶️ Start review", type="primary",
-                         use_container_width=True):
+                         width="stretch"):
                 chars = get_curriculum_session(USER_ID, new_count=new_count)
                 if chars:
                     launch(chars, "standard")
@@ -347,10 +347,10 @@ if "hw_payload" not in st.session_state:
                 default=list(range(min(5, len(weak)))))
             cola, colb = st.columns(2)
             if cola.button("🔁 Drill selected", type="primary",
-                           use_container_width=True, disabled=not picked):
+                           width="stretch", disabled=not picked):
                 chars = get_struggle_session(USER_ID, [weak[i]["character"] for i in picked])
                 launch(chars, "struggle")
-            if colb.button("🔥 Drill top 10", use_container_width=True,
+            if colb.button("🔥 Drill top 10", width="stretch",
                            disabled=len(weak) == 0):
                 chars = get_struggle_session(USER_ID, [w["character"] for w in weak[:10]])
                 launch(chars, "struggle")
@@ -361,7 +361,7 @@ if "hw_payload" not in st.session_state:
                    "regardless of due dates.")
         focus = st.text_input("Word or phrase (hanzi)", "",
                               placeholder="e.g. 巴刹")
-        if st.button("Start focus session", use_container_width=True,
+        if st.button("Start focus session", width="stretch",
                      disabled=not focus.strip()):
             chars = get_focus_session(USER_ID, focus.strip())
             if chars:
@@ -388,7 +388,7 @@ if st.session_state.get("hw_done"):
     st.success(
         f"Session saved — Easy {counts[3]} · Good {counts[2]} · "
         f"Hard {counts[1]} · Again {counts[0]}")
-    if st.button("🔄 New session", type="primary", use_container_width=True):
+    if st.button("🔄 New session", type="primary", width="stretch"):
         for k in ("hw_payload", "hw_sid", "hw_processed", "hw_done",
                   "hw_final", "hw_state_seed"):
             st.session_state.pop(k, None)
@@ -396,7 +396,7 @@ if st.session_state.get("hw_done"):
 else:
     with st.expander("End session early"):
         st.caption("Progress so far is already saved.")
-        if st.button("🏁 End now", use_container_width=True):
+        if st.button("🏁 End now", width="stretch"):
             for k in ("hw_payload", "hw_sid", "hw_processed", "hw_done",
                       "hw_final", "hw_state_seed"):
                 st.session_state.pop(k, None)

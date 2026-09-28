@@ -120,7 +120,7 @@ if 'words_due' not in st.session_state:
             st.caption(
                 f"Roughly **🎧 {listen_count} listening + 🎤 {recall_count} recall**."
             )
-            start = st.form_submit_button("▶️ Start Session", type="primary", use_container_width=True)
+            start = st.form_submit_button("▶️ Start Session", type="primary", width="stretch")
 
         if not start:
             st.stop()
@@ -214,13 +214,17 @@ def start_new_session():
 # 5. HEADER
 # ==========================================
 st.title("🎧 Pinyin Immersion Study")
+st.page_link("pages/1_Words.py", icon="📚",
+             label="Vocabulary study is on the Words page: words through chunks, sentences "
+                   "and five kinds of retrieval")
+st.caption("This page stays for sentence listening and speaking practice; both share your progress.")
 
 if st.session_state.current_index >= len(st.session_state.words_due):
     st.success("🎉 You're all caught up for today! Great job.")
     st.balloons()
     col_a, col_b = st.columns(2)
     with col_a:
-        if st.button("➕ Do 5 More Words", type="secondary", use_container_width=True):
+        if st.button("➕ Do 5 More Words", type="secondary", width="stretch"):
             with st.spinner("Fetching more words..."):
                 exclude_ids = [w['id'] for w in st.session_state.words_due]
                 extra_words = get_more_words(USER_ID, exclude_ids, amount=5)
@@ -232,7 +236,7 @@ if st.session_state.current_index >= len(st.session_state.words_due):
                 else:
                     st.warning("You've completely exhausted your database!")
     with col_b:
-        if st.button("🔄 Start New Session", type="primary", use_container_width=True):
+        if st.button("🔄 Start New Session", type="primary", width="stretch"):
             start_new_session()
             st.rerun()
     st.stop()
@@ -250,7 +254,7 @@ with col2:
     st.caption(f"**{badge}**")
 with col3:
     if st.session_state.current_index > 0:
-        if st.button("↩️ Undo", use_container_width=True):
+        if st.button("↩️ Undo", width="stretch"):
             undo_last_grade()
             st.rerun()
 
@@ -284,6 +288,7 @@ with st.sidebar:
 
     with st.expander("⚙️ Session style"):
         _MODES = {
+            "srs_frequency": "Spaced repetition + most common words first",
             "srs_latest": "Spaced repetition + newest words",
             "random_balanced": "Spaced repetition + balanced random",
             "latest_mix": "Newest + random (no spaced repetition)",
@@ -292,13 +297,17 @@ with st.sidebar:
         _picked = st.radio(
             "How today's cards are chosen",
             options=list(_MODES), index=list(_MODES).index(_current)
-            if _current in _MODES else 1,
+            if _current in _MODES else list(_MODES).index("random_balanced"),
             format_func=lambda k: _MODES[k], key="session_mode_pick")
         if _picked != _current:
             db.set_session_mode(USER_ID, _picked)
             st.session_state.pop("words_due", None)
             st.rerun()
-        if _picked == "srs_latest":
+        if _picked == "srs_frequency":
+            st.caption("Anything due for review comes first, then new words "
+                       "from the 10,000 most common in spoken Mandarin, in "
+                       "order. Your lesson words slot in at their own rank.")
+        elif _picked == "srs_latest":
             st.caption("Anything due for review comes first, then your "
                        "newest additions.")
         elif _picked == "random_balanced":
@@ -342,7 +351,7 @@ with st.sidebar:
         st.caption(f"This session: 🎧 {listen_left} listening · 🎤 {recall_left} recall")
 
         st.markdown("---")
-        if st.button("🔄 End & Start New Session", use_container_width=True):
+        if st.button("🔄 End & Start New Session", width="stretch"):
             start_new_session()
             st.rerun()
     else:
@@ -430,7 +439,7 @@ def render_breakdown():
     # negative example, then deals a replacement card immediately.
     flag_key = f"flag_sentence_{st.session_state.current_index}"
     if st.button("🚩 Flag this sentence as wrong", key=flag_key,
-                 use_container_width=True):
+                 width="stretch"):
         db.flag_sentence(ex['chinese'])
         st.toast("Sentence retired — it will never be shown again.")
         reset_card_state()
@@ -449,7 +458,7 @@ def render_card_settings():
             edit_english = st.text_input("Meaning (AI Prompt Hint)", current_word.get('english', ''))
         btn_col1, btn_col2 = st.columns([1, 1])
         with btn_col1:
-            if st.button("💾 Save & Regenerate Card", use_container_width=True):
+            if st.button("💾 Save & Regenerate Card", width="stretch"):
                 update_word_in_db(current_word['id'], edit_hanzi, edit_pinyin, edit_english)
                 st.session_state.words_due[st.session_state.current_index]['chinese'] = edit_hanzi
                 st.session_state.words_due[st.session_state.current_index]['pinyin'] = edit_pinyin
@@ -458,7 +467,7 @@ def render_card_settings():
                 save_cached_session()
                 st.rerun()
         with btn_col2:
-            if st.button("🗑️ Delete Word Permanently", type="secondary", use_container_width=True):
+            if st.button("🗑️ Delete Word Permanently", type="secondary", width="stretch"):
                 delete_word_from_db(current_word['id'])
                 st.session_state.words_due.pop(st.session_state.current_index)
                 st.session_state.modes.pop(st.session_state.current_index)
@@ -474,7 +483,7 @@ def render_grade_buttons(suggested_grade=None):
     for i, (col, label) in enumerate(zip(cols, labels)):
         with col:
             btn_type = "primary" if i == suggested_grade else "secondary"
-            if st.button(label, use_container_width=True, key=f"grade_{i}", type=btn_type):
+            if st.button(label, width="stretch", key=f"grade_{i}", type=btn_type):
                 grade_word_and_next(i)
                 st.rerun()
 
@@ -501,7 +510,7 @@ if current_mode == 'listen':
         # stayed pre-filled in the box on every subsequent card.
         pinyin_key = f"pinyin_input_{st.session_state.current_index}"
         st.text_input("Type the Pinyin you hear:", key=pinyin_key)
-        if st.button("Submit Pinyin", type="primary", use_container_width=True):
+        if st.button("Submit Pinyin", type="primary", width="stretch"):
             st.session_state.user_pinyin = st.session_state.get(pinyin_key, "")
             idx_str = str(st.session_state.current_index)
             st.session_state.setdefault("answers_history", {}).setdefault(idx_str, {})[
@@ -523,7 +532,7 @@ if current_mode == 'listen':
                 st.rerun()
         else:
             selected_meaning = st.radio("Choose translation:", st.session_state.shuffled_options, index=None, label_visibility="collapsed")
-            if st.button("Submit Meaning", type="primary", use_container_width=True, disabled=(selected_meaning is None)):
+            if st.button("Submit Meaning", type="primary", width="stretch", disabled=(selected_meaning is None)):
                 st.session_state.mcq_correct = (selected_meaning == st.session_state.current_exercise['english_correct'])
                 idx_str = str(st.session_state.current_index)
                 st.session_state.setdefault("answers_history", {}).setdefault(idx_str, {})[
@@ -562,7 +571,7 @@ elif current_mode == 'recall':
         audio_value = st.audio_input("🎙️ Your attempt", key=f"mic_{st.session_state.current_index}")
 
         if audio_value is not None:
-            if st.button("✅ Submit Recording", type="primary", use_container_width=True):
+            if st.button("✅ Submit Recording", type="primary", width="stretch"):
                 audio_bytes = audio_value.getvalue()
                 with st.spinner("Transcribing with Whisper..."):
                     transcription = transcribe_audio(audio_bytes)

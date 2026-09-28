@@ -41,7 +41,7 @@ pending = db.unseen_nudges(USER_ID)
 if pending:
     for n in pending:
         st.success(f"💬 **{n['display_name']}**: {n['message']}")
-    if st.button("Got it", use_container_width=True):
+    if st.button("Got it", width="stretch"):
         db.mark_nudges_seen(USER_ID)
         st.rerun()
     st.markdown("---")
@@ -88,7 +88,7 @@ for key, label in db.ACTIVITY_KINDS.items():
         USER["display_name"]: me["by_kind"].get(key, 0),
         other["display_name"]: them["by_kind"].get(key, 0),
     })
-st.dataframe(rows, hide_index=True, use_container_width=True)
+st.dataframe(rows, hide_index=True, width="stretch")
 
 # ----------------------------------------------------------------------
 # THE WRITING RACE
@@ -127,7 +127,7 @@ chart = {
     USER["display_name"]: [n for _, n in my_series],
     other["display_name"]: [n for _, n in their_series],
 }
-st.line_chart(chart, x="day", use_container_width=True)
+st.line_chart(chart, x="day", width="stretch")
 
 # ----------------------------------------------------------------------
 # SEND A NUDGE
@@ -145,7 +145,7 @@ choice = st.selectbox("Quick message", PRESETS + ["Write my own..."])
 message = choice
 if choice == "Write my own...":
     message = st.text_input("Your message", max_chars=280)
-if st.button("Send", type="primary", use_container_width=True,
+if st.button("Send", type="primary", width="stretch",
              disabled=not message or message == "Write my own..."):
     db.send_nudge(USER_ID, OTHER_ID, message)
     st.success(f"Sent to {other['display_name']}. She'll see it next time "

@@ -123,7 +123,9 @@ def main():
 
     conn = db.get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT chinese, pinyin, english FROM vocab ORDER BY id")
+    # your lesson words first, then the frequency list most-common first
+    cursor.execute("SELECT chinese, pinyin, english FROM vocab "
+                   "ORDER BY from_lessons DESC, freq_rank ASC NULLS LAST, id")
     vocab = [{"chinese": r[0], "pinyin": r[1], "english": r[2]}
              for r in cursor.fetchall()]
     conn.close()

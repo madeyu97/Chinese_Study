@@ -14,6 +14,7 @@ from dictionary_engine import (
     CN_NUMERAL_CHARS as _CN_NUMERAL_CHARS,
     is_cjk_char as _is_cjk_char,
     build_breakdown,
+    has_erhua,
 )
 
 load_dotenv()
@@ -566,6 +567,10 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
     3. NO INVENTED NAMES — use pronouns.
     4. Arabic numerals -> Chinese characters.
     5. 'hanzi' field MUST NEVER contain '/' or '／' or ';'.
+    6. NO BEIJING 儿 (erhua) — Malaysian Mandarin never uses it. Write 一点
+       not 一点儿, 哪里 not 哪儿, 这里 not 这儿, 一下 not 一会儿, 玩 not 玩儿,
+       and never end a pinyin syllable in -r (diǎn, not diǎnr). Words where
+       儿 is its own syllable (儿子, 女儿, 婴儿) are fine.
 
     GRAMMATICALITY (CRITICAL — the sentence teaches a learner):
     a. The sentence must be fully grammatical, natural Mandarin a native
@@ -644,6 +649,7 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
             #   b) the numbers in the English contradict the numbers in the
             #      Chinese (the "三 translated as four" bug)
             #   c) a non-locked sentence dropped the target word entirely
+            #   d) it uses the Beijing 儿 (erhua)
             problems = []
             if not cand_chinese.strip() or not cand_english.strip():
                 problems.append("empty hanzi/translation")
@@ -655,6 +661,9 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
                 problems.append(f"target '{chinese_chars}' missing from sentence")
             if cand_chinese in blocked_sentences:
                 problems.append("sentence previously flagged by learner")
+            if not is_locked and has_erhua(cand_chinese, candidate.get("pinyin", "")):
+                problems.append("uses the Beijing 儿 (erhua), which Malaysian "
+                                "Mandarin doesn't: write 一点 / 哪里 / 这里 instead")
 
             # ── GRAMMAR REVIEW GATE ─────────────────────────────────────
             # Independent second-pass check for grammaticality/naturalness

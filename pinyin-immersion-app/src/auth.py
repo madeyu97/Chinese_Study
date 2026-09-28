@@ -62,7 +62,7 @@ def _login_screen():
         confirm = st.text_input("Confirm PIN", type="password", max_chars=8,
                                 key="confirm_pin")
         if st.button("Set PIN and start", type="primary",
-                     use_container_width=True):
+                     width="stretch"):
             if len(new_pin) < 4:
                 st.error("Use at least 4 digits.")
             elif new_pin != confirm:
@@ -75,7 +75,7 @@ def _login_screen():
     else:
         pin = st.text_input("PIN", type="password", max_chars=8, key="pin_in")
         if st.button("Start studying", type="primary",
-                     use_container_width=True):
+                     width="stretch"):
             if db.verify_user_pin(user["id"], pin):
                 st.session_state.user = {"id": user["id"],
                                          "display_name": user["display_name"]}
@@ -124,7 +124,7 @@ def sidebar_user_badge():
         # This deployment belongs to one person; switching would be
         # meaningless (and confusing) here.
         return
-    if st.sidebar.button("Switch user", use_container_width=True):
+    if st.sidebar.button("Switch user", width="stretch"):
         # Clear everything session-scoped so no cards, queues or cached
         # answers leak from one person's session into the other's.
         for key in list(st.session_state.keys()):

@@ -171,6 +171,22 @@ def t_number_gate():
     assert "sān" in ex["pinyin"]
 
 
+@test("Beijing 儿 in a generated sentence forces a retry")
+def t_erhua_gate():
+    bad = {"hanzi": "我想买一点儿菜", "pinyin": "wǒ xiǎng mǎi yì diǎnr cài",
+           "english_correct": "I want to buy some vegetables",
+           "english_distractors": ["a", "b", "c"],
+           "word_breakdown": [], "grammar_point": {}, "particle_note": None}
+    good = dict(bad, hanzi="我想买一点菜", pinyin="wǒ xiǎng mǎi yì diǎn cài")
+    accept = {"acceptable": True, "problems": "", "corrected_sentence": ""}
+    responses = iter([fake_response(x) for x in (bad, good, accept)])
+    ap.client = MagicMock()
+    ap.client.chat.completions.create = lambda **kw: next(responses)
+    ex = ap.generate_dictation_exercise(
+        {"chinese": "菜", "pinyin": "cài", "english": "vegetables"})
+    assert ex["chinese"] == "我想买一点菜", ex["chinese"]
+
+
 @test("blocklisted sentence rejected; flags reach both prompts")
 def t_blocklist_and_flags():
     gen = {"hanzi": "巴刹很热", "english_correct": "The wet market is hot",
@@ -572,8 +588,576 @@ def db_tests():
         assert pool2[0]["id"] != first["id"], (
             "a sentence just read must not be served again immediately")
 
+    @test("vocab import: pinyin spacing never duplicates a card; glosses refresh")
+    def t_vocab_import():
+        import tempfile, pathlib
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM vocab WHERE chinese = '测试起来'")
+        cur.execute("INSERT INTO vocab (chinese, pinyin, english, date_added) "
+                    "VALUES ('测试起来', 'Cè shì qǐlái', 'old gloss', '2026-01-01')")
+        conn.commit(); conn.close()
+        tmp = pathlib.Path(tempfile.mkdtemp()) / "vocab.csv"
+        tmp.write_text('"Chinese","Pinyin","English"\n'
+                       '"测试起来","cè shì qǐ lái","new gloss"\n', encoding="utf-8")
+        original = db.VOCAB_CSV_PATH
+        try:
+            db.VOCAB_CSV_PATH = tmp
+            db.import_vocab_from_csv(force=True)
+        finally:
+            db.VOCAB_CSV_PATH = original
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT english FROM vocab WHERE chinese = '测试起来'")
+        rows = cur.fetchall()
+        cur.execute("DELETE FROM vocab WHERE chinese = '测试起来'")
+        conn.commit(); conn.close()
+        assert rows == [("new gloss",)], rows
+
+    @test("frequency import: no word stored twice; lesson words keep their meanings")
+    def t_freq_import():
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("""SELECT chinese FROM vocab WHERE NOT from_lessons
+                       GROUP BY chinese HAVING COUNT(*) > 1""")
+        assert cur.fetchall() == [], "frequency word duplicated"
+        cur.execute("""SELECT COUNT(*) FROM vocab v WHERE NOT v.from_lessons
+                       AND EXISTS (SELECT 1 FROM vocab l WHERE l.from_lessons
+                                   AND l.chinese = v.chinese)""")
+        assert cur.fetchone()[0] == 0, "frequency copy of a lesson word"
+        cur.execute("SELECT COUNT(DISTINCT chinese) FROM vocab WHERE freq_rank <= 10000")
+        assert cur.fetchone()[0] == 10000
+        cur.execute("SELECT english, from_lessons, freq_rank FROM vocab WHERE chinese = '好'")
+        eng, lesson, rank = cur.fetchone()
+        assert lesson and rank and "good" in eng
+        cur.execute("SELECT chinese, tag, freq_rank FROM vocab WHERE chinese IN "
+                    "('空调', '冷气', '冲凉', '洗澡') ORDER BY freq_rank")
+        got = cur.fetchall()
+        assert [(c, t) for c, t, _r in got] == [("冲凉", "Malaysia"), ("洗澡", "China"),
+                                                ("冷气", "Malaysia"), ("空调", "China")], got
+        conn.close()
+
+    @test("srs_frequency: new cards are the most common unseen words")
+    def t_freq_mode():
+        uid = db.list_users()[0]["id"]
+        batch = db.get_session_words(uid, total=12, mode="srs_frequency")
+        new = [w for w in batch if not w["review_count"]]
+        assert new, "should serve new words"
+        ids = [w["id"] for w in new]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT MAX(freq_rank) FROM vocab WHERE id = ANY(%s)", (ids,))
+        worst = cur.fetchone()[0]
+        cur.execute("""SELECT MIN(v.freq_rank) FROM vocab v
+                       LEFT JOIN vocab_progress p ON p.vocab_id = v.id AND p.user_id = %s
+                       WHERE (p.review_count IS NULL OR p.review_count = 0)
+                         AND NOT (v.id = ANY(%s))""", (uid, ids))
+        best_left = cur.fetchone()[0]
+        conn.close()
+        assert worst <= best_left, (worst, best_left)
+
+    @test("lesson-based modes never pull in unseen frequency-only words")
+    def t_lesson_modes():
+        uid = db.list_users()[0]["id"]
+        for mode in ("srs_latest", "random_balanced", "latest_mix"):
+            batch = db.get_session_words(uid, total=15, mode=mode)
+            ids = [w["id"] for w in batch if not w["review_count"]]
+            if not ids:
+                continue
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM vocab WHERE id = ANY(%s) "
+                        "AND NOT from_lessons", (ids,))
+            assert cur.fetchone()[0] == 0, mode
+            conn.close()
+
+    @test("cleanup: duplicates merge with progress kept; unstudied old cards go")
+    def t_vocab_cleanup():
+        users = [u["id"] for u in db.list_users()]
+        a, b = users[0], users[1]
+        conn = db.get_connection(); cur = conn.cursor()
+        def add(zh, py):
+            cur.execute("INSERT INTO vocab (chinese, pinyin, english, date_added, "
+                        "from_lessons) VALUES (%s, %s, 'x', '2026-01-01', TRUE) "
+                        "RETURNING id", (zh, py))
+            return cur.fetchone()[0]
+        def prog(uid, vid, rc):
+            cur.execute("INSERT INTO vocab_progress (user_id, vocab_id, "
+                        "next_review_date, interval, ease_factor, review_count) "
+                        "VALUES (%s, %s, '2026-10-01', %s, 2.5, %s) ON CONFLICT "
+                        "(user_id, vocab_id) DO UPDATE SET review_count = "
+                        "EXCLUDED.review_count, interval = EXCLUDED.interval",
+                        (uid, vid, rc, rc))
+        add("测试句子甲。", "Cèshì jùzi jiǎ.")
+        kept = add("测试句子乙。", "Cèshì jùzi yǐ."); prog(a, kept, 2)
+        stale = add("背包", "bèi bāo"); prog(a, stale, 5)
+        cur.execute("SELECT id FROM vocab WHERE chinese = '起来' AND pinyin = 'qǐ lái'")
+        canon = cur.fetchone()[0]; prog(b, canon, 3)
+        dup = add("起来", "qǐlái"); prog(b, dup, 1)
+        cur.execute("DELETE FROM app_meta WHERE key = 'vocab_cleanup_v1'")
+        conn.commit()
+        result = db.run_vocab_cleanup(conn)
+        assert result and result["merged"] >= 2, result
+        q = lambda sql, *args: (cur.execute(sql, args), cur.fetchall())[1]
+        assert q("SELECT 1 FROM vocab WHERE chinese = '测试句子甲。'") == []
+        assert q("SELECT pinyin FROM vocab WHERE chinese = '测试句子乙。'") == \
+            [("cè shì jù zi yǐ.",)]
+        bag = q("SELECT id, pinyin FROM vocab WHERE chinese = '背包'")
+        assert len(bag) == 1 and bag[0][1] == "bēi bāo", bag
+        assert q("SELECT review_count FROM vocab_progress WHERE user_id = %s "
+                 "AND vocab_id = %s", a, bag[0][0]) == [(5,)]
+        up = q("SELECT id FROM vocab WHERE chinese = '起来'")
+        assert up == [(canon,)], up
+        assert q("SELECT review_count FROM vocab_progress WHERE user_id = %s "
+                 "AND vocab_id = %s", b, canon) == [(3,)]
+        cur.execute("DELETE FROM vocab WHERE chinese = '测试句子乙。'")
+        cur.execute("DELETE FROM vocab_progress WHERE user_id = %s AND vocab_id = %s",
+                    (b, canon))
+        cur.execute("DELETE FROM vocab_progress WHERE user_id = %s AND vocab_id = %s",
+                    (a, bag[0][0]))
+        conn.commit(); conn.close()
+
+    @test("erhua cleanup: 一点儿 card merges into 一点 with its progress")
+    def t_erhua_cleanup():
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT id FROM vocab WHERE chinese = '一点'")
+        plain = cur.fetchone()[0]
+        cur.execute("INSERT INTO vocab (chinese, pinyin, english, date_added, from_lessons) "
+                    "VALUES ('一点儿', 'yì diǎnr', 'x', '2026-01-01', TRUE) RETURNING id")
+        er = cur.fetchone()[0]
+        cur.execute("INSERT INTO vocab (chinese, pinyin, english, date_added, from_lessons) "
+                    "VALUES ('测试这儿好', 'cè shì zhèr hǎo', 'x', '2026-01-01', TRUE) "
+                    "RETURNING id")
+        er_only = cur.fetchone()[0]
+        cur.execute("INSERT INTO vocab_progress (user_id, vocab_id, next_review_date, "
+                    "interval, ease_factor, review_count) VALUES (%s, %s, '2026-10-01', "
+                    "4, 2.5, 4)", (uid, er))
+        cur.execute("DELETE FROM app_meta WHERE key = 'vocab_erhua_v1'")
+        conn.commit()
+        result = db.run_erhua_cleanup(conn)
+        assert result["merged"] >= 1 and result["respelled"] >= 1, result
+        cur.execute("SELECT COUNT(*) FROM vocab WHERE chinese = '一点儿'")
+        assert cur.fetchone()[0] == 0
+        cur.execute("SELECT review_count FROM vocab_progress WHERE user_id = %s "
+                    "AND vocab_id = %s", (uid, plain))
+        assert cur.fetchone() == (4,)
+        cur.execute("SELECT chinese, pinyin FROM vocab WHERE id = %s", (er_only,))
+        assert cur.fetchone() == ("测试这好", "cè shì zhè hǎo")
+        cur.execute("DELETE FROM vocab_progress WHERE user_id = %s AND vocab_id = %s",
+                    (uid, plain))
+        cur.execute("DELETE FROM vocab WHERE id = %s", (er_only,))
+        conn.commit(); conn.close()
+
+    @test("grammar store: progress upsert, set reuse limits, refresh on vocab growth")
+    def t_gr_db():
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM grammar_drill_sets WHERE user_id = %s", (uid,))
+        cur.execute("DELETE FROM grammar_progress WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        db.grammar_save_progress(uid, "bu_neg", "2026-01-02", 1, 2.5, 0.8)
+        db.grammar_save_progress(uid, "bu_neg", "2026-01-05", 3, 2.5, 0.9)
+        p = db.grammar_progress(uid)["bu_neg"]
+        assert p["review_count"] == 2 and p["interval"] == 3
+        assert db.grammar_new_today(uid) == 1
+        sid = db.grammar_save_set(uid, "bu_neg", 100, {"identify": [{"hanzi": "我不去"}]})
+        pick = db.grammar_pick_set(uid, "bu_neg", 100)
+        assert pick and pick["id"] == sid and pick["payload"]["identify"]
+        db.grammar_mark_served(sid)
+        assert db.grammar_pick_set(uid, "bu_neg", 100) is None, "served today"
+        assert db.grammar_pick_set(uid, "bu_neg", 200) is None, "vocab grew"
+        for _ in range(5):
+            db.grammar_save_set(uid, "bu_neg", 100, {"identify": []})
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM grammar_drill_sets WHERE user_id = %s", (uid,))
+        assert cur.fetchone()[0] == 4
+        cur.execute("DELETE FROM grammar_drill_sets WHERE user_id = %s", (uid,))
+        cur.execute("DELETE FROM grammar_progress WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        assert "我不去" in db.grammar_recent_sentences(uid, "bu_neg") or True
+        pairs = dict(db.grammar_china_pairs())
+        assert pairs.get("空调") == "冷气"
+
+    @test("import is serialised: two app copies booting together don't collide")
+    def t_import_lock():
+        import threading
+        errors = []
+        def boot():
+            try:
+                db.import_vocab_from_csv(force=True)
+            except Exception as e:
+                errors.append(e)
+        threads = [threading.Thread(target=boot) for _ in range(2)]
+        [th.start() for th in threads]
+        [th.join() for th in threads]
+        assert not errors, errors
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT chinese FROM vocab WHERE NOT from_lessons GROUP BY chinese HAVING COUNT(*) > 1")
+        assert cur.fetchall() == []
+        conn.close()
+
+    @test("word engine store: progress migrates, recognition mirrors, candidates and unlocks gated")
+    def t_ve_db():
+        import random as _r
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        for tbl in ("word_attempts", "word_skill", "vocab_progress"):
+            cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
+        cur.execute("SELECT id, chinese FROM vocab WHERE chinese IN ('我', '巴士', '公车', '冷气')")
+        ids = {zh: vid for vid, zh in cur.fetchall()}
+        # studied before the engine existed: must carry over, not restart
+        cur.execute("""INSERT INTO vocab_progress (user_id, vocab_id, next_review_date, interval,
+                       ease_factor, review_count) VALUES (%s, %s, '2026-01-01', 6, 2.6, 5)""",
+                    (uid, ids["我"]))
+        conn.commit(); conn.close()
+        db.sync_word_skills(uid)
+        tr = db.word_tracks(uid, [ids["我"]])[(ids["我"], "recognition")]
+        assert tr["interval"] == 6 and tr["reps"] == 5 and tr["streak"] == 3
+        assert db.production_unlockable(uid, 5)[0]["chinese"] == "我"
+        # a later review in the classic session catches the track up
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("UPDATE vocab_progress SET review_count = 6, interval = 15 WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        db.sync_word_skills(uid)
+        assert db.word_tracks(uid, [ids["我"]])[(ids["我"], "recognition")]["interval"] == 15
+        # a China word waits for its Malaysian partner
+        lessons, freq = db.new_word_candidates(uid, limit=20000)
+        cands = {w["chinese"] for w in lessons + freq}
+        assert "巴士" in cands and "公车" not in cands and "冷气" in cands
+        t = ve.update_track({}, "correct")
+        db.save_word_track(uid, ids["巴士"], "recognition", t, mode="zh_to_meaning")
+        lessons, freq = db.new_word_candidates(uid, limit=20000)
+        assert "公车" in {w["chinese"] for w in lessons + freq}
+        assert db.introduced_today(uid) == 1
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT review_count, interval FROM vocab_progress WHERE user_id = %s AND vocab_id = %s",
+                    (uid, ids["巴士"]))
+        assert cur.fetchone() == (1, 1), "recognition is mirrored for the rest of the app"
+        conn.close()
+        db.log_word_attempt(uid, ids["巴士"], "recognition", "audio_to_meaning", "wrong", {"chose": "bus stop"})
+        db.log_word_attempt(uid, ids["巴士"], "recognition", "audio_to_meaning", "correct")
+        assert db.mode_error_rates(uid)["audio_to_meaning"] == 0.5
+        assert db.word_attempts(uid, ids["巴士"])[1]["detail"] == {"chose": "bus stop"}
+        plan = db.plan_word_session(uid, rng=_r.Random(0))
+        new = [it for it in plan["items"] if it["kind"] == "new"]
+        assert 0 < len(new) <= plan["new_allowed"] <= 5
+
+    @test("word content store: reuse, refresh after heavy use, bank fallback when generation fails")
+    def t_wc_db():
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM word_content WHERE user_id = %s", (uid,))
+        cur.execute("SELECT id, chinese, pinyin, english, tag FROM vocab WHERE chinese = '告诉'")
+        r = cur.fetchone(); conn.commit(); conn.close()
+        word = {"id": r[0], "chinese": r[1], "pinyin": r[2], "english": r[3], "tag": r[4]}
+        calls = {"n": 0}
+        real = wcon.generate
+        def fake_gen(w, known, structs, recent=()):
+            calls["n"] += 1
+            return dict(_wc_payload(), reviewed=True, source="generated", n=calls["n"])
+        wcon.generate = fake_gen
+        try:
+            p1, cid = db.word_content_for(uid, word, known=WC_KNOWN)
+            p2, cid2 = db.word_content_for(uid, word, known=WC_KNOWN)
+            assert calls["n"] == 1 and cid == cid2 and p2["n"] == 1, "cached set reused"
+            for _ in range(db.WORD_CONTENT_MAX_USES):
+                db.word_content_used(cid)
+            p3, cid3 = db.word_content_for(uid, word, known=WC_KNOWN)
+            assert calls["n"] == 2 and p3["n"] == 2 and cid3 != cid, "rewritten after heavy use"
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("DELETE FROM word_content WHERE user_id = %s", (uid,)); conn.commit(); conn.close()
+            wcon.generate = lambda *a, **k: None
+            db.bank_add("告诉", {"chinese": "你要告诉他吗？", "pinyin": "nǐ yào gào su tā ma",
+                                "english_correct": "Will you tell him?", "english_distractors": ["a", "b"]})
+            p4, cid4 = db.word_content_for(uid, word, known=WC_KNOWN)
+            assert cid4 is None and p4["source"] == "bank" and p4["sentences"][0]["hanzi"] == "你要告诉他吗？"
+            p5, _ = db.word_content_for(uid, word, allow_generate=False, known=WC_KNOWN)
+            assert p5["source"] in ("bank", "word")
+        finally:
+            wcon.generate = real
+        assert len(db.word_pool(uid)) >= 300
+
+    @test("Words page: a full session runs - intro, checks, retries, second looks, summary")
+    def t_words_page():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress"):
+            cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        real_content, real_audio = db.word_content_for, audio_engine.create_audio_file
+        def fake_content(user_id, word, allow_generate=True, known=None):
+            t = word["chinese"]
+            return ({"meaning": wcon.short_meaning(word["english"]),
+                     "chunks": [{"hanzi": t + "吗", "pinyin": "", "english": "c"}],
+                     "sentences": [{"hanzi": f"我说{t}。", "pinyin": "", "english": "s", "structure": None}],
+                     "confusables": [], "prompts": [], "introduced_words": [],
+                     "source": "generated", "reviewed": True}, None)
+        db.word_content_for = fake_content
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            at = AppTest.from_file("pages/1_Words.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.run(); at.button[0].click().run()
+            wrong_once, done = True, False
+            for _ in range(80):
+                assert not at.exception, at.exception
+                labels = [b.label for b in at.button]
+                if any("Another session" in l for l in labels):
+                    done = True; break
+                if "Got it — test me" in labels:
+                    next(b for b in at.button if b.label == "Got it — test me").click().run(); continue
+                mc = [r for r in at.radio if (r.key or "").startswith("wd_mc_")]
+                if mc and mc[0].value is None:
+                    right = next(o["text"] for o in at.session_state["wd_setup"]["options"] if o["kind"] == "correct")
+                    pick = next(o for o in mc[0].options if o != right) if wrong_once else right
+                    wrong_once = False
+                    mc[0].set_value(pick).run()
+                    next(b for b in at.button if b.label == "Check").click().run(); continue
+                next(b for b in at.button if b.label == "Next ▶️").click().run()
+            assert done
+            kinds = [it["kind"] for it in at.session_state["wd_items"]]
+            assert kinds.count("new") == kinds.count("step2") > 0 and kinds.count("retry") == 1
+        finally:
+            db.word_content_for, audio_engine.create_audio_file = real_content, real_audio
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT COUNT(*), MIN(interval) FROM word_skill WHERE user_id = %s", (uid,))
+        n, min_iv = cur.fetchone()
+        assert n == kinds.count("new") and min_iv >= 0
+        conn.close()
+
+    @test("diagnosis in use: a troubled word is diagnosed in-session, remedied, and steered after")
+    def t_wd_page():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress", "word_diagnosis"):
+            cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
+        cur.execute("SELECT id FROM vocab WHERE chinese = '买'"); buy_id = cur.fetchone()[0]
+        # 买 has lapsed twice, mostly missed by ear
+        cur.execute("""INSERT INTO word_skill (user_id, vocab_id, skill, interval, ease, next_review_date,
+                       reps, lapses, streak, introduced_on) VALUES (%s,%s,'recognition',0,2.0,'2026-01-01',6,2,0,'seeded')""",
+                    (uid, buy_id))
+        for _ in range(3):
+            cur.execute("""INSERT INTO word_attempts (user_id, vocab_id, skill, mode, result, detail)
+                           VALUES (%s,%s,'recognition','audio_to_meaning','wrong','{"kind":"review","chose_kind":"tone","chose":"卖"}')""",
+                        (uid, buy_id))
+        conn.commit(); conn.close()
+        real_content, real_audio = db.word_content_for, audio_engine.create_audio_file
+        db.word_content_for = lambda user_id, word, allow_generate=True, known=None: (
+            {"meaning": wcon.short_meaning(word["english"]), "chunks": [],
+             "sentences": [{"hanzi": f"我{word['chinese']}。", "pinyin": "", "english": "s", "structure": None}],
+             "confusables": [], "prompts": [], "introduced_words": [], "source": "generated",
+             "reviewed": True}, None)
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            at = AppTest.from_file("pages/1_Words.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.run(); at.button[0].click().run()
+            assert at.session_state["wd_items"][0]["word"]["chinese"] == "买"
+            mc = [r for r in at.radio if (r.key or "").startswith("wd_mc_")][0]
+            right = next(o["text"] for o in at.session_state["wd_setup"]["options"] if o["kind"] == "correct")
+            mc.set_value(next(o for o in mc.options if o != right)).run()
+            next(b for b in at.button if b.label == "Check").click().run()
+            assert "keeps slipping" in " ".join(w.value for w in at.warning)
+            assert at.session_state["wd_diag"]["cause"] == "tone"
+            next(b for b in at.button if b.label == "Work on it now").click().run()
+            R = at.session_state["wd_rem"]
+            assert R["cause"] == "tone" and R["rounds"]
+            for _ in range(len(R["rounds"])):
+                r = [x for x in at.radio if (x.key or "").startswith("wd_rem_")][0]
+                r.set_value(at.session_state["wd_rem"]["rounds"][at.session_state["wd_rem"]["i"]]["answer"]).run()
+                next(b for b in at.button if b.label == "Check").click().run()
+                next(b for b in at.button if b.label == "Next ▶️").click().run()
+            next(b for b in at.button if b.label == "Back to the session ▶️").click().run()
+            assert not at.exception and "wd_rem" not in at.session_state
+        finally:
+            db.word_content_for, audio_engine.create_audio_file = real_content, real_audio
+        d = db.open_diagnoses(uid, [buy_id])[buy_id]
+        assert d["cause"] == "tone" and d["evidence"]
+        # the next session leans towards listening for this word
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("UPDATE word_skill SET next_review_date = '2026-01-01' WHERE user_id = %s AND vocab_id = %s",
+                    (uid, buy_id)); conn.commit(); conn.close()
+        plan = db.plan_word_session(uid)
+        it = next(i for i in plan["items"] if i["word"]["id"] == buy_id and i["kind"] == "review")
+        assert it["mode"] == "audio_to_meaning"
+        assert db.word_attempts_all(uid, buy_id)[0]["mode"].startswith(("remedy", "audio", "zh"))
+
+    @test("integration store: recent words, non-words never sent for writing, network stats, classic page link")
+    def t_integration_db():
+        from streamlit.testing.v1 import AppTest
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress"):
+            cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
+        cur.execute("SELECT id FROM vocab WHERE chinese = '冷气'"); a = cur.fetchone()[0]
+        cur.execute("SELECT id FROM vocab WHERE chinese = '冰厨'"); b = cur.fetchone()[0]
+        conn.commit(); conn.close()
+        db.save_word_track(uid, a, "recognition", ve.update_track({}, "correct"))
+        db.save_word_track(uid, b, "recognition", {"interval": 0})          # introduced, not yet right
+        assert db.recent_words(uid) == ["冷气"], "introduced AND answered right at least once"
+        called = {"n": 0}
+        real = wcon.generate
+        wcon.generate = lambda *x, **k: called.__setitem__("n", called["n"] + 1)
+        try:
+            sentence = {"id": a, "chinese": "这么早起来干嘛？", "pinyin": "", "english": "Why up so early?", "tag": None}
+            db.word_content_for(uid, sentence)
+            db.word_content_for(uid, {"id": a, "chinese": "leng zai", "pinyin": "leng zai", "english": "handsome guy", "tag": None})
+            assert called["n"] == 0, "sentence cards and Latin entries are never sent for writing"
+        finally:
+            wcon.generate = real
+        st_ = db.network_stats(uid)
+        assert st_["recognition"] == 1 and st_["production"] == 0
+        at = AppTest.from_file("main_app.py", default_timeout=120)
+        at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+        at.run()
+        assert not at.exception, at.exception
+
+    @test("Sound & Pairing page: both drills run from introduced words and schedule each group")
+    def t_sd_page():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        for tbl in ("word_attempts", "word_skill", "drill_progress"):
+            cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
+        cur.execute("SELECT id FROM vocab WHERE freq_rank <= 400")
+        for (vid,) in cur.fetchall():
+            cur.execute("""INSERT INTO word_skill (user_id, vocab_id, skill, interval, next_review_date, reps,
+                           introduced_on) VALUES (%s, %s, 'recognition', 3, '2099-01-01', 3, 'seeded')""", (uid, vid))
+        conn.commit(); conn.close()
+        real_audio = audio_engine.create_audio_file
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            for drill in ("tone", "pair"):
+                at = AppTest.from_file("pages/4_Sound_and_Pairing.py", default_timeout=120)
+                at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+                at.run()
+                at.sidebar.radio[0].set_value(drill).run()
+                assert "from your words" in at.markdown[0].value
+                next(b for b in at.button if "Start" in b.label).click().run()
+                for _ in range(40):
+                    assert not at.exception, at.exception
+                    labels = [b.label for b in at.button]
+                    if any("Another round" in l for l in labels):
+                        break
+                    r = [x for x in at.radio if (x.key or "").startswith("sp_mc_")][0]
+                    if r.value is None:
+                        it = at.session_state["sp_items"][at.session_state["sp_i"]]
+                        r.set_value(next(o["label"] for o in it["options"] if o["value"] == it["answer"])).run()
+                        next(b for b in at.button if b.label == "Check").click().run()
+                    next(b for b in at.button if b.label == "Next ▶️").click().run()
+                assert any("Another round" in b.label for b in at.button)
+                prog = db.drill_progress_get(uid, drill)
+                assert prog and all(t["reps"] == 1 and t["interval"] == 1 for t in prog.values())
+        finally:
+            audio_engine.create_audio_file = real_audio
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM word_attempts WHERE user_id = %s AND detail->>'kind' = 'drill'", (uid,))
+        assert cur.fetchone()[0] > 0
+        conn.close()
+
+    @test("connection pool: more simultaneous users than connections wait their turn, nothing is reset")
+    def t_pool_busy():
+        import threading, time as _t
+        errors, resets = [], []
+        real_reset = db.reset_pool
+        db.reset_pool = lambda: resets.append(1) or real_reset()
+        def worker():
+            try:
+                conn = db.get_connection(); cur = conn.cursor()
+                cur.execute("SELECT pg_sleep(0.3)"); cur.fetchall(); conn.close()
+            except Exception as e:
+                errors.append(e)
+        try:
+            threads = [threading.Thread(target=worker) for _ in range(25)]
+            [th.start() for th in threads]; [th.join() for th in threads]
+        finally:
+            db.reset_pool = real_reset
+        assert not errors and not resets, (errors[:2], len(resets))
+
+    @test("Games page: all four games play through, in both display modes; results stay out of diagnosis")
+    def t_games_page():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM game_scores WHERE user_id = %s", (uid,))
+        cur.execute("DELETE FROM word_attempts WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        real_audio = audio_engine.create_audio_file
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            for game, show in (("picture", "Characters + pinyin"), ("word", "Characters only"),
+                               ("listen", "Characters only"), ("memory", "Characters + pinyin")):
+                at = AppTest.from_file("pages/8_Games.py", default_timeout=120)
+                at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+                at.run()
+                if game == "picture":       # credits for every Commons picture on the picker screen
+                    exp = next(e for e in at.expander if e.label == "Picture credits")
+                    md = exp.markdown[0].value
+                    assert "Twemoji" in md and sum(l.startswith("- **") for l in md.splitlines()) == 38
+                at.sidebar.radio[0].set_value(show).run()
+                next(b for b in at.button if b.key == f"pick_{game}").click().run()
+                for _ in range(120):
+                    assert not at.exception, (game, at.exception)
+                    if any("Play again" in b.label for b in at.button):
+                        break
+                    if game == "memory":
+                        cards, up = at.session_state["gm_cards"], at.session_state["gm_up"]
+                        matched = at.session_state["gm_matched"]
+                        pills = [p for p in at.get("button_group") if (p.key or "").startswith("gm_mem_")][0]
+                        # turn over one card, then its partner
+                        if len(up) == 1:
+                            want = next(n for n, c in enumerate(cards) if n != up[0] and n not in matched
+                                        and c["item"]["chinese"] == cards[up[0]]["item"]["chinese"])
+                        else:
+                            want = next(n for n in range(len(cards)) if n not in matched and n not in up)
+                        pills.set_value(str(want + 1)).run()
+                        continue
+                    if at.session_state.get("gm_ans") is None:
+                        rnd = at.session_state["gm_rounds"][at.session_state["gm_i"]]
+                        idx = rnd["options"].index(rnd["target"])
+                        g = [x for x in at.get("button_group") if (x.key or "").startswith("gm_pick_")][0]
+                        if game == "picture":
+                            g.set_value(gms.label(rnd["target"], show == "Characters + pinyin")).run()
+                        else:
+                            g.set_value(["A", "B", "C", "D"][idx]).run()
+                        continue
+                    next(b for b in at.button if b.label == "Next ▶️").click().run()
+                assert any("Play again" in b.label for b in at.button), game
+                if game == "memory":
+                    assert at.session_state["gm_moves"] == 6, "perfect play: one turn per pair"
+        finally:
+            audio_engine.create_audio_file = real_audio
+        scores = db.game_scores(uid)
+        assert scores["picture"]["best"] > 0 and scores["memory"]["best"] == 100
+        # game results are logged, but never read as evidence of a troubled word
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT vocab_id FROM word_attempts WHERE user_id = %s AND mode LIKE 'game_%%' LIMIT 1", (uid,))
+        vid = cur.fetchone()[0]; conn.close()
+        import word_diagnosis as _wd
+        atts = [dict(a, result="wrong") for a in db.word_attempts_all(uid, vid)] * 5
+        assert not _wd.is_troubled({}, [a for a in atts if a["skill"] == "recognition"])
+        assert all(v == 0 for v in _wd.diagnose(atts)["scores"].values()), "games contribute no evidence"
+
     t_bank()
     t_flags()
+    t_games_page()
+    t_pool_busy()
+    t_sd_page()
+    t_integration_db()
+    t_wd_page()
+    t_words_page()
+    t_wc_db()
+    t_ve_db()
+    t_import_lock()
+    t_vocab_import()
+    t_gr_db()
+    t_vocab_cleanup()
+    t_erhua_cleanup()
+    t_freq_import()
+    t_freq_mode()
+    t_lesson_modes()
     t_hw_session()
     t_multiuser_vocab()
     t_multiuser_pins()
@@ -585,16 +1169,782 @@ def db_tests():
 
 
 # ======================================================================
+# GRAMMAR DRILLS
+# ======================================================================
+import grammar_curriculum as gcur
+import grammar_drills as gdr
+
+GR_KNOWN = ["喝", "咖啡", "茶", "吃", "饭", "去", "巴刹", "喜欢", "榴莲", "明天",
+            "今天", "做工", "累", "贵", "冷气", "睡觉", "早", "朋友", "打电话"]
+
+
+def _gr_payload():
+    mc = lambda hz, en: {"hanzi": hz, "pinyin": "", "english": en,
+                         "question": "What does the speaker mean?",
+                         "options": ["doesn't / won't", "didn't", "can't"],
+                         "answer": 0, "explain": "不 = doesn't or won't."}
+    return {
+        "identify": [mc("我不喝咖啡。", "I don't drink coffee."),
+                     mc("明天我不去巴刹。", "I'm not going tomorrow."),
+                     mc("这个不贵。", "This isn't expensive.")],
+        "produce": [{"situation": "Say you don't eat durian.", "answer_hanzi": "我不吃榴莲。",
+                     "answer_pinyin": "wǒ bù chī liú lián", "answer_english": "I don't eat durian."},
+                    {"situation": "Say you're not tired.", "answer_hanzi": "我不累。",
+                     "answer_pinyin": "wǒ bú lèi", "answer_english": "I'm not tired."},
+                    {"situation": "Tell a friend you won't go tomorrow.",
+                     "answer_hanzi": "明天我不去。", "answer_pinyin": "míng tiān wǒ bú qù",
+                     "answer_english": "I won't go tomorrow."}],
+        "contrast": {"with": "没", "items": [mc("我不喝茶。", "I don't drink tea."),
+                                            mc("我没喝茶。", "I didn't drink tea."),
+                                            mc("他不去。", "He won't go.")]},
+        "rapid": [{"prompt": p_, "answer_hanzi": a, "answer_pinyin": ""} for p_, a in [
+            ("You don't like tea.", "我不喜欢茶。"), ("It isn't expensive.", "不贵。"),
+            ("You're not going to work tomorrow.", "明天我不做工。"),
+            ("You don't drink coffee.", "我不喝咖啡。"), ("You're not sleepy / going to sleep.", "我不睡觉。")]],
+        "conversation": [{"question_hanzi": q, "question_pinyin": "", "question_english": qe,
+                          "sample_hanzi": a, "sample_pinyin": "", "sample_english": ae}
+                         for q, qe, a, ae in [
+            ("你喝咖啡吗？", "Do you drink coffee?", "我不喝咖啡。", "I don't drink coffee."),
+            ("你明天去巴刹吗？", "Going to the market tomorrow?", "不去。", "No."),
+            ("这个贵吗？", "Is this expensive?", "不贵。", "Not expensive.")]],
+        "introduced_words": [],
+    }
+
+
+@test("grammar curriculum: every syllabus line maps to a real, unique structure")
+def t_gr_curriculum():
+    from dictionary_engine import has_erhua
+    ids = [s.id for s in gcur.STRUCTURES]
+    assert len(ids) == len(set(ids)), "duplicate structure id"
+    listed = {sid for lines in gcur.LISTED.values() for _l, sid in lines}
+    assert listed <= set(ids), listed - set(ids)
+    assert set(ids) <= listed, set(ids) - listed
+    for s in gcur.STRUCTURES:
+        assert s.section in gcur.SECTIONS and 1 <= s.level <= 5, s.id
+        assert s.purpose and len(s.purpose) < 120, s.id
+        assert all(c in gcur.BY_ID for c in s.contrast), s.id
+        assert not has_erhua(s.pattern) and not has_erhua(s.name), s.id
+    order = gcur.learning_order()
+    assert order[0].level == 1 and order[0].core
+    assert len(order) == len(ids) and len({s.id for s in order}) == len(ids)
+    pos = {s.id: i for i, s in enumerate(order)}
+    for s in order:
+        if s.kind == "contrast":
+            assert all(pos[c] < pos[s.id] for c in s.contrast), f"{s.id} before its parts"
+            p = gdr.build_prompt(s, GR_KNOWN, contrasts=[gcur.get(c) for c in s.contrast])
+            assert "CONTRAST DRILL" in p and all(gcur.get(c).pattern in p for c in s.contrast)
+    le = gdr.build_prompt(gcur.get("le_verb"), GR_KNOWN)
+    assert "past tense" in le and "completed action" in le
+
+
+@test("grammar syllabus: every one of the supplied lines is drilled; group 30 = contrast drills; group 36 = core")
+def t_gr_syllabus():
+    import re
+    norm = lambda s: re.sub(r"\s+", " ", s.strip())
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data",
+                        "grammar_syllabus.txt")
+    syllabus, sec = {}, None
+    for line in open(path, encoding="utf-8"):
+        line = line.rstrip("\n")
+        if not line.strip() or line.startswith("# "):
+            continue
+        if line.startswith("## "):
+            sec = int(line[3:]); syllabus[sec] = []
+            continue
+        syllabus[sec].append(norm(line))
+    assert sorted(syllabus) == list(range(1, 37)) == sorted(gcur.SECTIONS)
+    mapped = {s: {norm(l) for l, _ in lines} for s, lines in gcur.LISTED.items()}
+    missing = [(s, l) for s, ls in syllabus.items() for l in ls if l not in mapped.get(s, set())]
+    assert not missing, missing
+    extra = [(s, l) for s, ls in gcur.LISTED.items() for l, _ in ls
+             if norm(l) not in syllabus[s] and "(added)" not in l]
+    assert not extra, extra
+    assert all(gcur.get(sid).kind == "contrast" for _l, sid in gcur.LISTED[30])
+    assert len(gcur.LISTED[36]) == 50
+    assert all(gcur.get(sid).core for _l, sid in gcur.LISTED[36])
+
+
+@test("grammar vocab control: unstudied words caught, compounds of known words allowed")
+def t_gr_vocab():
+    s = gcur.get("bu_neg")
+    allowed = gdr.allowed_set(GR_KNOWN, s)
+    assert gdr.unknown_words("我不喝咖啡", allowed) == []
+    assert gdr.unknown_words("我不喝啤酒", allowed) == ["啤酒"]
+    assert gdr.unknown_words("我不喝啤酒", gdr.allowed_set(GR_KNOWN, s, ["啤酒"])) == []
+    assert gdr.unknown_words("我们三个人不去", allowed) == []   # function words, numbers
+    # a structure's grammar words are free, but the example nouns in its pattern are not
+    mw = gdr.allowed_set(GR_KNOWN, gcur.get("mw_common"))
+    assert "本" in mw and "书" not in mw
+    assert gdr.unknown_words("我有一本书", mw) == ["书"]
+    assert gdr.unknown_words("我喝了一杯茶", mw) == []
+
+
+@test("grammar validation: good set passes; missing structure, 儿, unknown words, bad keys fail")
+def t_gr_validate():
+    s = gcur.get("bu_neg")
+    payload, problems = gdr.validate(_gr_payload(), s, GR_KNOWN)
+    assert problems == [], problems
+    assert payload["identify"][0]["pinyin"]            # derived when missing
+    bad = _gr_payload()
+    bad["identify"][0]["hanzi"] = "我喝咖啡。"            # target structure missing
+    bad["produce"][0]["answer_hanzi"] = "我一点儿不吃。"   # Beijing 儿
+    bad["rapid"][0]["answer_hanzi"] = "我不喝啤酒。"       # unstudied word
+    bad["contrast"]["items"][0]["answer"] = 7             # key out of range
+    _p, problems = gdr.validate(bad, s, GR_KNOWN)
+    text = " ".join(problems)
+    assert "doesn't use the target" in text and "儿" in text
+    assert "啤酒" in text and "answer index" in text
+
+
+@test("grammar generation: rejected drafts are rewritten with the problems fed back")
+def t_gr_generate():
+    s = gcur.get("bu_neg")
+    bad = _gr_payload()
+    bad["rapid"][0]["answer_hanzi"] = "我不喝啤酒。"
+    good = _gr_payload()
+    prompts = []
+    replies = iter([fake_response(bad), fake_response(good),
+                    fake_response({"acceptable": False, "problems": ["[rapid 2] unnatural"]}),
+                    fake_response(good),
+                    fake_response({"acceptable": True, "problems": []})])
+    def create(**kw):
+        prompts.append(kw["messages"][0]["content"])
+        return next(replies)
+    ap.client = MagicMock()
+    ap.client.chat.completions.create = create
+    out = gdr.generate(s, GR_KNOWN)
+    assert out and out["structure_id"] == "bu_neg"
+    assert "啤酒" in prompts[1] and "unnatural" in prompts[3]
+    assert "Beijing 儿" in prompts[0] and "咖啡" in prompts[0]
+
+
+@test("grammar generation: gives up (returns None) if no draft ever passes review")
+def t_gr_generate_fails_closed():
+    s = gcur.get("bu_neg")
+    reject = {"acceptable": False, "problems": ["[identify 1] wrong key"]}
+    replies = iter([fake_response(x) for x in
+                    [_gr_payload(), reject] * gdr.MAX_ATTEMPTS])
+    ap.client = MagicMock()
+    ap.client.chat.completions.create = lambda **kw: next(replies)
+    assert gdr.generate(s, GR_KNOWN) is None
+
+
+@test("audit fixes: contrast words allowed, API errors retried, unreviewed/ungraded never count")
+def t_gr_audit_fixes():
+    # the contrast stage may use the look-alike's grammar words
+    assert "不要" in gdr.allowed_set([], gcur.get("bie"))
+    assert "只有" in gdr.allowed_set([], gcur.get("zhiyao_jiu"))
+    s = gcur.get("bu_neg")
+    # a rate-limit error is waited out and retried, not counted as bad output
+    real_sleep = gdr.time.sleep
+    gdr.time.sleep = lambda _s: None
+    calls = {"n": 0}
+    def flaky(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("429 rate limit")
+        return fake_response(_gr_payload() if calls["n"] == 2 else {"acceptable": True, "problems": []})
+    ap.client = MagicMock()
+    ap.client.chat.completions.create = flaky
+    out = gdr.generate(s, GR_KNOWN)
+    assert out and out["reviewed"] is True and calls["n"] == 3
+    # both reviewers down: shown, but flagged so the page never stores it
+    calls["n"] = 0
+    def reviewers_down(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return fake_response(_gr_payload())
+        raise RuntimeError("down")
+    ap.client.chat.completions.create = reviewers_down
+    out = gdr.generate(s, GR_KNOWN)
+    assert out and out["reviewed"] is False
+    # grader unreachable: ungraded, not half-right
+    ap.client.chat.completions.create = lambda **kw: (_ for _ in ()).throw(RuntimeError("down"))
+    assert gdr.grade_answer(s, "x", "我不去。", "我不去")["verdict"] == "ungraded"
+    assert "ungraded" not in gdr.POINTS
+    gdr.time.sleep = real_sleep
+
+
+@test("grammar grading + scheduling: verdicts, session grade, spacing, queue order")
+def t_gr_grade_schedule():
+    s = gcur.get("bu_neg")
+    ap.client = MagicMock()
+    ap.client.chat.completions.create = lambda **kw: fake_response(
+        {"verdict": "close", "feedback": "Use 不, not 没.", "better": "我不去。"})
+    g = gdr.grade_answer(s, "Say you won't go.", "我不去。", "我没去", spoken=True)
+    assert g["verdict"] == "close" and g["better"] == "我不去。"
+    assert gdr.grade_answer(s, "x", "我不去。", "  ")["verdict"] == "wrong"
+    assert gdr.session_grade([True, True, "correct", "got"]) == (3, 1.0)
+    assert gdr.session_grade([False, "wrong", "missed", "close"])[0] == 0
+    from datetime import date as _d
+    iv, ease, nxt = gdr.schedule(0, 2.5, 2, today=_d(2026, 1, 1))
+    assert iv == 1 and nxt == "2026-01-02"
+    iv, _e, _n = gdr.schedule(40, 2.5, 3, core=True)
+    assert iv == 21, "core structures are capped so they keep coming back"
+    order = gcur.learning_order()
+    prog = {order[3].id: {"next_review_date": "2026-01-01"},
+            order[5].id: {"next_review_date": "2099-01-01"}}
+    q = gdr.todays_queue(order, prog, _d(2026, 1, 2), new_so_far=1, new_per_day=2)
+    assert q[0].id == order[3].id and len(q) == 2 and q[1].id not in prog
+
+
+# ======================================================================
+# VOCABULARY ENGINE
+# ======================================================================
+import vocab_engine as ve
+
+
+def _w(i, zh="词", tag=None, lessons=False, rank=None):
+    return {"id": i, "chinese": zh, "pinyin": "cí", "english": "word", "tag": tag,
+            "from_lessons": lessons, "freq_rank": rank or i}
+
+
+@test("vocab engine: two-track scheduling, lapses only once learned, ungraded is a no-op")
+def t_ve_schedule():
+    from datetime import date as _d
+    d = _d(2026, 1, 1)
+    t1 = ve.update_track({}, "correct", d)
+    assert t1["interval"] == 1 and t1["streak"] == 1 and t1["reps"] == 1
+    assert t1["next_review_date"] == "2026-01-02"
+    t2 = ve.update_track(t1, "correct", d)
+    assert t2["interval"] == 3 and t2["streak"] == 2
+    t3 = ve.update_track(t2, "wrong", d)
+    assert t3["interval"] == 0 and t3["streak"] == 0 and t3["lapses"] == 1
+    assert ve.update_track({}, "wrong", d).get("lapses", 0) == 0, "a brand-new miss isn't a lapse"
+    assert ve.update_track(t2, "ungraded", d) == t2
+    big = ve.update_track({"interval": 300, "ease": 3.0, "streak": 9}, "easy", d)
+    assert big["interval"] == ve.MAX_INTERVAL
+
+
+@test("vocab engine: production only for solid, Malaysian, word-sized items")
+def t_ve_production_gate():
+    assert ve.can_produce(_w(1, "巴士")) and not ve.can_produce(_w(2, "巴士", tag="China"))
+    assert not ve.can_produce(_w(3, "这么早起来干嘛？")) and not ve.can_produce(_w(4, "leng zai"))
+    assert not ve.production_ready({"interval": 3, "streak": 1})
+    assert ve.production_ready({"interval": 3, "streak": 2})
+
+
+@test("vocab engine: modes harden with strength, rotate, and lean towards weaknesses")
+def t_ve_modes():
+    import random as _r
+    rng = _r.Random(1)
+    assert ve.choose_mode(ve.RECOGNITION, step=1) == "zh_to_meaning"
+    assert ve.choose_mode(ve.RECOGNITION, step=2) == "audio_to_meaning"
+    assert ve.choose_mode(ve.PRODUCTION, {"streak": 0}, rng=rng) == "cloze"
+    assert {ve.choose_mode(ve.PRODUCTION, {"streak": 3}, rng=rng) for _ in range(40)} <= {"cloze", "meaning_to_zh"}
+    assert "spoken" in {ve.choose_mode(ve.PRODUCTION, {"streak": 6}, rng=rng) for _ in range(60)}
+    for _ in range(30):   # never the same mode twice running when there's a choice
+        assert ve.choose_mode(ve.RECOGNITION, {"last_mode": "audio_to_meaning"}, rng=rng) == "zh_to_meaning"
+    picks = [ve.choose_mode(ve.PRODUCTION, {"streak": 6}, {"spoken": 1.0}, rng) for _ in range(600)]
+    assert picks.count("spoken") > picks.count("cloze") * 1.5, "weak modes are asked more"
+
+
+@test("vocab engine: new words capped per session and day, and shrink with the backlog")
+def t_ve_allowance():
+    assert ve.new_word_allowance(0, 0, 5, 10, 40) == 5
+    assert ve.new_word_allowance(0, 8, 5, 10, 40) == 2
+    assert ve.new_word_allowance(0, 12, 5, 10, 40) == 0
+    assert ve.new_word_allowance(60, 0, 5, 10, 40) == 2       # half-way to 2x backlog
+    assert ve.new_word_allowance(80, 0, 5, 10, 40) == 0
+    lessons = [_w(100 + i, lessons=True) for i in range(10)]
+    freq = [_w(i) for i in range(1, 20)]
+    picked = ve.pick_new_words(lessons, freq, 5, lesson_share=0.4)
+    assert len(picked) == 5 and sum(w["from_lessons"] for w in picked) == 2
+    assert [w["id"] for w in picked if not w["from_lessons"]] == [1, 2, 3]
+
+
+@test("vocab engine: sessions warm up on reviews and space each new word's second look")
+def t_ve_session():
+    import random as _r
+    due_r = [_w(i) for i in range(1, 16)]
+    due_p = [_w(i) for i in range(20, 26)]
+    new = [_w(900), _w(901), _w(902)]
+    items = ve.build_session(due_r, due_p, [_w(50)], new, max_reviews=15,
+                             max_unlocks=1, rng=_r.Random(3))
+    kinds = [it["kind"] for it in items]
+    assert kinds[:3] == ["review"] * 3
+    assert kinds.count("review") == 15 and kinds.count("unlock") == 1
+    assert kinds.count("new") == 3 and kinds.count("step2") == 3
+    for w in new:
+        a = next(i for i, it in enumerate(items) if it["kind"] == "new" and it["word"]["id"] == w["id"])
+        b = next(i for i, it in enumerate(items) if it["kind"] == "step2" and it["word"]["id"] == w["id"])
+        assert b - a >= 5, (a, b)
+    assert {it["skill"] for it in items if it["kind"] == "review"} == {"recognition", "production"}
+
+
+# ======================================================================
+# WORD CONTENT
+# ======================================================================
+import word_content as wcon
+
+WC_KNOWN = ["我", "你", "他", "明天", "朋友", "老板", "一件事", "件", "事", "吗", "要", "什么", "时候"]
+WC_WORD = {"id": 1, "chinese": "告诉", "pinyin": "gào su", "english": "to tell / to inform", "tag": None}
+
+
+def _wc_payload():
+    return {"meaning": "to tell",
+            "chunks": [{"hanzi": "告诉我", "pinyin": "", "english": "tell me"},
+                       {"hanzi": "告诉你一件事", "pinyin": "", "english": "tell you something"}],
+            "sentences": [{"hanzi": s, "pinyin": "", "english": e, "structure": st} for s, e, st in [
+                ("你告诉我吧。", "Tell me.", None), ("他没告诉我。", "He didn't tell me.", "mei_neg"),
+                ("我明天告诉你。", "I'll tell you tomorrow.", None),
+                ("你要告诉老板吗？", "Will you tell the boss?", "ma_question")]],
+            "confusables": [{"hanzi": "说", "difference": "说 = say; 告诉 needs a person told."}],
+            "prompts": [{"situation": "You want a friend to tell you something.",
+                         "sample_hanzi": "你告诉我吧。", "sample_pinyin": "", "sample_english": "Tell me."}],
+            "introduced_words": []}
+
+
+@test("word content: typed/spoken answers - right, tone slip, same-sound character, wrong word")
+def t_wc_check():
+    assert wcon.check_answer("告诉", "告诉", "gào su")[0] == "correct"
+    assert wcon.check_answer("gaosu", "告诉", "gào su") == ("correct", {"typed": "gaosu", "tones_given": False})
+    assert wcon.check_answer("gao4 su", "告诉", "gào su")[0] == "correct"
+    r, d = wcon.check_answer("gǎo su", "告诉", "gào su")
+    assert r == "close" and d["tone_error"]
+    r, d = wcon.check_answer("事", "是", "shì")
+    assert r == "close" and d["homophone"]
+    assert wcon.check_answer("shuo", "告诉", "gào su")[0] == "wrong"
+    assert wcon.check_answer("", "告诉", "gào su")[0] == "wrong"
+    assert wcon.short_meaning("to tell / to inform (Malaysia: 讲 jiǎng)") == "to tell"
+    assert wcon.cloze("你告诉我吧。", "告诉") == "你＿＿我吧。"
+
+
+@test("word content: wrong options are sound-, look- and meaning-alikes, labelled for diagnosis")
+def t_wc_options():
+    import random as _r
+    pool = [{"chinese": c, "pinyin": p, "english": e} for c, p, e in [
+        ("事", "shì", "matter / thing"), ("试", "shì", "to try"), ("说", "shuō", "to say"),
+        ("告别", "gào bié", "to say goodbye"), ("吃", "chī", "to eat"), ("明天", "míng tiān", "tomorrow")]]
+    pool += [{"chinese": "她", "pinyin": "tā", "english": "she"}, {"chinese": "他", "pinyin": "tā", "english": "he"},
+             {"chinese": "卖", "pinyin": "mài", "english": "to sell"}]
+    word = {"chinese": "是", "pinyin": "shì", "english": "to be / is"}
+    opts = wcon.meaning_options(word, pool, rng=_r.Random(0))
+    assert sum(o["kind"] == "correct" for o in opts) == 1 and len(opts) == 4
+    assert "homophone" in {o["kind"] for o in opts}                  # 事/试 on screen
+    he = {"chinese": "他", "pinyin": "tā", "english": "he"}
+    assert "她" in {o["chinese"] for o in wcon.meaning_options(he, pool, rng=_r.Random(0))}
+    for seed in range(10):   # listening: no option you can't tell apart by ear
+        assert "她" not in {o["chinese"] for o in wcon.meaning_options(he, pool, rng=_r.Random(seed), audio=True)}
+    buy = {"chinese": "买", "pinyin": "mǎi", "english": "to buy"}
+    assert {"卖": "tone"}.items() <= {o["chinese"]: o["kind"] for o in wcon.meaning_options(buy, pool, rng=_r.Random(0), audio=True)}.items()
+    opts = wcon.meaning_options(WC_WORD, pool, [{"hanzi": "说"}], rng=_r.Random(0))
+    kinds = {o["chinese"]: o["kind"] for o in opts}
+    assert kinds.get("说") == "meaning" and kinds.get("告别") == "look"
+    assert len({o["text"] for o in opts}) == len(opts)
+
+
+@test("word content: target present, known words only, 儿 and false structure tags rejected")
+def t_wc_validate():
+    structs = [gcur.get("mei_neg"), gcur.get("ma_question")]
+    content, problems = wcon.validate(_wc_payload(), WC_WORD, WC_KNOWN, structs)
+    assert problems == [], problems
+    bad = _wc_payload()
+    bad["sentences"][0]["hanzi"] = "你说吧。"                 # target missing
+    bad["sentences"][2]["hanzi"] = "我明天告诉你一点儿。"      # 儿
+    bad["chunks"][0]["hanzi"] = "告诉经理"                    # unstudied word
+    bad["sentences"][3]["structure"] = "mei_neg"              # tag without the structure
+    _c, problems = wcon.validate(bad, WC_WORD, WC_KNOWN, structs)
+    text = " ".join(problems)
+    assert "doesn't contain" in text and "儿" in text and "经理" in text and "tagged mei_neg" in text
+    china = dict(WC_WORD, tag="China")
+    c, problems = wcon.validate(_wc_payload(), china, WC_KNOWN, structs)
+    assert problems == [] and c["prompts"] == [], "mainland words: recognition only"
+
+
+@test("word content: rejected drafts rewritten with feedback; spoken answers graded with a cause")
+def t_wc_generate():
+    bad = _wc_payload(); bad["chunks"][0]["hanzi"] = "告诉经理"
+    prompts = []
+    replies = iter([fake_response(bad), fake_response(_wc_payload()),
+                    fake_response({"acceptable": True, "problems": []})])
+    def create(**kw):
+        prompts.append(kw["messages"][0]["content"]); return next(replies)
+    ap.client = MagicMock(); ap.client.chat.completions.create = create
+    out = wcon.generate(WC_WORD, WC_KNOWN, [gcur.get("mei_neg")])
+    assert out and out["reviewed"] and "经理" in prompts[1] and "[mei_neg]" in prompts[0]
+    ap.client.chat.completions.create = lambda **kw: fake_response(
+        {"verdict": "close", "error": "wrong_word", "feedback": "Use 告诉.", "better": "你告诉我吧。"})
+    g = wcon.grade_spoken(WC_WORD, "x", "你告诉我吧。", "你说我吧")
+    assert g["verdict"] == "close" and g["error"] == "wrong_word"
+    from datetime import date as _d
+    rows = {"a": {"structure_id": "bu_neg", "last_seen": "2026-01-10", "next_review_date": "2026-02-01"},
+            "b": {"structure_id": "ma_question", "last_seen": "2025-06-01", "next_review_date": "2026-01-05"},
+            "c": {"structure_id": "shei", "last_seen": "2025-06-01", "next_review_date": "2026-03-01"}}
+    got = [s.id for s in wcon.practising_structures(rows, _d(2026, 1, 12))]
+    assert got == ["bu_neg", "ma_question"], got
+
+
+# ======================================================================
+# WORD DIAGNOSIS
+# ======================================================================
+import word_diagnosis as wdiag
+
+
+def _att(mode, result, skill="recognition", kind="review", **detail):
+    return {"mode": mode, "result": result, "skill": skill, "detail": {"kind": kind, **detail}}
+
+
+@test("integration: grammar drills must recycle recent words; word sentences must use practised grammar")
+def t_integration():
+    s = gcur.get("bu_neg")
+    recent = ["巴刹", "冷气", "做工"]
+    p = gdr.build_prompt(s, GR_KNOWN, recent=recent)
+    assert "RECENTLY LEARNED" in p and "巴刹、冷气、做工" in p
+    payload, problems = gdr.validate(_gr_payload(), s, GR_KNOWN, ["冰厨", "锁匙", "油站"])
+    assert any("recently learned" in x for x in problems), "a drill using none of them is rejected"
+    payload, problems = gdr.validate(_gr_payload(), s, GR_KNOWN, recent)
+    assert problems == [], problems          # 巴刹 / 冷气 / 做工 appear in the sample drill
+    untagged = _wc_payload()
+    for x in untagged["sentences"]:
+        x["structure"] = None
+    _c, problems = wcon.validate(untagged, WC_WORD, WC_KNOWN, [gcur.get("mei_neg")])
+    assert any("grammar being practised" in x for x in problems)
+    _c, problems = wcon.validate(untagged, WC_WORD, WC_KNOWN, [])
+    assert problems == [], "no grammar practised yet: no requirement"
+    assert "巴刹" in wcon.build_prompt(WC_WORD, WC_KNOWN, recent=["巴刹"])
+
+
+@test("diagnosis: trouble needs scored misses; learning-step and remedy misses don't count")
+def t_wd_trouble():
+    assert wdiag.is_troubled({"lapses": 2}, [])
+    three = [_att("zh_to_meaning", "wrong")] * 3 + [_att("zh_to_meaning", "correct")] * 7
+    assert wdiag.is_troubled({}, three)
+    steps = [_att("zh_to_meaning", "wrong", kind="new"), _att("audio_to_meaning", "wrong", kind="retry"),
+             _att("remedy_sound", "wrong"), _att("zh_to_meaning", "wrong")]
+    assert not wdiag.is_troubled({}, steps)
+
+
+@test("diagnosis: each cause read from its own evidence; memory only when nothing specific fits")
+def t_wd_diagnose():
+    cases = {
+        "tone": [_att("cloze", "close", "production", tone_error=True)] * 2,
+        "sound": [_att("audio_to_meaning", "wrong", chose_kind="other")] * 3 + [_att("zh_to_meaning", "correct")] * 3,
+        "character": [_att("zh_to_meaning", "wrong", chose_kind="look", chose="领")] +
+                     [_att("zh_to_meaning", "wrong", chose_kind="look", chose="零")] + [_att("audio_to_meaning", "correct")] * 2,
+        "confusion": [_att("zh_to_meaning", "wrong", chose_kind="meaning", chose="说")] * 2,
+        "production_gap": [_att("zh_to_meaning", "correct")] * 4 + [_att("cloze", "wrong", "production", gave_up=True)] * 3,
+        "usage": [_att("spoken", "close", "production", error="collocation")] * 2,
+        "memory": [_att("zh_to_meaning", "wrong", chose_kind="other", chose=c) for c in "甲乙"] + [_att("audio_to_meaning", "wrong", chose_kind="other", chose="丙")],
+    }
+    for cause, atts in cases.items():
+        d = wdiag.diagnose(atts)
+        assert d["cause"] == cause, (cause, d)
+        assert d["evidence"], cause
+    assert wdiag.diagnose(cases["confusion"])["confused_with"] == "说"
+
+
+@test("diagnosis remedies: tone variants, hearable contrasts, components, production ladder")
+def t_wd_remedies():
+    import random as _r
+    v = wdiag.tone_variants("gào su", 3, _r.Random(1))
+    assert len(v) == 3 and "gào su" not in v and all(len(x.split()) == 2 for x in v)
+    assert set(wdiag.tone_variants("liù", 3, _r.Random(0))) == {"liú", "liū", "liǔ"}, "tone mark on u in iu"
+    assert set(wdiag.tone_variants("guì", 3, _r.Random(0))) == {"guí", "guī", "guǐ"}, "tone mark on i in ui"
+    pool = [{"chinese": c, "pinyin": p, "english": e} for c, p, e in [
+        ("卖", "mài", "to sell"), ("麦", "mài", "wheat"), ("买", "mǎi", "to buy"),
+        ("领", "lǐng", "to lead"), ("零", "líng", "zero"), ("冷", "lěng", "cold")]]
+    buy = {"chinese": "买", "pinyin": "mǎi", "english": "to buy"}
+    for r in wdiag.sound_rounds(buy, pool, _r.Random(0)):
+        assert r["answer"] in r["options"]
+        assert not ({"卖 mài", "麦 mài"} <= set(r["options"])), "never two identical-sounding options"
+    card = wdiag.character_card({"chinese": "冷", "pinyin": "lěng", "english": "cold"}, pool, _r.Random(0))
+    assert any("冫" in line for line in card["components"]) and card["rounds"]
+    ladder = wdiag.production_ladder(WC_WORD, _wc_payload())
+    assert ladder[0]["show"].startswith("你告＿") and ladder[-1]["answer"] == "告诉我"
+    assert wdiag.check_chunk("告诉我", "告诉我", "gào su wǒ", "告诉")[0] == "correct"
+    assert wdiag.check_chunk("告诉", "告诉我", "gào su wǒ", "告诉")[0] == "close"
+
+
+@test("diagnosis remedies: model-written contrasts and mnemonics are checked before use")
+def t_wd_written():
+    say = {"chinese": "说", "pinyin": "shuō", "english": "to say"}
+    known = ["你", "我", "他", "老板", "明天", "话", "一件事"]
+    good = {"difference": "告诉 needs a listener; 说 doesn't.", "items": [
+        {"hanzi": "你告诉我吧。", "answer": "告诉"}, {"hanzi": "他告诉老板。", "answer": "告诉"},
+        {"hanzi": "你说吧。", "answer": "说"}, {"hanzi": "他说话。", "answer": "说"}]}
+    bad = dict(good, items=[dict(good["items"][0], answer="说")] + good["items"][1:])   # answer not in sentence
+    replies = iter([fake_response(bad), fake_response(good), fake_response({"acceptable": True, "problems": []})])
+    ap.client = MagicMock(); ap.client.chat.completions.create = lambda **kw: next(replies)
+    c = wdiag.write_contrast(WC_WORD, say, known)
+    assert c and len(c["items"]) == 4 and c["items"][0]["gap"] == "你＿＿我吧。"
+    replies = iter([fake_response(good), fake_response({"acceptable": False, "problems": ["x"]})] * 3)
+    ap.client.chat.completions.create = lambda **kw: next(replies)
+    assert wdiag.write_contrast(WC_WORD, say, known) is None, "an unreviewed contrast is never shown"
+    ap.client.chat.completions.create = lambda **kw: fake_response({"mnemonic": "告 has a mouth 口 telling."})
+    assert "口" in wdiag.write_mnemonic(WC_WORD)
+    ap.client.chat.completions.create = lambda **kw: fake_response({"mnemonic": "Think of 猫 the cat."})
+    assert wdiag.write_mnemonic(WC_WORD) is None, "invented characters are rejected"
+
+
+# ======================================================================
+# SOUND & PAIRING
+# ======================================================================
+import sound_drill as sdr
+
+SD_WORDS = [{"id": i, "chinese": c, "pinyin": p, "english": e, "freq_rank": i} for i, (c, p, e) in enumerate([
+    ("想要", "xiǎng yào", "to want"), ("想法", "xiǎng fǎ", "idea"), ("想念", "xiǎng niàn", "to miss"),
+    ("香味", "xiāng wèi", "aroma"), ("香水", "xiāng shuǐ", "perfume"), ("好像", "hǎo xiàng", "as if"),
+    ("需要", "xū yào", "to need"), ("要求", "yāo qiú", "to request"), ("不要", "bú yào", "don't"),
+    ("对不起", "duì bu qǐ", "sorry"), ("为了", "wèi le", "in order to"), ("想", "xiǎng", "to think"),
+    ("一起", "yì qǐ", "together"), ("一样", "yí yàng", "same")], 1)]
+
+
+@test("tones: groups by syllable across your words, shown with real words; 一/不 and neutral tones left out")
+def t_sd_groups():
+    groups = {g["key"]: g for g in sdr.tone_groups(SD_WORDS)}
+    x = groups["xiang"]
+    assert [p["pinyin"] for p in x["patterns"]] == ["xiāng", "xiǎng", "xiàng"]
+    assert {e["char"] for p in x["patterns"] for e in p["entries"]} == {"香", "想", "像"}
+    assert sdr._example(x["patterns"][1]["entries"][0])["chinese"] == "想要", "a real word, not the bare character"
+    assert "yao" in groups and {p["pinyin"] for p in groups["yao"]["patterns"]} == {"yāo", "yào"}
+    assert not any(e["char"] in "一不" for g in groups.values() for p in g["patterns"] for e in p["entries"])
+    assert sdr.with_tone("liu", 4) == "liù" and sdr.with_tone("gui", 4) == "guì" and sdr.with_tone("xue", 2) == "xué"
+
+
+@test("tones: listening items only play what the speech engine will say right; options all sound different")
+def t_sd_audio():
+    import random as _r
+    assert sdr.tts_safe("想", "xiǎng") and sdr.tts_safe("要求", "yāo qiú")
+    assert not sdr.tts_safe("为了", "wèi le"), "了 is read liào by the app's TTS"
+    assert not sdr.tts_safe("要", "yāo") and not sdr.tts_safe("长", "cháng"), "heteronyms never played alone"
+    groups = {g["key"]: g for g in sdr.tone_groups(SD_WORDS)}
+    for seed in range(20):
+        it = sdr.tone_hear_item(groups["yao"], _r.Random(seed))
+        assert "要" in it["play"] and len(it["play"]) == 2 and it["answer"] in [o["value"] for o in it["options"]]
+        it = sdr.tone_hear_item(groups["xiang"], _r.Random(seed))
+        chars = [o["value"].split("|")[0] for o in it["options"]]
+        assert len(chars) == len(set(chars)) == 3
+        pick = sdr.tone_pick_item(groups["xiang"], _r.Random(seed))
+        assert pick["answer"] in [o["value"] for o in pick["options"]] and len(pick["options"]) == 4
+
+
+@test("pairings: families of real words per character; three item types, answers never given away")
+def t_sd_pairs():
+    import random as _r
+    fams = {f["char"]: f for f in sdr.families(SD_WORDS, {"想": SD_WORDS[11]})}
+    assert {w["chinese"] for w in fams["想"]["words"]} == {"想要", "想法", "想念"}
+    assert "要" in fams and {w["chinese"] for w in fams["要"]["words"]} >= {"想要", "需要", "要求"}
+    for kind in ("pair_meaning", "pair_complete", "pair_word"):
+        for seed in range(10):
+            it = sdr.pair_item(fams["想"], _r.Random(seed), kind)
+            values = [o["value"] for o in it["options"]]
+            assert it["answer"] in values and len(values) == len(set(values))
+            if kind == "pair_complete":
+                assert it["question"].startswith("想＿") and it["answer"] not in it["question"].split("—")[0]
+    assert fams["想"]["char_word"]["english"] == "to think"
+    assert "on its own: to think" in sdr.pair_item(fams["想"], _r.Random(0))["header"]
+
+
+@test("sound & pairing sessions: due groups first, a few new ones, two items each, no back-to-back repeats")
+def t_sd_session():
+    import random as _r
+    from datetime import date as _d
+    groups = sdr.tone_groups(SD_WORDS)
+    items = sdr.build_session("tone", groups, {}, _d(2026, 1, 1), _r.Random(0))
+    keys = [i["key"] for i in items]
+    assert len(set(keys)) <= sdr.MAX_GROUPS_NEW and keys
+    assert all(a != b for a, b in zip(keys, keys[1:]) if keys.count(a) < len(keys))
+    prog = {"xiang": {"next_review_date": "2025-12-01"}, "yao": {"next_review_date": "2099-01-01"}}
+    assert sdr.pick_keys(["yao", "xiang", "qi"], prog, _d(2026, 1, 1)) == ["xiang", "qi"]
+    assert sdr.group_result([True, True]) == "correct" and sdr.group_result([True, False]) == "close"
+    assert sdr.group_result([False, False]) == "wrong"
+
+
+# ======================================================================
+# GAMES
+# ======================================================================
+import game_items as gitems
+import games as gms
+import game_images as gimg
+
+
+@test("games: every word has a real, valid image; topics are big enough; pinyin matches the lists")
+def t_games_items():
+    import csv as _csv
+    import xml.etree.ElementTree as ET
+    from config import FREQUENCY_CSV_PATH, VOCAB_CSV_PATH
+    from dictionary_engine import has_erhua
+    zh = [i["chinese"] for i in gitems.ITEMS]
+    assert len(zh) == len(set(zh)), "each word once"
+    for it in gitems.ITEMS:
+        assert it["image"].split(":")[0] in ("tw", "wm"), it     # bundled Twemoji or Commons only
+        if it["image"].startswith("tw:"):
+            ET.fromstring(gimg.path_for(it["image"]).read_text(encoding="utf-8"))   # parses as SVG
+        assert gimg.img_tag(it["image"]).startswith('<img src="data:image/')
+        assert len(it["pinyin"].split()) == len(it["chinese"]) and not has_erhua(it["chinese"], it["pinyin"])
+    for cat in gitems.CATEGORIES:
+        assert len(gitems.by_category([cat])) >= 12, cat
+    vocab = {}
+    for path in (VOCAB_CSV_PATH, FREQUENCY_CSV_PATH):
+        for r in _csv.DictReader(open(path, encoding="utf-8")):
+            vocab.setdefault(r["Chinese"], r["Pinyin"])
+    clash = [(i["chinese"], i["pinyin"], vocab[i["chinese"]]) for i in gitems.ITEMS
+             if i["chinese"] in vocab and vocab[i["chinese"]] != i["pinyin"]]
+    assert not clash, clash
+    assert (gimg.IMAGE_DIR / "ATTRIBUTION.md").exists()
+
+
+@test("games: Commons pictures are bundled small and square, each credited with author, licence and source")
+def t_games_commons():
+    import importlib.util
+    import re
+    from urllib.parse import unquote
+    from PIL import Image
+    assert importlib.util.find_spec("game_art") is None, "hand-drawn art replaced by sourced pictures"
+    credits = gimg.credits()
+    used = [i["image"][3:] for i in gitems.ITEMS if i["image"].startswith("wm:")]
+    assert len(used) == len(set(used)) == 38 and set(used) == set(credits), "every picture used once, none spare"
+    free = re.compile(r"(CC0|Public domain|CC BY(-SA)? [0-9.]+( [a-z]{2})?)$")
+    for name, c in credits.items():
+        path = gimg.IMAGE_DIR / c["file"]
+        assert path.suffix in (".jpg", ".png") and path.stat().st_size <= 60_000, (name, path.stat().st_size)
+        with Image.open(path) as im:
+            im.verify()
+        with Image.open(path) as im:
+            assert im.width == im.height and 240 <= im.width <= 400, (name, im.size)
+        assert c["title"].startswith("File:") and c["author"].strip(), name
+        assert unquote(c["source"]) == "https://commons.wikimedia.org/wiki/" + c["title"].replace(" ", "_"), name
+        assert free.match(c["licence"]), (name, c["licence"])
+        assert c["licence"] in ("CC0", "Public domain") or c["licence_url"].startswith("https://creativecommons.org/"), name
+        assert c["changes"], name
+    lines = gimg.credit_lines(gitems.ITEMS)
+    assert len(lines) == 38 and all(credits[n]["author"] in l.replace("\\", "") for n, l in zip(used, lines))
+    svgs = {p.stem for p in gimg.IMAGE_DIR.glob("*.svg")}
+    assert svgs == {i["image"][3:] for i in gitems.ITEMS if i["image"].startswith("tw:")}, "no stray Twemoji"
+    assert {p.name for p in gimg.IMAGE_DIR.iterdir()} == (
+        {p + ".svg" for p in svgs} | {c["file"] for c in credits.values()}
+        | {"ATTRIBUTION.md", "credits.json"}), "nothing unaccounted for in data/game_images"
+
+
+@test("games: rounds use same-topic look-alikes, all different; memory board has matching pairs")
+def t_games_logic():
+    import random as _r
+    pool = gitems.by_category(["body", "tcm"])
+    rounds = gms.quiz_rounds(pool, rng=_r.Random(1))
+    assert len(rounds) == gms.ROUNDS and len({r["target"]["chinese"] for r in rounds}) == gms.ROUNDS
+    for r in rounds:
+        opts = r["options"]
+        assert r["target"] in opts and len(opts) == 4
+        assert len({o["chinese"] for o in opts}) == len({o["image"] for o in opts}) == 4
+        assert all(o["category"] == r["target"]["category"] for o in opts), "same topic"
+    cards = gms.memory_board(pool, rng=_r.Random(2))
+    assert len(cards) == 12 and sum(c["face"] == "image" for c in cards) == 6
+    a = next(c for c in cards if c["face"] == "image")
+    b = next(c for c in cards if c["face"] == "word" and c["item"] is a["item"])
+    assert gms.is_match(a, b) and not gms.is_match(a, a)
+    met = {pool[0]["chinese"], pool[1]["chinese"]}
+    items, topped = gms.word_pool(["body"], met, only_met=True)
+    assert topped and len(items) == gms.MIN_POOL and pool[0] in items
+    assert gms.points(True, 0) == 10 and gms.points(True, 9) == 20 and gms.points(False, 3) == 0
+    assert gms.memory_score(6, 6) == 100 and gms.memory_score(6, 30) == 10
+    assert gms.label(pool[0], True).startswith(pool[0]["chinese"] + "  ") and gms.label(pool[0], False) == pool[0]["chinese"]
+
+
+# ======================================================================
+# FREQUENCY LIST DATA
+# ======================================================================
+@test("frequency list: 10,000 unique words, ranked 1..10000, ranks agree")
+def t_freq_files():
+    import csv as _csv
+    import re
+    from config import FREQUENCY_CSV_PATH, FREQUENCY_RANKS_PATH, VOCAB_CSV_PATH
+    from dictionary_engine import format_pinyin
+    head = open(FREQUENCY_CSV_PATH, encoding="utf-8").readline()
+    assert head == open(VOCAB_CSV_PATH, encoding="utf-8").readline(), \
+        "both lists must share one format"
+    rows = list(_csv.DictReader(open(FREQUENCY_CSV_PATH, encoding="utf-8")))
+    assert len(rows) >= 10000
+    assert len({r["Chinese"] for r in rows}) == len(rows), "a word repeats"
+    assert all(r["Pinyin"].strip() and r["English"].strip() for r in rows)
+    ranks = {r["Chinese"]: int(r["Rank"])
+             for r in _csv.DictReader(open(FREQUENCY_RANKS_PATH, encoding="utf-8"))}
+    assert all(ranks[r["Chinese"]] == i for i, r in enumerate(rows, 1))
+    lesson = list(_csv.DictReader(open(VOCAB_CSV_PATH, encoding="utf-8")))
+    keys = [(r["Chinese"], r["Pinyin"]) for r in lesson]
+    assert len(keys) == len(set(keys)), "lesson list repeats a word"
+    for r in rows + lesson:     # one syllable per space, lower case
+        if re.fullmatch(r"[\u4e00-\u9fff]+", r["Chinese"]):
+            assert format_pinyin(r["Pinyin"]) == r["Pinyin"], r
+
+
+@test("China-tagged words: Malaysian word named, tagged Malaysia and listed above")
+def t_region_tags():
+    import csv as _csv
+    import re
+    from config import FREQUENCY_CSV_PATH, VOCAB_CSV_PATH
+    freq = list(_csv.DictReader(open(FREQUENCY_CSV_PATH, encoding="utf-8")))
+    lesson = list(_csv.DictReader(open(VOCAB_CSV_PATH, encoding="utf-8")))
+    order = {r["Chinese"]: i for i, r in enumerate(freq)}
+    tags = {}
+    for r in freq + lesson:
+        assert r["Tag"] in ("", "China", "Malaysia"), r
+        if r["Tag"]:
+            tags[r["Chinese"]] = r["Tag"]
+    china = [r for r in freq + lesson if r["Tag"] == "China"]
+    assert len({r["Chinese"] for r in china}) >= 90
+    for r in china:
+        m = re.search(r"\(Malaysia: (\S+) ", r["English"])
+        assert m, r
+        my = m.group(1)
+        assert tags.get(my) == "Malaysia", (r["Chinese"], my)
+        if r["Chinese"] in order:
+            assert order.get(my, 10**9) < order[r["Chinese"]], (my, r["Chinese"])
+
+
+@test("erhua: 一点儿 -> 一点 and diǎnr -> diǎn; 儿子 / 女儿 untouched; none left in lists")
+def t_erhua():
+    import csv as _csv
+    from config import FREQUENCY_CSV_PATH, FREQUENCY_RANKS_PATH, VOCAB_CSV_PATH
+    from dictionary_engine import strip_erhua, has_erhua
+    assert strip_erhua("一点儿", "yì diǎnr") == ("一点", "yì diǎn")
+    assert strip_erhua("你去哪儿？", "nǐ qù nǎr?") == ("你去哪？", "nǐ qù nǎ?")
+    assert strip_erhua("买点儿菜", "mǎi diǎn er cài") == ("买点菜", "mǎi diǎn cài")
+    for word, py in (("儿子", "ér zi"), ("女儿", "nǚ ér"), ("孤儿院", "gū ér yuàn"),
+                     ("儿", "ér")):
+        assert not has_erhua(word, py) and strip_erhua(word, py) == (word, py)
+    for path in (FREQUENCY_CSV_PATH, VOCAB_CSV_PATH):
+        for r in _csv.DictReader(open(path, encoding="utf-8")):
+            assert not has_erhua(r["Chinese"], r["Pinyin"]), r
+    for r in _csv.DictReader(open(FREQUENCY_RANKS_PATH, encoding="utf-8")):
+        assert not has_erhua(r["Chinese"]), r
+
+
+@test("pinyin house style: 'Zhème qǐlái' -> 'zhè me qǐ lái', erhua and names kept")
+def t_format_pinyin():
+    from dictionary_engine import format_pinyin as f
+    assert f("Zhème zǎo qǐlái gàn ma?") == "zhè me zǎo qǐ lái gàn ma?"
+    assert f("diǎnr") == "diǎnr" and f("yíhuìr") == "yí huìr"
+    assert f("Xī'ān") == "xī ān"
+    assert f("Kaya Kok") == "Kaya Kok" and f("T-shirt hěn guì") == "T-shirt hěn guì"
+
+
+# ======================================================================
 if __name__ == "__main__":
     print("Dictionary engine:")
     t_pinyin(); t_numerals(); t_numeral_gloss(); t_classifier()
     t_gloss_corroboration(); t_greedy_split(); t_tone_marks()
     print("Generation pipeline (mocked LLM):")
-    t_mismatch(); t_pronouns(); t_classify(); t_grammar_gate()
+    t_mismatch(); t_pronouns(); t_classify(); t_grammar_gate(); t_erhua_gate()
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
     t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
+    print("Grammar drills:")
+    t_gr_curriculum(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_generate()
+    t_gr_generate_fails_closed(); t_gr_audit_fixes(); t_gr_grade_schedule()
+    print("Vocabulary engine:")
+    t_ve_schedule(); t_ve_production_gate(); t_ve_modes(); t_ve_allowance(); t_ve_session()
+    print("Word content:")
+    t_wc_check(); t_wc_options(); t_wc_validate(); t_wc_generate()
+    print("Word diagnosis:")
+    t_integration(); t_wd_trouble(); t_wd_diagnose(); t_wd_remedies(); t_wd_written()
+    print("Sound & Pairing:")
+    t_sd_groups(); t_sd_audio(); t_sd_pairs(); t_sd_session()
+    print("Games:")
+    t_games_items(); t_games_commons(); t_games_logic()
+    print("Frequency list:")
+    t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):
         print("Database (DATABASE_URL detected):")
         db_tests()

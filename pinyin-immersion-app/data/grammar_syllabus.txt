@@ -1,0 +1,811 @@
+# The grammar syllabus as supplied, one line per item. run_tests.py checks that
+# every line here is mapped to a drill in grammar_curriculum.LISTED.
+## 1
+Basic S + V + O word order
+Subject + Time + Place + Verb + Object
+Time expressions before the verb
+Place expressions before the verb
+Topic + Comment sentences
+Subject omission when context is clear
+Object omission when context is clear
+是…… — identification / "to be"
+有…… — existence / possession
+没有…… — non-existence / possession
+是不是…… — confirmation
+的 — possession / attribution
+的 — nominalisation
+的 — emphasis / explanatory use
+的 / 得 / 地 distinction
+Adjective as predicate
+很 + adjective
+Adjective + 的 + noun
+Adverb + verb
+Modal verb + verb
+Double-object constructions
+Verb + object + location
+Verb + object + quantity
+## 2
+不 — general/present/future negation
+没 / 没有 — past/non-occurrence/absence
+不 vs 没
+别 — negative imperative
+不要 — don't / should not
+从来不…… — never
+从来没…… — have never
+一点也不…… — not at all
+什么都不…… — don't do/eat/etc. anything
+谁都不…… — nobody…
+哪儿都不…… — nowhere…
+怎么也不…… — no matter how…not…
+## 3
+吗 — yes/no questions
+呢 — follow-up / "what about…?" / ongoing question
+A-not-A questions
+是不是……？
+有没有……？
+V 不 V？
+谁 — who
+什么 — what
+哪个 — which
+哪儿 / 哪里 — where
+什么时候 — when
+为什么 — why
+怎么 — how
+怎么样 — how / what is it like
+几 — how many
+多少 — how much/many
+多 + adjective — how + adjective
+多久 — how long
+多长时间 — how long
+多大 — how old/how big
+几点 — what time
+哪一种 / 什么样的 — what kind of
+Question-word position in Chinese
+Question words as indefinite words
+## 4
+General measure word 个
+Common measure words: 本、张、件、杯、瓶、只、条、辆、台、家、间、位、名、次、遍
+Number + measure word + noun
+这/那 + measure word + noun
+几 + measure word
+多少 + measure word
+一点儿
+一些
+好几个
+几个
+多 + measure word
+数量 + 的 + noun
+一共…… — altogether
+大约 / 大概…… — approximately
+差不多…… — approximately/almost
+左右 — approximately
+多 / 少 + adjective
+比较 + adjective
+最 + adjective
+## 5
+Verb + 了 — completed/relevant event
+Sentence-final 了 — change of state
+Verb + 了 + object + 了
+了 with duration
+了 with quantity
+Negative forms involving 了
+了 vs 没
+了 vs 过
+了 vs 在
+了 vs 着
+V + 过 — past experience
+没 + V + 过
+V + 过 + quantity
+过 vs 了
+过 vs experience without explicit marker
+在 + V
+正在 + V
+正 + V
+正在……呢
+V + 着
+着 — continuing state
+在 vs 正在
+在/正在 vs 着
+要……了
+快……了
+快要……了
+就要……了
+马上……了
+就要……了 vs 快要……了
+已经……了
+还没……
+还没有……
+已经……了，还……
+还…… — still
+又…… — again/already
+再…… — again/in future
+## 6
+Time phrase + sentence
+Time duration
+Point in time vs duration
+……的时候 — when/while
+……以前 — before
+……以后 — after
+……之前 — before
+……之后 — after
+……以前/以后 + noun/verb
+从……到…… — from…to…
+从……开始 — from/beginning
+到……为止 — until
+一直…… — continuously
+刚…… — just
+刚才…… — just now
+刚刚…… — just
+马上…… — immediately
+先…… — first
+再…… — then/again
+然后…… — then
+最后…… — finally
+同时…… — simultaneously
+当……的时候…… — when…
+## 7
+V + 了 + duration
+V + O + V + duration
+V + duration + O
+Duration + 的 + noun
+次 — number of occurrences
+遍 — number of complete repetitions
+次 vs 遍
+每…… — every
+每次……都……
+一共……次
+……几次
+V + 一下
+V + 一会儿
+Verb reduplication: 看看、试试、想想
+One-syllable reduplication: AA
+Two-syllable reduplication: ABAB
+Adjective reduplication: 好好、慢慢、早早
+一下 vs 一会儿
+## 8
+想 — want/intend
+要 — want/need/about to
+想要 — want
+会 — know how to / likely to
+能 — ability/circumstances
+可以 — permission/possibility
+会 vs 能 vs 可以
+应该 — should/probably
+得 — must/have to
+必须 — must
+需要 — need
+愿意 — be willing
+敢 — dare
+肯 — be willing
+可能 — may/possibly
+一定 — certainly/must
+应该 vs 一定 vs 可能
+## 9
+V + 完 — finish
+V + 好 — successfully complete
+V + 到 — reach/find
+V + 见 — perceive
+V + 懂 — understand
+V + 清楚 — make clear
+V + 错 — do incorrectly
+V + 对 — do correctly
+V + 开 — open/separate
+V + 光 — completely use/eat
+V + 住 — successfully hold/retain
+V + 成 — become/turn into
+V + 走 — carry away
+V + 掉 — remove/disappear
+Resultative complement negation
+Resultative complement + 了
+Resultative complement + 过
+V + 得 + complement
+V + 不 + complement
+吃得完 / 吃不完
+听得懂 / 听不懂
+看得见 / 看不见
+做得到 / 做不到
+Potential complement questions
+Potential vs 能 / 可以
+V + 得 + adjective
+V + 得 + 很 + adjective
+V + 得 + adjective + complement
+Adjective + 得不得了
+……得很
+Degree complement vs adverbial adjective
+V + 来 / 去
+V + 上 / 下 / 进 / 出 / 回 / 过
+V + directional complement + 来 / 去
+上来 / 上去
+下来 / 下去
+进来 / 进去
+出来 / 出去
+回来 / 回去
+过来 / 过去
+拿来 / 拿去
+Directional complement with objects
+Literal vs extended directional meaning
+## 10
+把 + object + verb
+把 + object + result complement
+把 + object + directional complement
+把 + object + location
+把 + object + quantity
+把 + object + V + 了
+把 + object + V + 好/完/光/etc.
+When 把 is required/natural
+When 把 cannot normally be used
+Active vs 把 construction
+## 11
+被 + agent + verb
+被 + resultative complement
+被 + directional complement
+被 + 了
+Agent omitted after 被
+让 / 叫 / 给 as passive markers
+被 vs active sentence
+被 vs 把
+Unfortunate-event passive vs neutral passive
+## 12
+是……的 — focus on completed-event circumstances
+Time focus: 是……买的
+Place focus: 是在……买的
+Manner focus: 是……去的
+Agent focus: 是……给我的
+是不是……的
+Negating 是……的
+是……的 vs 了
+是……的 vs ordinary past statement
+## 13
+A 比 B + adjective
+A 比 B + verb
+A 比 B + quantity
+比……多/少……
+比……早/晚……
+比……更……
+比……还……
+没有 A 那么…… — not as…as
+不如…… — not as good as
+跟 / 和……一样……
+跟 / 和……不一样
+像……一样……
+像……那么…… / 像……这么……
+像……似的
+比 vs 没有……那么……
+跟……一样 vs 像……一样
+越……越……
+越来越……
+越来越 + adjective
+越 V 越……
+最……
+更……
+还要……
+极了
+得不得了
+太……了
+真……啊
+好……啊
+多……啊
+## 14
+很 + adjective
+非常 + adjective
+真 + adjective
+太 + adjective
+更 + adjective
+最 + adjective
+比较 + adjective
+特别 + adjective
+挺 + adjective
+有点 / 有一点 + adjective
+一点也不……
+一点都不……
+地 — manner adverbial
+Adjective + 地 + verb
+慢慢地、认真地、仔细地 etc.
+好好 + verb
+Verb + 得 + degree
+的 vs 地 vs 得
+## 15
+因为……所以……
+由于……所以……
+因此……
+所以……
+因为……而……
+如果……就……
+要是……就……
+要……就……
+只要……就……
+只有……才……
+除非……才……
+除非……否则……
+假如……就……
+假使……就……
+虽然……但是……
+虽然……可是……
+即使……也……
+哪怕……也……
+就算……也……
+无论……都……
+不管……都……
+不论……都……
+一……就……
+一……便……
+先……再……
+然后……
+接着……
+最后……
+不但……而且……
+不仅……还……
+不但……还……
+又……又……
+既……又……
+除了……以外，还……
+还是……
+或者……
+或者……或者……
+要么……要么……
+但是……
+可是……
+不过……
+而……
+而是……
+不是……而是……
+既然……就……
+既然……那么……
+原来……
+难怪……
+果然……
+## 16
+一……就……
+才 — only then / not until / late
+就 — then / already / soon / only
+才 vs 就
+又 — again (completed/present/repeated)
+再 — again (future/additional)
+又 vs 再
+还 — still
+又……又……
+还…… — also/still
+还 vs 又
+就…… — immediate/early/emphatic
+才…… — delayed/limited
+就 vs 才 in conditional sentences
+## 17
+是……的
+连……都/也……
+甚至…… — even
+只…… — only
+只有……才……
+才…… — only/not until
+光……就…… — merely/just
+还…… — even/still
+连……都没有……
+什么都……
+谁都……
+哪儿都……
+怎么都……
+一点都……
+一点也……
+都 — all / even / already depending on context
+## 18
+除了 A 以外，其他都……
+除了 A 以外，还有 B
+除了 A 以外，也……
+除了 A 以外，没……
+除非……
+只有……
+只……
+都……
+也……
+还……
+甚至……
+## 19
+一边……一边……
+一面……一面……
+又……又……
+边……边……
+V 着 + V
+V 着 + location
+一边……一边…… vs V 着……
+一……就……
+一边……一边…… + modal verbs
+## 20
+V + 的 + noun
+Adjective + 的 + noun
+Possessive + 的 + noun
+Place + 的 + noun
+Time + 的 + noun
+谁 + V + 的人
+我买的书
+在桌子上的书
+昨天买的书
+没有……的……
+的 nominalisation
+……的东西
+……的人
+……的地方
+……的时候
+Multiple modifiers before noun
+Modifier ordering
+## 21
+在 + place
+V + 在 + place
+有 + noun + place
+Place + 有 + noun
+是 + place
+在 vs 有 vs 是
+上 / 下 / 里 / 外 / 前 / 后
+左 / 右 / 旁边 / 中间 / 附近
+离……近/远
+从……到……
+往…… — toward
+向…… — toward
+朝…… — toward
+在……上/下/里/外
+到…… — arrive/go to
+从…… — from
+对…… — toward/with respect to
+## 22
+来 / 去
+到……去
+到……来
+从……来
+往……去
+往……来
+进 / 出
+上 / 下
+回
+过
+离开
+走到……
+走进……
+走出来……
+拿进去 / 拿出来
+带来 / 带去
+带进去 / 带出来
+Movement verb + location
+Directional complement vs preposition
+## 23
+在…… — at/in
+从…… — from
+到…… — to/until
+往…… — toward
+向…… — toward
+朝…… — toward
+对…… — toward/for
+跟…… — with
+和…… — with
+给…… — to/for
+替…… — on behalf of
+为…… — for
+关于…… — regarding
+对于…… — regarding
+根据…… — according to
+按照…… — according to
+除了…… — except/besides
+关于 vs 对于
+跟/和 vs 对
+给 vs 对
+## 24
+给 + person + object
+给 + person + verb
+V + 给 + person
+替 + person + verb
+帮 + person + verb
+为 + person + verb
+对 + person + verb/adjective
+Double-object construction
+给 vs 对 vs 替 vs 帮
+## 25
+Verb + object
+Verb + person + object
+Verb + 给 + person
+Verb + 在 + location
+Verb + 到 + location
+Verb + 成 + result
+Verb + 起来
+V + 下去
+V + 上来
+V + 下来
+V + 起来 — begin/rise/come to mind
+V + 下去 — continue
+V + 出来 — emerge/figure out
+V + 起来 vs V + 下去
+连动句 — serial verb constructions
+Purpose construction: 去 + V
+去……来…… — go and come
+来……去…… — come and go
+有 + noun + verb
+是 + noun + verb
+## 26
+去 + place + V
+来 + place + V
+去 + V
+来 + V
+V + 去 + V
+V + 来 + V
+V1 + V2 — sequential actions
+V1 + location + V2
+V1 + purpose + V2
+为了…… — in order to
+为了……而……
+通过…… — through/by means of
+用…… — use/by means of
+## 27
+……的时候
+……以后
+……以前
+……之后
+……之前
+当……的时候……
+每当……就……
+一……就……
+……以后再……
+……之前先……
+只要……就……
+只有……才……
+如果……就……
+除非……否则……
+## 28
+吗
+呢
+吧
+啊 / 呀 / 哪
+哦 / 噢
+了
+的
+呢 — ongoing state/topic
+吧 — suggestion/softening/uncertainty
+啊 — emphasis/emotion
+Sentence-final 了 vs 的
+Spoken omission
+Repetition for emphasis
+Topic-comment structures
+Conversational sentence fragments
+Ellipsis after understood information
+## 29
+是…… — that's…
+不是…… — it's not…
+是不是…… — isn't it?/is it?
+对不对？ — right?
+好不好？ — okay?
+行不行？ — is that okay?
+有没有……？ — is there?/do you have?
+要不要……？ — do you want…?
+能不能……？ — can/could…?
+可不可以……？ — may/can…?
+好不好……？ — shall we…?
+……怎么样？ — how about…?
+……呢？ — what about…?
+……吧 — let's/probably…
+原来…… — it turns out…
+其实…… — actually…
+当然…… — of course…
+当然可以 — of course
+没问题 — no problem
+没关系 — it doesn't matter
+算了 — forget it
+还是…… — better to…
+还好…… — fortunately…
+幸亏…… — luckily…
+难怪…… — no wonder…
+## 30
+不 vs 没
+了 vs 过
+了 vs 着
+在 vs 正在 vs 着
+的 vs 得 vs 地
+是……的 vs 了
+会 vs 能 vs 可以
+想 vs 要
+要 vs 快要
+来 vs 去
+到 vs 在
+有 vs 是
+给 vs 对
+跟/和 vs 对
+比 vs 没有……那么……
+跟/和……一样 vs 像……一样
+一样 vs 相似
+越来越 vs 越……越……
+又 vs 再
+又 vs 还
+还 vs 再
+才 vs 就
+只 vs 才
+也 vs 都
+都 vs 全
+一点 vs 有点
+几 vs 多少
+次 vs 遍
+一下 vs 一会儿
+刚 vs 刚才
+已经 vs 过
+先 vs 再
+再 vs 然后
+只要……就…… vs 只有……才……
+因为……所以…… vs 既然……就……
+虽然……但是…… vs 即使……也……
+如果……就…… vs 只要……就……
+一……就…… vs 才……就……
+把 vs ordinary active sentence
+被 vs ordinary active sentence
+把 vs 被
+能/可以 vs 得/不得
+Resultative complement vs potential complement
+Directional complement vs ordinary location
+V + 了 vs V + 过
+V + 了 vs V + 着
+## 31
+越……越……
+越来越……
+随着…… — as/with…
+随便…… — casually/whatever
+只好…… — have no choice but
+只能…… — can only
+只得…… — have no choice but
+终于…… — finally
+总算…… — finally/at last
+果然…… — as expected
+竟然…… — unexpectedly
+居然…… — unexpectedly
+反而…… — instead/on the contrary
+甚至…… — even
+尤其…… — especially
+特别是…… — especially
+至少…… — at least
+至多…… — at most
+差点儿…… — almost
+差一点儿…… — almost
+几乎…… — almost
+幸亏 / 幸好…… — luckily
+结果…… — as a result
+因此…… — therefore
+原来…… — it turns out
+难怪…… — no wonder
+看起来…… — it looks/seems
+听起来…… — it sounds
+看来…… — apparently
+好像…… — seem/as if
+似乎…… — seem
+据说…… — reportedly
+听说…… — I hear…
+据…… — according to…
+## 32
+像……一样……
+像……似的
+像……那么……
+像……这么……
+跟……一样……
+和……一样……
+跟……差不多
+和……差不多
+不如……
+比不上……
+比……还……
+比……更……
+没有……那么……
+越……越……
+越来越……
+与其……不如……
+宁可……也不……
+宁愿……也不……
+## 33
+只要……就……
+只有……才……
+如果……就……
+要是……就……
+假如……就……
+除非……否则……
+除非……才……
+无论……都……
+不管……都……
+不论……都……
+即使……也……
+哪怕……也……
+就算……也……
+即便……也……
+哪怕……也……
+无论……还是……
+不管……还是……
+## 34
+一……就……
+越……越……
+越来越……
+又……又……
+一边……一边……
+一面……一面……
+既……又……
+不但……而且……
+不仅……还……
+虽然……但是……
+因为……所以……
+既然……就……
+只要……就……
+只有……才……
+如果……就……
+无论……都……
+即使……也……
+除了……以外……
+不是……而是……
+与其……不如……
+宁可……也……
+一方面……另一方面……
+## 35
+Topic fronting
+Topic-comment sentences
+Omitted subjects
+Omitted objects
+Omitted repeated information
+Context-dependent pronouns
+Short answer patterns
+Repetition for emphasis
+Verb reduplication
+Adjective reduplication
+Echo questions
+A-not-A questions
+Rhetorical questions
+Sentence-final particles
+Softened commands
+Suggestions with 吧
+Confirmation with 对不对 / 是不是
+想……就…… — if you want…then…
+要……就…… — if you want/need…then…
+不……就…… — if not…then…
+……的话…… — if…
+要是……的话……
+如果……的话……
+……的时候……
+……的时候就……
+……以后再……
+……以前先……
+## 36
+Basic word order
+的
+不 / 没
+在 / 正在
+了
+过
+着
+Question words
+吗 / A-not-A
+Measure words
+Duration
+Frequency
+Modal verbs
+Resultative complements
+Potential complements
+Directional complements
+比
+没有……那么……
+跟/和……一样
+像……一样
+越……越……
+越来越……
+把
+被
+是……的
+才 / 就
+又 / 再
+还 / 又
+只要……就……
+只有……才……
+如果……就……
+一……就……
+因为……所以……
+既然……就……
+虽然……但是……
+即使……也……
+无论……都……
+除了……以外……
+连……都/也……
+一边……一边……
+不但……而且……
+不是……而是……
+对……来说……
+Relative clauses with 的
+Prepositional phrases
+Serial verbs
+Verb reduplication
+Sentence-final particles
+Spoken ellipsis
+Topic-comment structures

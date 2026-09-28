@@ -12,6 +12,11 @@ BASE_DIR = SRC_DIR.parent
 
 DATA_DIR = BASE_DIR / "data"
 VOCAB_CSV_PATH = DATA_DIR / "vocab_export.csv"
+# The 10,000 most common words (SUBTLEX-CH film/TV subtitle corpus, Cai &
+# Brysbaert 2010), ranked by how many films each appears in. The ranks file
+# covers ~44,000 words so anything you add to vocab_export.csv gets a rank.
+FREQUENCY_CSV_PATH = DATA_DIR / "frequency_words.csv"
+FREQUENCY_RANKS_PATH = DATA_DIR / "frequency_ranks.csv"
 DB_PATH = DATA_DIR / "user_progress.db"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -95,3 +100,37 @@ PRECISION_RELAPSE = 2    # clean-writes forfeited when you fail a character
 EASY_MULTIPLIER = 2.5
 GOOD_MULTIPLIER = 1.5
 HARD_MULTIPLIER = 1.2
+
+
+# ==========================================
+# GRAMMAR DRILLS
+# ==========================================
+# A word counts as "well studied" for grammar drills once it has been
+# reviewed this many times and isn't currently failed (interval >= 1).
+GRAMMAR_KNOWN_MIN_REVIEWS = 3
+GRAMMAR_KNOWN_MIN_INTERVAL = 1
+# Below this many well-studied words, anything reviewed at least once counts.
+GRAMMAR_KNOWN_FLOOR = 60
+# Cap on words passed to the drill writer (best-known first).
+GRAMMAR_VOCAB_CAP = 700
+# New grammar structures introduced per day.
+GRAMMAR_NEW_PER_DAY = 2
+# A stored drill set is replaced once your well-studied vocabulary has
+# grown by this fraction since it was written.
+GRAMMAR_REFRESH_GROWTH = 0.25
+
+
+# ==========================================
+# VOCABULARY LEARNING ENGINE
+# ==========================================
+# New words introduced per session / per day (the second is a hard ceiling).
+VOCAB_NEW_PER_SESSION = 5
+VOCAB_NEW_PER_DAY = 10
+# Once this many reviews are due, new words shrink; at twice this, none.
+VOCAB_BACKLOG_SOFT = 40
+# Reviews per session (recognition and production together).
+VOCAB_SESSION_REVIEWS = 25
+# Words whose production practice may start in one session.
+VOCAB_UNLOCKS_PER_SESSION = 4
+# Share of new words drawn from your lesson list (the rest follow frequency).
+VOCAB_LESSON_SHARE = 0.4

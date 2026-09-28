@@ -82,7 +82,7 @@ if focus:
                + " ".join(focus[:10]))
 
 col1, col2 = st.columns(2)
-if col1.button("📖 Next sentence", type="primary", use_container_width=True):
+if col1.button("📖 Next sentence", type="primary", width="stretch"):
     pool = db.reading_bank_for(USER_ID, known, max_unknown, limit=30,
                                focus=focus)
     current = st.session_state.get("reading_current")
@@ -115,7 +115,7 @@ if col1.button("📖 Next sentence", type="primary", use_container_width=True):
 
 topic = col2.text_input("Topic (optional)", placeholder="food, weather…")
 
-if st.button("✨ Write me a new one", use_container_width=True):
+if st.button("✨ Write me a new one", width="stretch"):
     st.session_state.reading_current = "GENERATE"
     st.rerun()
 
@@ -185,7 +185,7 @@ if isinstance(card, dict):
                                           key=f"rev_{card.get('id')}_{pos}"):
                 st.session_state.reading_revealed.add(pos)
                 st.rerun()
-        if st.button("Show all pinyin", use_container_width=True):
+        if st.button("Show all pinyin", width="stretch"):
             st.session_state.reading_revealed = set(range(len(ann)))
             st.rerun()
 

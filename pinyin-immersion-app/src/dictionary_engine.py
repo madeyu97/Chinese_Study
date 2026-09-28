@@ -11,6 +11,7 @@ otherwise the dictionary wins. This permanently removes the entire class of
 
 import logging
 import re
+import unicodedata
 import threading
 
 from pypinyin import pinyin as _pypinyin, Style as _PinyinStyle
@@ -486,3 +487,130 @@ def frequency_label(rank):
     if rank <= 3000:
         return f"#{rank}"
     return f"#{rank} - uncommon"
+
+
+# ======================================================================
+# PINYIN FORMATTING — one syllable per space, lower case ("Qǐlái" -> "qǐ lái"),
+# the house style of both vocabulary lists.
+# ======================================================================
+_COMBINING_TONES = {"\u0304", "\u0301", "\u030c", "\u0300"}      # ā á ǎ à
+_PY_TOKEN = re.compile(r"[A-Za-zÜüĀÁǍÀĒÉĚÈĪÍǏÌŌÓǑÒŪÚǓÙǕǗǙǛāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňǹḿ]+")
+_PY_BASES = None
+
+
+def _strip_tones(s):
+    decomposed = unicodedata.normalize("NFD", s)
+    return unicodedata.normalize(
+        "NFC", "".join(c for c in decomposed if c not in _COMBINING_TONES))
+
+
+def _tone_count(s):
+    return sum(1 for c in unicodedata.normalize("NFD", s) if c in _COMBINING_TONES)
+
+
+def _pinyin_bases():
+    global _PY_BASES
+    if _PY_BASES is None:
+        from pypinyin.pinyin_dict import pinyin_dict
+        bases = set()
+        for readings in pinyin_dict.values():
+            for r in readings.split(","):
+                bases.add(_strip_tones(r))
+        _PY_BASES = bases | {"r"}
+    return _PY_BASES
+
+
+def _split_syllables(word):
+    """Fewest-syllable split of one run of pinyin letters, or None."""
+    bases, n = _pinyin_bases(), len(word)
+    best = {n: []}
+    for i in range(n - 1, -1, -1):
+        options = []
+        for j in range(min(n, i + 6), i, -1):
+            piece = word[i:j]
+            if (j in best and _strip_tones(piece) in bases
+                    and _tone_count(piece) <= 1):
+                options.append([piece] + best[j])
+        if options:
+            best[i] = min(options, key=len)
+    return best.get(0)
+
+
+def format_pinyin(text):
+    """Re-space pinyin one syllable at a time and lower-case it. Runs that
+    aren't pinyin (English words, Malaysian particles) are left as written."""
+    def fix(m):
+        token = unicodedata.normalize("NFC", m.group(0))
+        if _tone_count(token) == 0 and token != token.lower():
+            return token              # a toneless capitalised word: a name
+        parts = _split_syllables(token.lower())
+        if not parts:
+            return token
+        merged = []
+        for part in parts:            # keep erhua on its syllable: diǎnr
+            if part == "r" and merged:
+                merged[-1] += "r"
+            else:
+                merged.append(part)
+        return " ".join(merged)
+    text = unicodedata.normalize("NFC", str(text))
+    text = re.sub(r"(?<=\w)['’](?=\w)", " ", text)     # xī'ān -> xī ān
+    out = _PY_TOKEN.sub(fix, text)
+    return re.sub(r"\s+", " ", out).strip()
+
+
+# ======================================================================
+# ERHUA — the Beijing 儿 suffix (一点儿 yì diǎnr). Malaysian Mandarin never
+# uses it, so it is stripped from vocabulary and rejected in new sentences.
+# 儿 as a syllable of its own (儿子 ér zi, 女儿 nǚ ér) is a real word, kept.
+# ======================================================================
+REAL_ER_WORDS = (
+    "儿子", "女儿", "婴儿", "儿童", "幼儿", "孤儿", "胎儿", "儿时", "儿女", "儿媳",
+    "男儿", "健儿", "宠儿", "侄儿", "孙儿", "新生儿", "早产儿", "混血儿", "患儿",
+    "育儿", "托儿所", "儿科", "儿歌", "儿戏", "儿孙", "婴幼儿", "少儿", "儿郎",
+)
+_ER_SYLLABLE = re.compile(r"^[eēéěè]r$")
+
+
+def _erhua_positions(chinese):
+    """Indexes of 儿 characters that are the erhua suffix, not a syllable."""
+    text = str(chinese)
+    protected = set()
+    for word in REAL_ER_WORDS:
+        start = text.find(word)
+        while start != -1:
+            protected.update(range(start, start + len(word)))
+            start = text.find(word, start + 1)
+    return [i for i, ch in enumerate(text)
+            if ch == "儿" and i > 0 and i not in protected
+            and "\u4e00" <= text[i - 1] <= "\u9fff"]
+
+
+def _erhua_syllable(syl):
+    base = _strip_tones(syl.lower())
+    return (base.endswith("r") and len(base) > 1 and not _ER_SYLLABLE.match(syl.lower())
+            and base[:-1] in _pinyin_bases())
+
+
+def has_erhua(chinese, pinyin=""):
+    if _erhua_positions(chinese):
+        return True
+    return any(_erhua_syllable(s) for s in _PY_TOKEN.findall(str(pinyin)))
+
+
+def strip_erhua(chinese, pinyin):
+    """('一点儿', 'yì diǎnr') -> ('一点', 'yì diǎn'). Leaves 儿子/女儿 alone."""
+    text = str(chinese)
+    drop = set(_erhua_positions(text))
+    text = "".join(ch for i, ch in enumerate(text) if i not in drop)
+
+    def fix(m):
+        syl = m.group(0)
+        if _erhua_syllable(syl):
+            return syl[:-1]
+        if drop and syl.lower() == "er":   # suffix 儿 spelled as a toneless 'er'
+            return ""
+        return syl
+    py = _PY_TOKEN.sub(fix, unicodedata.normalize("NFC", str(pinyin)))
+    py = re.sub(r"\s+([,.!?;:])", r"\1", re.sub(r"\s+", " ", py)).strip()
+    return text, py

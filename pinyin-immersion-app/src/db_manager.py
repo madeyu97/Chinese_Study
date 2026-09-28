@@ -1,7 +1,10 @@
 # src/db_manager.py
 
 import os
+import re
+import json
 import hashlib
+import unicodedata
 import threading
 import pandas as pd
 from datetime import datetime, date
@@ -14,6 +17,8 @@ import streamlit as st
 from config import (
     PRECISION_RELAPSE,
     VOCAB_CSV_PATH,
+    FREQUENCY_CSV_PATH,
+    FREQUENCY_RANKS_PATH,
     MAX_REVIEWS_PER_DAY,
     NEW_WORDS_PER_DAY,
     RANDOM_BREADTH_PCT,
@@ -22,7 +27,8 @@ from handwriting_engine import (precision_for, precision_level,
                                 score_character, get_stroke_count,
                                 compute_next_review, choose_context_word)
 from dictionary_engine import (derive_pinyin, cedict_gloss,
-                               character_info, frequency_label)
+                               character_info, frequency_label,
+                               has_erhua, strip_erhua)
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -87,7 +93,7 @@ def _get_pool():
         with _POOL_LOCK:
             if _POOL is None:
                 _POOL = pool.ThreadedConnectionPool(
-                    minconn=1, maxconn=5, dsn=_database_url())
+                    minconn=1, maxconn=10, dsn=_database_url())
     return _POOL
 
 
@@ -105,8 +111,14 @@ def reset_pool():
 
 
 def get_connection():
-    """Borrow a connection from the pool, reconnecting if it has gone stale."""
-    for attempt in (1, 2):
+    """Borrow a connection from the pool, reconnecting if it has gone stale.
+
+    A pool that is merely busy (every connection lent out - background
+    content preparation plus two learners can do that) is waited on, never
+    reset: resetting would close connections other threads are still using."""
+    import time
+    busy_waits, resets = 0, 0
+    while True:
         try:
             p = _get_pool()
             raw = p.getconn()
@@ -114,8 +126,14 @@ def get_connection():
                 p.putconn(raw, close=True)
                 raise psycopg2.OperationalError("stale pooled connection")
             return _PooledConnection(p, raw)
+        except pool.PoolError:
+            busy_waits += 1
+            if busy_waits > 100:                     # ~10 s of genuine exhaustion
+                raise
+            time.sleep(0.1)
         except Exception as e:
-            if attempt == 2:
+            resets += 1
+            if resets > 1:
                 raise
             logging.warning(f"[DB] pool reset after: {e}")
             reset_pool()
@@ -162,6 +180,150 @@ def init_db():
     cursor.execute('''
         CREATE UNIQUE INDEX IF NOT EXISTS idx_vocab_unique
         ON vocab (chinese, pinyin)
+    ''')
+    # Every word carries its rank in the frequency list (NULL = not in it),
+    # and words from your own lesson list are marked, so the lesson-based
+    # session modes keep drawing only from them. Everything already in the
+    # table when this column first appears came from your lessons.
+    cursor.execute("""SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'vocab' AND column_name = 'from_lessons'""")
+    had_lesson_flag = cursor.fetchone() is not None
+    cursor.execute("ALTER TABLE vocab ADD COLUMN IF NOT EXISTS freq_rank INTEGER")
+    cursor.execute("ALTER TABLE vocab ADD COLUMN IF NOT EXISTS "
+                   "from_lessons BOOLEAN DEFAULT FALSE")
+    if not had_lesson_flag:
+        cursor.execute("UPDATE vocab SET from_lessons = TRUE")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_vocab_freq ON vocab (freq_rank)")
+    # 'Malaysia' = the word Malaysians use; 'China' = mainland usage, with the
+    # Malaysian word named in its meaning. Blank for everything shared.
+    cursor.execute("ALTER TABLE vocab ADD COLUMN IF NOT EXISTS tag TEXT")
+    # Grammar drills: per-learner spaced repetition for each structure, and the
+    # drill sets written for them (kept so a set can be reused, then replaced
+    # as the learner's vocabulary grows).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS grammar_progress (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            structure_id TEXT NOT NULL,
+            next_review_date TEXT,
+            interval INTEGER DEFAULT 0,
+            ease_factor REAL DEFAULT 2.5,
+            review_count INTEGER DEFAULT 0,
+            last_score REAL,
+            first_seen TEXT,
+            last_seen TEXT,
+            PRIMARY KEY (user_id, structure_id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS grammar_drill_sets (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            structure_id TEXT NOT NULL,
+            known_count INTEGER DEFAULT 0,
+            payload TEXT NOT NULL,
+            served_count INTEGER DEFAULT 0,
+            last_served TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_grammar_sets "
+                   "ON grammar_drill_sets (user_id, structure_id)")
+    # Vocabulary engine: separate recognition and production schedules per
+    # word, and a log of every retrieval (mode, result, what went wrong) that
+    # the diagnosis of repeatedly missed words reads.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS word_skill (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            vocab_id INTEGER NOT NULL REFERENCES vocab(id) ON DELETE CASCADE,
+            skill TEXT NOT NULL,
+            interval INTEGER DEFAULT 0,
+            ease REAL DEFAULT 2.5,
+            next_review_date TEXT,
+            reps INTEGER DEFAULT 0,
+            lapses INTEGER DEFAULT 0,
+            streak INTEGER DEFAULT 0,
+            last_mode TEXT,
+            last_result TEXT,
+            introduced_on TEXT,
+            PRIMARY KEY (user_id, vocab_id, skill)
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_word_skill_due "
+                   "ON word_skill (user_id, skill, next_review_date)")
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS word_attempts (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            vocab_id INTEGER NOT NULL REFERENCES vocab(id) ON DELETE CASCADE,
+            skill TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            result TEXT NOT NULL,
+            detail JSONB,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_word_attempts "
+                   "ON word_attempts (user_id, vocab_id, created_at)")
+    # What each word is learned through (chunks, sentences, confusables,
+    # prompts), written per learner from the words they know.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS word_content (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            vocab_id INTEGER NOT NULL REFERENCES vocab(id) ON DELETE CASCADE,
+            known_count INTEGER DEFAULT 0,
+            payload TEXT NOT NULL,
+            uses INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_word_content "
+                   "ON word_content (user_id, vocab_id)")
+    # Why a word keeps being missed, the remedy built for it, and the
+    # learner's own memory hook; resolved once the word holds again.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS word_diagnosis (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            vocab_id INTEGER NOT NULL REFERENCES vocab(id) ON DELETE CASCADE,
+            skill TEXT NOT NULL,
+            cause TEXT NOT NULL,
+            evidence JSONB,
+            confused_with TEXT,
+            remedy JSONB,
+            note TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            resolved_at TIMESTAMP
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_word_diagnosis "
+                   "ON word_diagnosis (user_id, vocab_id) WHERE resolved_at IS NULL")
+    # Sound & Pairing drills: a spaced schedule per tone group (syllable) and
+    # per character family.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS drill_progress (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            drill TEXT NOT NULL,
+            key TEXT NOT NULL,
+            interval INTEGER DEFAULT 0,
+            ease REAL DEFAULT 2.5,
+            next_review_date TEXT,
+            reps INTEGER DEFAULT 0,
+            lapses INTEGER DEFAULT 0,
+            streak INTEGER DEFAULT 0,
+            last_result TEXT,
+            PRIMARY KEY (user_id, drill, key)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS game_scores (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            game TEXT NOT NULL,
+            best INTEGER DEFAULT 0,
+            plays INTEGER DEFAULT 0,
+            last_played TEXT,
+            PRIMARY KEY (user_id, game)
+        )
     ''')
     conn.commit()
 
@@ -603,28 +765,293 @@ _VOCAB_SELECT = """
     LEFT JOIN vocab_progress p
            ON p.vocab_id = v.id AND p.user_id = %s
 """
+# Pool for the lesson-based modes: your lesson words, plus anything you have
+# already studied (whichever list it came from).
+_LESSON_OR_STUDIED = "(v.from_lessons OR p.review_count > 0)"
 
 
 def _csv_fingerprint():
-    """Cheap identity for the vocabulary CSV (size + mtime + row count)."""
-    try:
-        st_ = os.stat(VOCAB_CSV_PATH)
-        return f"{st_.st_size}:{int(st_.st_mtime)}"
-    except OSError:
-        return ""
+    """Content hash of every vocabulary source file. (Size + mtime changed on
+    every Streamlit Cloud reboot, because the repo is re-cloned, so the
+    import used to rerun on each cold start.)"""
+    h = hashlib.sha256()
+    for path in (VOCAB_CSV_PATH, FREQUENCY_CSV_PATH, FREQUENCY_RANKS_PATH):
+        try:
+            h.update(path.read_bytes())
+        except OSError:
+            h.update(b"-")
+    return h.hexdigest()[:32]
+
+
+def _read_frequency_files():
+    """(rank for every ranked word, the study rows of the top-10,000 list)."""
+    ranks, study = {}, []
+    if FREQUENCY_RANKS_PATH.exists():
+        rdf = pd.read_csv(FREQUENCY_RANKS_PATH, dtype=str, keep_default_na=False)
+        for zh, rk in zip(rdf["Chinese"], rdf["Rank"]):
+            if zh.strip() and rk.strip():
+                ranks.setdefault(zh.strip(), int(rk))
+    if FREQUENCY_CSV_PATH.exists():
+        # Same three columns as vocab_export.csv; the row order IS the rank.
+        fdf = pd.read_csv(FREQUENCY_CSV_PATH, dtype=str, keep_default_na=False)
+        tags = fdf["Tag"] if "Tag" in fdf.columns else [""] * len(fdf)
+        for rk, (zh, py, en, tag) in enumerate(zip(fdf["Chinese"], fdf["Pinyin"],
+                                                   fdf["English"], tags), 1):
+            zh, py = zh.strip(), py.strip()
+            if zh and py:
+                study.append((rk, zh, py, en.strip(), _clean_tag(tag)))
+                ranks.setdefault(zh, rk)
+    return ranks, study
+
+
+def _clean_tag(tag):
+    tag = str(tag).strip() if tag == tag and tag is not None else ""
+    return tag if tag in ("China", "Malaysia") else ""
+
+
+def _read_lesson_file():
+    """Your lesson list. The Tag column is optional, so rows pasted in with
+    just Chinese, Pinyin and English still import."""
+    rows = []
+    if VOCAB_CSV_PATH.exists():
+        df = pd.read_csv(VOCAB_CSV_PATH, dtype=str, keep_default_na=False)
+        tags = df['Tag'] if 'Tag' in df.columns else [""] * len(df)
+        for zh, py, en, tag in zip(df['Chinese'], df['Pinyin'], df['English'], tags):
+            zh, py = str(zh).strip(), str(py).strip()
+            en = str(en).strip() if en == en else ""
+            if zh and py and zh != 'nan' and py != 'nan':
+                zh, py = strip_erhua(zh, py)     # no Beijing 儿 (一点儿 -> 一点)
+                rows.append((zh, py, en, _clean_tag(tag)))
+    return rows
+
+
+def _progress_strength(p):
+    return (p["review_count"] or 0, p["interval"] or 0)
+
+
+def _merge_card(cursor, progress, src, dst):
+    """Move every learner's progress from card `src` onto card `dst`, keeping
+    the stronger record where both exist, then delete `src`."""
+    dst_rows = {p["user_id"]: p for p in progress.get(dst, [])}
+    for p in progress.get(src, []):
+        d = dst_rows.get(p["user_id"])
+        if d is None:
+            cursor.execute("UPDATE vocab_progress SET vocab_id = %s WHERE id = %s",
+                           (dst, p["id"]))
+            p["vocab_id"] = dst
+            dst_rows[p["user_id"]] = p
+            progress.setdefault(dst, []).append(p)
+            continue
+        if _progress_strength(p) > _progress_strength(d):
+            for k in ("next_review_date", "interval", "ease_factor", "review_count"):
+                d[k] = p[k]
+        d["priority_weight"] = max(d["priority_weight"] or 1, p["priority_weight"] or 1)
+        cursor.execute("""UPDATE vocab_progress SET next_review_date = %s,
+                              interval = %s, ease_factor = %s, review_count = %s,
+                              priority_weight = %s WHERE id = %s""",
+                       (d["next_review_date"], d["interval"], d["ease_factor"],
+                        d["review_count"], d["priority_weight"], d["id"]))
+        cursor.execute("DELETE FROM vocab_progress WHERE id = %s", (p["id"],))
+    progress.pop(src, None)
+    cursor.execute("DELETE FROM vocab WHERE id = %s", (src,))
+
+
+def run_erhua_cleanup(conn=None):
+    """One-off: remove the Beijing 儿 from every stored card. A card whose
+    plain form already exists (一点儿 -> 一点) is merged into it, carrying
+    progress across; any other card is simply respelled."""
+    own_conn = conn is None
+    conn = conn or get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, chinese, pinyin FROM vocab ORDER BY id")
+    cards = [{"id": v, "chinese": c, "pinyin": p} for v, c, p in cursor.fetchall()]
+    cursor.execute("""SELECT id, user_id, vocab_id, next_review_date, interval,
+                             ease_factor, review_count, priority_weight
+                      FROM vocab_progress""")
+    progress = {}
+    for r in cursor.fetchall():
+        p = dict(zip(("id", "user_id", "vocab_id", "next_review_date", "interval",
+                      "ease_factor", "review_count", "priority_weight"), r))
+        progress.setdefault(p["vocab_id"], []).append(p)
+    by_chinese = {}
+    for c in cards:
+        by_chinese.setdefault(c["chinese"], []).append(c)
+    merged = respelled = 0
+    for card in cards:
+        if not has_erhua(card["chinese"], card["pinyin"]):
+            continue
+        zh, py = strip_erhua(card["chinese"], card["pinyin"])
+        others = [c for c in by_chinese.get(zh, []) if c["id"] != card["id"]]
+        if others:
+            target = next((c for c in others
+                           if _pinyin_key(c["pinyin"]) == _pinyin_key(py)), others[0])
+            _merge_card(cursor, progress, card["id"], target["id"])
+            merged += 1
+        else:
+            cursor.execute("UPDATE vocab SET chinese = %s, pinyin = %s WHERE id = %s",
+                           (zh, py, card["id"]))
+            card["chinese"], card["pinyin"] = zh, py
+            by_chinese.setdefault(zh, []).append(card)
+            respelled += 1
+    cursor.execute("""INSERT INTO app_meta (key, value) VALUES ('vocab_erhua_v1', 'done')
+                      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""")
+    conn.commit()
+    if own_conn:
+        conn.close()
+    clear_caches()
+    logging.info(f"Erhua cleanup: {merged} cards merged into their plain form, "
+                 f"{respelled} respelled.")
+    return {"merged": merged, "respelled": respelled}
+
+
+def run_vocab_cleanup(conn=None):
+    """One-off tidy so the shared vocabulary matches the two word lists.
+
+    - A word stored more than once (e.g. 背包 as both 'bèi bāo' and 'bēi bāo')
+      becomes one card in the list's spelling. Every learner's progress is
+      carried over; where both copies had progress, the stronger one wins.
+    - Old cards in neither list (the pre-2026-09 sentence cards) are deleted
+      unless someone has made progress with them. Those kept get the lists'
+      pinyin style (one syllable per space, lower case).
+    Returns counts, or None if the list files are missing.
+    """
+    from dictionary_engine import format_pinyin
+    lesson_rows = _read_lesson_file()
+    _ranks, study = _read_frequency_files()
+    if len(lesson_rows) < 50 or len(study) < 1000:
+        logging.warning("Vocabulary cleanup skipped: list files incomplete.")
+        return None
+
+    # Canonical readings: your lesson spelling wins; the frequency list
+    # only speaks for words that aren't in your lessons.
+    listed = {}
+    for zh, py, _en, _tag in lesson_rows:
+        listed.setdefault(zh, {}).setdefault(_pinyin_key(py), py)
+    for _rk, zh, py, _en, _tag in study:
+        if zh not in listed:
+            listed[zh] = {_pinyin_key(py): py}
+
+    own_conn = conn is None
+    conn = conn or get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, chinese, pinyin FROM vocab ORDER BY id")
+    groups = {}
+    for vid, zh, py in cursor.fetchall():
+        groups.setdefault(zh, []).append({"id": vid, "pinyin": py})
+    cursor.execute("""SELECT id, user_id, vocab_id, next_review_date, interval,
+                             ease_factor, review_count, priority_weight
+                      FROM vocab_progress""")
+    progress = {}
+    for r in cursor.fetchall():
+        p = dict(zip(("id", "user_id", "vocab_id", "next_review_date", "interval",
+                      "ease_factor", "review_count", "priority_weight"), r))
+        progress.setdefault(p["vocab_id"], []).append(p)
+
+    def studied(vid):
+        return any((p["review_count"] or 0) > 0 or (p["priority_weight"] or 1) > 1
+                   for p in progress.get(vid, []))
+
+    def weight(vid):
+        return max([_progress_strength(p) for p in progress.get(vid, [])] or [(0, 0)])
+
+    def bases(py):
+        return re.sub(r"[^a-zü]", "", unicodedata.normalize("NFD", py.lower()))
+
+    merged = deleted = restyled = 0
+    to_delete, respell = [], []
+    for zh, cards in groups.items():
+        readings = listed.get(zh)
+        if readings:
+            owner = {}
+            strays = []
+            for key, py in readings.items():
+                same = [c for c in cards if _pinyin_key(c["pinyin"]) == key]
+                if not same:
+                    continue
+                keep = next((c for c in same if c["pinyin"] == py), None) or \
+                    max(same, key=lambda c: (weight(c["id"]), -c["id"]))
+                owner[key] = keep
+                strays += [c for c in same if c is not keep]
+            strays += [c for c in cards
+                       if _pinyin_key(c["pinyin"]) not in readings]
+            strays.sort(key=lambda c: weight(c["id"]), reverse=True)
+            for c in strays:
+                unowned = [k for k in readings if k not in owner]
+                if unowned and _pinyin_key(c["pinyin"]) not in readings:
+                    # the only copy of this reading: respell it, keep the card
+                    key = next((k for k in unowned
+                                if bases(readings[k]) == bases(c["pinyin"])), unowned[0])
+                    owner[key] = c
+                    continue
+                target = next((o for k, o in owner.items()
+                               if bases(readings[k]) == bases(c["pinyin"])),
+                              next(iter(owner.values())))
+                _merge_card(cursor, progress, c["id"], target["id"])
+                merged += 1
+            for key, c in owner.items():
+                if c["pinyin"] != readings[key]:
+                    respell.append((readings[key], c["id"]))
+            continue
+        # in neither list: keep only cards someone has made progress with
+        keepers = [c for c in cards if studied(c["id"])]
+        to_delete += [c["id"] for c in cards if not studied(c["id"])]
+        if keepers:
+            keepers.sort(key=lambda c: weight(c["id"]), reverse=True)
+            for c in keepers[1:]:
+                _merge_card(cursor, progress, c["id"], keepers[0]["id"])
+                merged += 1
+            styled = format_pinyin(keepers[0]["pinyin"])
+            if styled != keepers[0]["pinyin"]:
+                respell.append((styled, keepers[0]["id"]))
+
+    if to_delete:
+        cursor.execute("DELETE FROM vocab WHERE id = ANY(%s)", (to_delete,))
+        deleted = len(to_delete)
+    for py, vid in respell:
+        cursor.execute("UPDATE vocab SET pinyin = %s WHERE id = %s", (py, vid))
+    restyled = len(respell)
+    cursor.execute("""INSERT INTO app_meta (key, value) VALUES ('vocab_cleanup_v1', 'done')
+                      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""")
+    conn.commit()
+    if own_conn:
+        conn.close()
+    clear_caches()
+    logging.info(f"Vocabulary cleanup: {merged} duplicates merged, {deleted} "
+                 f"unstudied old cards removed, {restyled} cards respelled.")
+    return {"merged": merged, "deleted": deleted, "respelled": restyled}
+
+
+_IMPORT_LOCK_KEY = 7_730_517
 
 
 def import_vocab_from_csv(force=False):
-    """Import the CSV into the SHARED vocabulary table.
+    """Serialised wrapper: if two copies of the app boot together (the cloud
+    app and a local run, say) the second waits, then finds the work done."""
+    lock_conn = get_connection()
+    lock_cur = lock_conn.cursor()
+    lock_cur.execute("SELECT pg_advisory_lock(%s)", (_IMPORT_LOCK_KEY,))
+    try:
+        _import_vocab(force)
+    finally:
+        lock_cur.execute("SELECT pg_advisory_unlock(%s)", (_IMPORT_LOCK_KEY,))
+        lock_conn.close()
 
-    PERFORMANCE: this used to run one SELECT per row - about 1,400 network
-    round-trips to Supabase on every single app boot, which dominated
-    start-up time. Now it does two queries total (read existing keys, bulk
-    insert the rest), and skips the work altogether when the CSV hasn't
-    changed since the last import.
+
+def _import_vocab(force=False):
+    """Merge your lesson list and the 10,000-word frequency list into the
+    SHARED vocabulary table.
+
+    - Your lesson words (vocab_export.csv) always win: their pinyin and
+      meaning are used, and they are marked from_lessons.
+    - A frequency word is only added if no row with the same characters
+      exists, so no word appears twice (a genuine second reading you add
+      yourself, like 只 zhǐ / zhī, is still allowed).
+    - Every row gets its frequency rank; glosses refresh from the files.
+    Runs only when a source file's content changes, in a handful of bulk
+    queries.
     """
-    if not VOCAB_CSV_PATH.exists():
-        logging.warning("CSV file not found. Skipping import.")
+    if not VOCAB_CSV_PATH.exists() and not FREQUENCY_CSV_PATH.exists():
+        logging.warning("No vocabulary files found. Skipping import.")
         return
 
     fingerprint = _csv_fingerprint()
@@ -633,50 +1060,144 @@ def import_vocab_from_csv(force=False):
     cursor.execute("""CREATE TABLE IF NOT EXISTS app_meta (
                         key TEXT PRIMARY KEY, value TEXT)""")
     conn.commit()
-    if not force and fingerprint:
+    cursor.execute("SELECT key FROM app_meta WHERE key IN "
+                   "('vocab_cleanup_v1', 'vocab_erhua_v1')")
+    done = {r[0] for r in cursor.fetchall()}
+    cleaned = "vocab_cleanup_v1" in done
+    if not force and len(done) == 2:
         cursor.execute("SELECT value FROM app_meta WHERE key = 'vocab_csv'")
         row = cursor.fetchone()
         if row and row[0] == fingerprint:
             conn.close()
-            logging.info("Vocabulary CSV unchanged - import skipped.")
+            logging.info("Vocabulary files unchanged - import skipped.")
             return
+    if not cleaned:
+        run_vocab_cleanup(conn)
+    if "vocab_erhua_v1" not in done:
+        run_erhua_cleanup(conn)
 
-    df = pd.read_csv(VOCAB_CSV_PATH)
-    df['Chinese'] = df['Chinese'].astype(str).str.strip()
-    df['Pinyin'] = df['Pinyin'].astype(str).str.strip()
-    df = df.replace('', pd.NA).replace('nan', pd.NA).dropna(subset=['Chinese', 'Pinyin'])
-    df['English'] = df['English'].fillna('').astype(str).str.strip()
+    lesson_rows = _read_lesson_file()
+    ranks, study = _read_frequency_files()
 
-    # 1 query: everything already stored
-    cursor.execute("SELECT chinese, pinyin FROM vocab")
-    existing = {(c, p) for c, p in cursor.fetchall()}
+    # 1 query: everything already stored. Keyed on a normalised pinyin so a
+    # formatting-only difference ('qǐlái' vs 'qǐ lái') is the same word.
+    cursor.execute("SELECT id, chinese, pinyin, english, freq_rank, from_lessons, tag "
+                   "FROM vocab")
+    by_key, by_chinese = {}, {}
+    for vid, c, p, e, fr, fl, tg in cursor.fetchall():
+        rec = {"id": vid, "chinese": c, "pinyin": p, "english": e,
+               "freq_rank": fr, "from_lessons": bool(fl), "tag": tg}
+        by_key.setdefault((c, _pinyin_key(p)), []).append(rec)
+        by_chinese.setdefault(c, []).append(rec)
 
     today_str = date.today().isoformat()
-    fresh = []
+    inserts, changed = [], {}
+
+    def change(rec, **fields):
+        diff = {k: v for k, v in fields.items() if rec.get(k) != v}
+        if diff and rec["id"] is not None:
+            rec.update(diff)
+            changed[rec["id"]] = rec
+
+    def add(zh, py, en, rank, lesson, tag):
+        rec = {"id": None, "chinese": zh, "pinyin": py, "english": en,
+               "freq_rank": rank, "from_lessons": lesson, "tag": tag}
+        by_key.setdefault((zh, _pinyin_key(py)), []).append(rec)
+        by_chinese.setdefault(zh, []).append(rec)
+        inserts.append((zh, py, en, today_str, rank, lesson, tag))
+
+    study_tag = {zh: tag for _r, zh, _p, _e, tag in study}
+
+    # 1. your lesson words
     seen = set()
-    for _i, row in df.iterrows():
-        key = (row['Chinese'], row['Pinyin'])
-        if key in existing or key in seen:
+    for zh, py, en, tag in lesson_rows:
+        key = (zh, _pinyin_key(py))
+        if key in seen:
             continue
         seen.add(key)
-        fresh.append((row['Chinese'], row['Pinyin'], row['English'], today_str))
+        rank = ranks.get(zh)
+        tag = tag or study_tag.get(zh) or None
+        if key in by_key:
+            recs = by_key[key]
+            for rec in recs:
+                change(rec, english=en or rec["english"], freq_rank=rank,
+                       from_lessons=True, tag=tag)
+            if len(recs) == 1:
+                change(recs[0], pinyin=py)      # the list's exact spelling
+            continue
+        # Already there from the frequency list under another pinyin
+        # spelling: adopt that row (keeping any progress) instead of
+        # adding a second copy of the word.
+        spare = [r for r in by_chinese.get(zh, [])
+                 if not r["from_lessons"] and r["id"] is not None]
+        if spare:
+            rec = spare[0]
+            change(rec, pinyin=py, english=en or rec["english"],
+                   freq_rank=rank, from_lessons=True, tag=tag)
+            by_key.setdefault(key, []).append(rec)
+            continue
+        add(zh, py, en, rank, True, tag)
 
-    # 1 query: bulk insert
-    if fresh:
+    # 2. the frequency list: a word you already have is never added again
+    for rank, zh, py, en, tag in study:
+        if zh in by_chinese:
+            continue
+        add(zh, py, en, rank, False, tag or None)
+
+    # 3. every stored row gets its current rank (older cards included)
+    for zh, recs in by_chinese.items():
+        rank = ranks.get(zh)
+        for rec in recs:
+            if rank is not None:
+                change(rec, freq_rank=rank)
+            elif not rec["from_lessons"] and rec["freq_rank"] is not None:
+                change(rec, freq_rank=None)
+    # frequency words refresh too (never over one of your lesson words)
+    study_by_word = {zh: (py, en, tag) for _r, zh, py, en, tag in study}
+    for zh, recs in by_chinese.items():
+        if zh not in study_by_word:
+            continue
+        py, en, tag = study_by_word[zh]
+        for rec in recs:
+            if rec["from_lessons"]:
+                continue
+            change(rec, tag=tag or None)
+            if en:
+                change(rec, english=en)
+            if len(recs) == 1 and _pinyin_key(rec["pinyin"]) == _pinyin_key(py):
+                change(rec, pinyin=py)
+
+    if changed:
         psycopg2.extras.execute_values(
             cursor,
-            "INSERT INTO vocab (chinese, pinyin, english, date_added) VALUES %s "
-            "ON CONFLICT (chinese, pinyin) DO NOTHING",
-            fresh, page_size=500)
+            "UPDATE vocab SET pinyin = u.pinyin, english = u.english, "
+            "freq_rank = u.freq_rank, from_lessons = u.from_lessons, tag = u.tag "
+            "FROM (VALUES %s) AS u(id, pinyin, english, freq_rank, from_lessons, tag) "
+            "WHERE vocab.id = u.id",
+            [(r["id"], r["pinyin"], r["english"], r["freq_rank"], r["from_lessons"],
+              r.get("tag")) for r in changed.values()],
+            template="(%s, %s, %s, %s::integer, %s::boolean, %s::text)", page_size=1000)
+    if inserts:
+        psycopg2.extras.execute_values(
+            cursor,
+            "INSERT INTO vocab (chinese, pinyin, english, date_added, freq_rank, "
+            "from_lessons, tag) VALUES %s ON CONFLICT (chinese, pinyin) DO NOTHING",
+            inserts, template="(%s, %s, %s, %s, %s::integer, %s::boolean, %s::text)",
+            page_size=1000)
 
-    if fingerprint:
-        cursor.execute("""INSERT INTO app_meta (key, value) VALUES ('vocab_csv', %s)
-                          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
-                       (fingerprint,))
+    cursor.execute("""INSERT INTO app_meta (key, value) VALUES ('vocab_csv', %s)
+                      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
+                   (fingerprint,))
     conn.commit()
     conn.close()
-    logging.info(f"Vocabulary import: {len(fresh)} new, "
-                 f"{len(df) - len(fresh)} already present.")
+    clear_caches()
+    logging.info(f"Vocabulary import: {len(inserts)} new, {len(changed)} updated.")
+
+
+def _pinyin_key(pinyin):
+    """Pinyin with case, spacing, apostrophes and hyphens ignored."""
+    p = unicodedata.normalize("NFC", str(pinyin)).lower()
+    return re.sub(r"[\s'’\-]", "", p)
 
 
 def _ensure_progress(cursor, user_id, vocab_id):
@@ -735,13 +1256,14 @@ BAND_MIX = {EASY: 0.45, MEDIUM: 0.35, HARD: 0.20}
 
 
 def _fetch_all_candidates(cursor, user_id, exclude_ids=()):
-    """Every vocabulary row this user has not yet seen, with any pooled
-    ease data from other learners."""
+    """Every lesson word this user has not yet seen, with any pooled ease
+    data from other learners. (Frequency-list words have their own mode.)"""
     sql = _VOCAB_SELECT + """
         LEFT JOIN (SELECT vocab_id, MIN(ease_factor) AS pooled_ease
                    FROM vocab_progress GROUP BY vocab_id) agg
                ON agg.vocab_id = v.id
         WHERE (p.review_count IS NULL OR p.review_count = 0)
+          AND v.from_lessons
     """
     params = [user_id]
     if exclude_ids:
@@ -785,6 +1307,9 @@ def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
     random_balanced — anything genuinely due comes first (real spaced
                       repetition), then unseen words drawn at random but
                       spread evenly across difficulty bands.
+    srs_frequency   — anything due first, then unseen words in frequency
+                      order: the most common words in spoken Mandarin first.
+    The first three draw new cards from your lesson words only.
     """
     import random as _random
     rng = _random.Random()
@@ -793,7 +1318,7 @@ def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    if mode in ("random_balanced", "srs_latest"):
+    if mode in ("random_balanced", "srs_latest", "srs_frequency"):
         today = date.today().isoformat()
         # 1. everything actually due, oldest/most-urgent first
         cursor.execute(_VOCAB_SELECT + """
@@ -808,16 +1333,22 @@ def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
         session = due
         if needed:
             exclude = [r["id"] for r in due]
-            if mode == "srs_latest":
-                # newest additions first — what you just put in the CSV
+            if mode in ("srs_latest", "srs_frequency"):
                 sql = _VOCAB_SELECT + \
                     " WHERE (p.review_count IS NULL OR p.review_count = 0)"
+                if mode == "srs_latest":
+                    sql += " AND v.from_lessons"
                 params = [user_id]
                 if exclude:
                     ph = ",".join(["%s"] * len(exclude))
                     sql += f" AND v.id NOT IN ({ph})"
                     params += exclude
-                sql += " ORDER BY v.id DESC LIMIT %s"
+                if mode == "srs_latest":
+                    # newest additions first — what you just put in the CSV
+                    sql += " ORDER BY v.id DESC LIMIT %s"
+                else:
+                    # most common first; words outside the list come last
+                    sql += " ORDER BY v.freq_rank ASC NULLS LAST, v.id ASC LIMIT %s"
                 params.append(needed)
                 cursor.execute(sql, params)
                 session = due + [dict(r) for r in cursor.fetchall()]
@@ -832,19 +1363,19 @@ def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
     # ---- latest_mix (unchanged) ----
     random_count = int(round(total * random_pct))
     latest_count = total - random_count
-    cursor.execute(_VOCAB_SELECT + " ORDER BY v.id DESC LIMIT %s",
-                   (user_id, latest_count))
+    cursor.execute(_VOCAB_SELECT + " WHERE v.from_lessons "
+                   "ORDER BY v.id DESC LIMIT %s", (user_id, latest_count))
     latest_rows = [dict(r) for r in cursor.fetchall()]
     latest_ids = [r['id'] for r in latest_rows]
 
     if latest_ids:
         ph = ','.join(['%s'] * len(latest_ids))
         cursor.execute(_VOCAB_SELECT + f" WHERE v.id NOT IN ({ph}) "
-                       "ORDER BY RANDOM() LIMIT %s",
+                       f"AND {_LESSON_OR_STUDIED} ORDER BY RANDOM() LIMIT %s",
                        [user_id] + latest_ids + [random_count])
     else:
-        cursor.execute(_VOCAB_SELECT + " ORDER BY RANDOM() LIMIT %s",
-                       (user_id, random_count))
+        cursor.execute(_VOCAB_SELECT + f" WHERE {_LESSON_OR_STUDIED} "
+                       "ORDER BY RANDOM() LIMIT %s", (user_id, random_count))
     random_rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     session = latest_rows + random_rows
@@ -864,7 +1395,8 @@ def get_due_words(user_id):
     needed = MAX_REVIEWS_PER_DAY - len(due_reviews)
     if needed > 0:
         cursor.execute(_VOCAB_SELECT + """
-            WHERE p.review_count IS NULL OR p.review_count = 0
+            WHERE (p.review_count IS NULL OR p.review_count = 0)
+              AND v.from_lessons
             ORDER BY COALESCE(p.priority_weight, 1) DESC, v.id DESC LIMIT %s
         """, (user_id, needed))
         new_words = [dict(r) for r in cursor.fetchall()]
@@ -941,11 +1473,11 @@ def get_more_words(user_id, exclude_ids, amount=5):
     if exclude_ids:
         ph = ','.join(['%s'] * len(exclude_ids))
         cursor.execute(_VOCAB_SELECT + f" WHERE v.id NOT IN ({ph}) "
-                       "ORDER BY RANDOM() LIMIT %s",
+                       f"AND {_LESSON_OR_STUDIED} ORDER BY RANDOM() LIMIT %s",
                        [user_id] + list(exclude_ids) + [amount])
     else:
-        cursor.execute(_VOCAB_SELECT + " ORDER BY RANDOM() LIMIT %s",
-                       (user_id, amount))
+        cursor.execute(_VOCAB_SELECT + f" WHERE {_LESSON_OR_STUDIED} "
+                       "ORDER BY RANDOM() LIMIT %s", (user_id, amount))
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
@@ -1061,7 +1593,9 @@ def get_focus_session(user_id, text):
     cursor.execute("""SELECT v.chinese, v.pinyin, v.english,
                              COALESCE(p.review_count, 0) AS review_count
                       FROM vocab v LEFT JOIN vocab_progress p
-                        ON p.vocab_id = v.id AND p.user_id = %s""", (user_id,))
+                        ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE v.chinese ~ %s""",
+                   (user_id, "[" + "".join(chars) + "]"))
     vocab_rows = [dict(r) for r in cursor.fetchall()]
     placeholders = ','.join(['%s'] * len(chars))
     cursor.execute(f"SELECT * FROM handwriting_progress "
@@ -1698,7 +2232,9 @@ def get_struggle_session(user_id, characters):
     cursor.execute("""SELECT v.chinese, v.pinyin, v.english,
                              COALESCE(p.review_count, 0) AS review_count
                       FROM vocab v LEFT JOIN vocab_progress p
-                        ON p.vocab_id = v.id AND p.user_id = %s""", (user_id,))
+                        ON p.vocab_id = v.id AND p.user_id = %s
+                      WHERE v.chinese ~ %s""",
+                   (user_id, "[" + "".join(characters) + "]"))
     vocab_rows = [dict(r) for r in cursor.fetchall()]
     ph = ','.join(['%s'] * len(characters))
     cursor.execute(f"SELECT * FROM handwriting_progress "
@@ -1737,7 +2273,7 @@ def get_char_state(user_id, character):
 # stop being motivating for either.
 # ==========================================
 ACTIVITY_KINDS = {"listen": "Listening", "speak": "Speaking",
-                  "write": "Handwriting"}
+                  "write": "Handwriting", "grammar": "Grammar", "games": "Games"}
 
 
 def log_activity(user_id, kind, item=None, grade=None, mistakes=0):
@@ -2225,3 +2761,711 @@ def reading_stats(user_id):
 
 init_db()
 import_vocab_from_csv()
+
+
+# ==========================================
+# GRAMMAR DRILLS
+# ==========================================
+def grammar_known_vocab(user_id):
+    """The learner's well-studied words, best-known first. Falls back to
+    anything reviewed once while the list is still short."""
+    from config import (GRAMMAR_KNOWN_MIN_REVIEWS, GRAMMAR_KNOWN_MIN_INTERVAL,
+                        GRAMMAR_KNOWN_FLOOR, GRAMMAR_VOCAB_CAP)
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = """SELECT v.chinese FROM vocab v
+               JOIN vocab_progress p ON p.vocab_id = v.id AND p.user_id = %s
+               WHERE p.review_count >= %s AND COALESCE(p.interval, 0) >= %s
+                 AND v.chinese ~ '^[一-鿿]+$'
+               ORDER BY p.review_count DESC, p.interval DESC LIMIT %s"""
+    cursor.execute(query, (user_id, GRAMMAR_KNOWN_MIN_REVIEWS,
+                           GRAMMAR_KNOWN_MIN_INTERVAL, GRAMMAR_VOCAB_CAP))
+    words = [r[0] for r in cursor.fetchall()]
+    if len(words) < GRAMMAR_KNOWN_FLOOR:
+        cursor.execute(query, (user_id, 1, 0, GRAMMAR_VOCAB_CAP))
+        words = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return list(dict.fromkeys(words))
+
+
+def grammar_china_pairs():
+    """(China word, Malaysian word) pairs from the tagged vocabulary, so the
+    drill writer prefers the Malaysian word."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT chinese, english FROM vocab WHERE tag = 'China'")
+    pairs = []
+    for zh, en in cursor.fetchall():
+        m = re.search(r"\(Malaysia: (\S+) ", en or "")
+        if m:
+            pairs.append((zh, m.group(1)))
+    conn.close()
+    return pairs
+
+
+def grammar_progress(user_id):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM grammar_progress WHERE user_id = %s", (user_id,))
+    rows = {r["structure_id"]: dict(r) for r in cursor.fetchall()}
+    conn.close()
+    return rows
+
+
+def grammar_save_progress(user_id, structure_id, next_review_date, interval,
+                          ease, score):
+    today = date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO grammar_progress (user_id, structure_id, next_review_date,
+               interval, ease_factor, review_count, last_score, first_seen, last_seen)
+        VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s)
+        ON CONFLICT (user_id, structure_id) DO UPDATE SET
+            next_review_date = EXCLUDED.next_review_date,
+            interval = EXCLUDED.interval, ease_factor = EXCLUDED.ease_factor,
+            review_count = grammar_progress.review_count + 1,
+            last_score = EXCLUDED.last_score, last_seen = EXCLUDED.last_seen
+    """, (user_id, structure_id, next_review_date, interval, ease, score, today, today))
+    conn.commit()
+    conn.close()
+
+
+def grammar_new_today(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM grammar_progress WHERE user_id = %s "
+                   "AND first_seen = %s", (user_id, date.today().isoformat()))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n
+
+
+def grammar_pick_set(user_id, structure_id, known_count):
+    """A stored drill set worth reusing, or None if a fresh one should be
+    written (none stored, all used recently, or vocabulary has grown)."""
+    from config import GRAMMAR_REFRESH_GROWTH
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT id, known_count, payload, served_count, last_served
+                      FROM grammar_drill_sets
+                      WHERE user_id = %s AND structure_id = %s
+                      ORDER BY created_at DESC""", (user_id, structure_id))
+    sets = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    today = date.today().isoformat()
+    fresh_enough = [x for x in sets
+                    if known_count <= (x["known_count"] or 0) * (1 + GRAMMAR_REFRESH_GROWTH)]
+    usable = [x for x in fresh_enough if x["served_count"] < 2 and x["last_served"] != today]
+    if not usable:
+        return None
+    pick = min(usable, key=lambda x: (x["served_count"], x["last_served"] or ""))
+    pick["payload"] = json.loads(pick["payload"])
+    return pick
+
+
+def grammar_recent_sentences(user_id, structure_id, limit=3):
+    from grammar_drills import sentences_in
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT payload FROM grammar_drill_sets
+                      WHERE user_id = %s AND structure_id = %s
+                      ORDER BY created_at DESC LIMIT %s""", (user_id, structure_id, limit))
+    out = []
+    for (payload,) in cursor.fetchall():
+        try:
+            out += sentences_in(json.loads(payload))
+        except Exception:
+            pass
+    conn.close()
+    return out
+
+
+def grammar_save_set(user_id, structure_id, known_count, payload, keep=4):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO grammar_drill_sets (user_id, structure_id,
+                          known_count, payload) VALUES (%s, %s, %s, %s) RETURNING id""",
+                   (user_id, structure_id, known_count,
+                    json.dumps(payload, ensure_ascii=False)))
+    new_id = cursor.fetchone()[0]
+    cursor.execute("""DELETE FROM grammar_drill_sets WHERE user_id = %s
+                      AND structure_id = %s AND id NOT IN (
+                          SELECT id FROM grammar_drill_sets WHERE user_id = %s
+                          AND structure_id = %s ORDER BY created_at DESC, id DESC
+                          LIMIT %s)""",
+                   (user_id, structure_id, user_id, structure_id, keep))
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def grammar_mark_served(set_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""UPDATE grammar_drill_sets SET served_count = served_count + 1,
+                      last_served = %s WHERE id = %s""",
+                   (date.today().isoformat(), set_id))
+    conn.commit()
+    conn.close()
+
+
+# ==========================================
+# VOCABULARY ENGINE
+# ==========================================
+_WORD_COLS = """v.id, v.chinese, v.pinyin, v.english, v.tag, v.freq_rank,
+                v.from_lessons"""
+
+
+def _track_row(r):
+    return {"interval": r["interval"], "ease": r["ease"],
+            "next_review_date": r["next_review_date"], "reps": r["reps"],
+            "lapses": r["lapses"], "streak": r["streak"],
+            "last_mode": r["last_mode"], "last_result": r["last_result"],
+            "introduced_on": r["introduced_on"]}
+
+
+def sync_word_skills(user_id):
+    """Keep the recognition schedule in step with vocab_progress, which the
+    classic session, handwriting and reading still use:
+    - words studied before this engine existed get a recognition track
+      seeded from their existing progress (nothing is lost);
+    - if the classic session has reviewed a word more recently, its
+      recognition track catches up."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO word_skill (user_id, vocab_id, skill, interval, ease,
+               next_review_date, reps, lapses, streak, introduced_on)
+        SELECT p.user_id, p.vocab_id, 'recognition', COALESCE(p.interval, 0),
+               COALESCE(p.ease_factor, 2.5), p.next_review_date, p.review_count, 0,
+               CASE WHEN COALESCE(p.interval, 0) >= 1 THEN LEAST(p.review_count, 3) ELSE 0 END,
+               %s
+        FROM vocab_progress p
+        WHERE p.user_id = %s AND p.review_count > 0
+        ON CONFLICT (user_id, vocab_id, skill) DO NOTHING
+    """, ("seeded", user_id))
+    cursor.execute("""
+        UPDATE word_skill s SET interval = COALESCE(p.interval, 0),
+               ease = COALESCE(p.ease_factor, 2.5),
+               next_review_date = p.next_review_date, reps = p.review_count
+        FROM vocab_progress p
+        WHERE s.user_id = %s AND s.skill = 'recognition'
+          AND p.user_id = s.user_id AND p.vocab_id = s.vocab_id
+          AND p.review_count > s.reps
+    """, (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def word_tracks(user_id, vocab_ids):
+    """(vocab_id, skill) -> track for the given words."""
+    if not vocab_ids:
+        return {}
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM word_skill WHERE user_id = %s AND vocab_id = ANY(%s)",
+                   (user_id, list(vocab_ids)))
+    out = {(r["vocab_id"], r["skill"]): _track_row(r) for r in cursor.fetchall()}
+    conn.close()
+    return out
+
+
+def due_words(user_id, skill, limit, today=None):
+    """Words whose `skill` is due, most overdue first, repeated misses
+    breaking ties."""
+    today = (today or date.today()).isoformat()
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute(f"""
+        SELECT {_WORD_COLS} FROM word_skill s JOIN vocab v ON v.id = s.vocab_id
+        WHERE s.user_id = %s AND s.skill = %s
+          AND COALESCE(s.next_review_date, '') <= %s
+        ORDER BY s.next_review_date NULLS FIRST, s.lapses DESC, v.freq_rank NULLS LAST
+        LIMIT %s
+    """, (user_id, skill, today, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def count_due(user_id, today=None):
+    today = (today or date.today()).isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT COUNT(*) FROM word_skill WHERE user_id = %s
+                      AND COALESCE(next_review_date, '') <= %s""", (user_id, today))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n
+
+
+def production_unlockable(user_id, limit):
+    """Words recognised reliably enough to start producing them."""
+    from vocab_engine import UNLOCK_MIN_INTERVAL, UNLOCK_MIN_STREAK
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute(f"""
+        SELECT {_WORD_COLS} FROM word_skill r JOIN vocab v ON v.id = r.vocab_id
+        WHERE r.user_id = %s AND r.skill = 'recognition'
+          AND r.interval >= %s AND r.streak >= %s
+          AND v.chinese ~ '^[一-鿿]{{1,6}}$' AND COALESCE(v.tag, '') <> 'China'
+          AND NOT EXISTS (SELECT 1 FROM word_skill p WHERE p.user_id = r.user_id
+                          AND p.vocab_id = r.vocab_id AND p.skill = 'production')
+        ORDER BY v.freq_rank NULLS LAST, v.id
+        LIMIT %s
+    """, (user_id, UNLOCK_MIN_INTERVAL, UNLOCK_MIN_STREAK, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def new_word_candidates(user_id, limit=40):
+    """(lesson words, frequency words) not yet introduced, each in frequency
+    order. China-tagged (mainland) words wait until their Malaysian partner
+    has been introduced."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    base = f"""
+        SELECT {_WORD_COLS} FROM vocab v
+        WHERE NOT EXISTS (SELECT 1 FROM word_skill s WHERE s.user_id = %s
+                          AND s.vocab_id = v.id AND s.skill = 'recognition')
+          AND v.chinese !~ '[，。！？,.!?]'
+    """
+    cursor.execute(base + " AND v.from_lessons ORDER BY v.freq_rank NULLS LAST, v.id LIMIT %s",
+                   (user_id, limit))
+    lessons = [dict(r) for r in cursor.fetchall()]
+    cursor.execute(base + " AND NOT v.from_lessons AND v.freq_rank IS NOT NULL "
+                   "ORDER BY v.freq_rank LIMIT %s", (user_id, limit))
+    frequency = [dict(r) for r in cursor.fetchall()]
+    cursor.execute("""SELECT v.chinese FROM word_skill s JOIN vocab v ON v.id = s.vocab_id
+                      WHERE s.user_id = %s AND s.skill = 'recognition'""", (user_id,))
+    known = {r[0] for r in cursor.fetchall()}
+    conn.close()
+
+    def partner_ready(w):
+        if w.get("tag") != "China":
+            return True
+        m = re.search(r"\(Malaysia: (\S+) ", w.get("english") or "")
+        return bool(m) and m.group(1) in known
+    return [w for w in lessons if partner_ready(w)], [w for w in frequency if partner_ready(w)]
+
+
+def introduced_today(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT COUNT(*) FROM word_skill WHERE user_id = %s
+                      AND skill = 'recognition' AND introduced_on = %s""",
+                   (user_id, date.today().isoformat()))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n
+
+
+def save_word_track(user_id, vocab_id, skill, track, mode=None):
+    """Store a skill track. The recognition track is mirrored into
+    vocab_progress so everything else in the app keeps seeing progress."""
+    track = dict(track)
+    track["next_review_date"] = track.get("next_review_date") or date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO word_skill (user_id, vocab_id, skill, interval, ease,
+               next_review_date, reps, lapses, streak, last_mode, last_result,
+               introduced_on)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, vocab_id, skill) DO UPDATE SET
+            interval = EXCLUDED.interval, ease = EXCLUDED.ease,
+            next_review_date = EXCLUDED.next_review_date, reps = EXCLUDED.reps,
+            lapses = EXCLUDED.lapses, streak = EXCLUDED.streak,
+            last_mode = EXCLUDED.last_mode, last_result = EXCLUDED.last_result
+    """, (user_id, vocab_id, skill, track.get("interval", 0), track.get("ease", 2.5),
+          track.get("next_review_date"), track.get("reps", 0), track.get("lapses", 0),
+          track.get("streak", 0), mode or track.get("last_mode"), track.get("last_result"),
+          track.get("introduced_on") or date.today().isoformat()))
+    if skill == "recognition":
+        cursor.execute("""
+            INSERT INTO vocab_progress (user_id, vocab_id, next_review_date, interval,
+                   ease_factor, review_count)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, vocab_id) DO UPDATE SET
+                next_review_date = EXCLUDED.next_review_date,
+                interval = EXCLUDED.interval, ease_factor = EXCLUDED.ease_factor,
+                review_count = EXCLUDED.review_count
+        """, (user_id, vocab_id, track.get("next_review_date"), track.get("interval", 0),
+              track.get("ease", 2.5), track.get("reps", 0)))
+    conn.commit()
+    conn.close()
+    clear_caches()
+
+
+def log_word_attempt(user_id, vocab_id, skill, mode, result, detail=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO word_attempts (user_id, vocab_id, skill, mode,
+                          result, detail) VALUES (%s, %s, %s, %s, %s, %s)""",
+                   (user_id, vocab_id, skill, mode, result,
+                    json.dumps(detail or {}, ensure_ascii=False)))
+    conn.commit()
+    conn.close()
+
+
+def mode_error_rates(user_id, days=30):
+    """mode -> share of recent attempts in that mode that were missed."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT mode, COUNT(*) FILTER (WHERE result = 'wrong'),
+                             COUNT(*) FILTER (WHERE result <> 'ungraded')
+                      FROM word_attempts WHERE user_id = %s
+                        AND created_at > NOW() - (%s || ' days')::interval
+                      GROUP BY mode""", (user_id, str(days)))
+    out = {m: (w / n if n else 0.0) for m, w, n in cursor.fetchall()}
+    conn.close()
+    return out
+
+
+def word_attempts(user_id, vocab_id, limit=30):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT skill, mode, result, detail, created_at FROM word_attempts
+                      WHERE user_id = %s AND vocab_id = %s
+                      ORDER BY created_at DESC, id DESC LIMIT %s""", (user_id, vocab_id, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def plan_word_session(user_id, rng=None):
+    """Everything the session builder needs, gathered in one place."""
+    from config import (VOCAB_NEW_PER_SESSION, VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT,
+                        VOCAB_SESSION_REVIEWS, VOCAB_UNLOCKS_PER_SESSION,
+                        VOCAB_LESSON_SHARE)
+    import vocab_engine as ve
+    sync_word_skills(user_id)
+    due = count_due(user_id)
+    rec = due_words(user_id, "recognition", VOCAB_SESSION_REVIEWS)
+    prod = due_words(user_id, "production", VOCAB_SESSION_REVIEWS)
+    room = ve.new_word_allowance(due, introduced_today(user_id), VOCAB_NEW_PER_SESSION,
+                                 VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT)
+    lessons, frequency = new_word_candidates(user_id)
+    new = ve.pick_new_words(lessons, frequency, room, VOCAB_LESSON_SHARE)
+    # production starts only when the load is light enough for new material
+    unlock_cap = VOCAB_UNLOCKS_PER_SESSION if due <= VOCAB_BACKLOG_SOFT else 0
+    unlock = production_unlockable(user_id, unlock_cap)
+    ids = {w["id"] for w in rec + prod + unlock}
+    items = ve.build_session(rec, prod, unlock, new, VOCAB_SESSION_REVIEWS, unlock_cap,
+                             mode_error_rates(user_id), word_tracks(user_id, ids), rng)
+    import word_diagnosis as wd
+    open_d = open_diagnoses(user_id, [it["word"]["id"] for it in items])
+    for it in items:
+        dg = open_d.get(it["word"]["id"])
+        if dg and it["kind"] == "review":
+            it["mode"] = wd.PREFERRED_MODE.get((dg["cause"], it["skill"]), it["mode"])
+            it["confused_with"] = dg.get("confused_with")
+    return {"items": items, "due": due, "new_allowed": room}
+
+
+# ---- word content ---------------------------------------------------------
+# A cached set is rewritten after this many uses (fresh sentences), or once the
+# learner's known vocabulary has grown this much since it was written.
+WORD_CONTENT_MAX_USES = 12
+WORD_CONTENT_REFRESH_GROWTH = 0.5
+
+
+def word_content_get(user_id, vocab_id):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT id, known_count, payload, uses FROM word_content
+                      WHERE user_id = %s AND vocab_id = %s
+                      ORDER BY created_at DESC, id DESC LIMIT 1""", (user_id, vocab_id))
+    r = cursor.fetchone()
+    conn.close()
+    if not r:
+        return None
+    return {"id": r["id"], "known_count": r["known_count"], "uses": r["uses"],
+            "payload": json.loads(r["payload"])}
+
+
+def word_content_save(user_id, vocab_id, known_count, payload, keep=2):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO word_content (user_id, vocab_id, known_count, payload)
+                      VALUES (%s, %s, %s, %s) RETURNING id""",
+                   (user_id, vocab_id, known_count, json.dumps(payload, ensure_ascii=False)))
+    new_id = cursor.fetchone()[0]
+    cursor.execute("""DELETE FROM word_content WHERE user_id = %s AND vocab_id = %s
+                      AND id NOT IN (SELECT id FROM word_content WHERE user_id = %s
+                                     AND vocab_id = %s ORDER BY created_at DESC, id DESC
+                                     LIMIT %s)""",
+                   (user_id, vocab_id, user_id, vocab_id, keep))
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def word_content_used(content_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE word_content SET uses = uses + 1 WHERE id = %s", (content_id,))
+    conn.commit()
+    conn.close()
+
+
+def word_pool(user_id, minimum=300):
+    """Words to draw multiple-choice options from: the learner's introduced
+    words, topped up with the most frequent words while that list is short."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT DISTINCT v.chinese, v.pinyin, v.english FROM word_skill s
+                      JOIN vocab v ON v.id = s.vocab_id
+                      WHERE s.user_id = %s AND s.skill = 'recognition'
+                        AND v.chinese ~ '^[一-鿿]{1,6}$'""", (user_id,))
+    pool = [dict(r) for r in cursor.fetchall()]
+    if len(pool) < minimum:
+        have = {w["chinese"] for w in pool}
+        cursor.execute("""SELECT chinese, pinyin, english FROM vocab
+                          WHERE freq_rank IS NOT NULL ORDER BY freq_rank LIMIT %s""",
+                       (minimum * 2,))
+        pool += [dict(r) for r in cursor.fetchall() if r["chinese"] not in have][:minimum - len(pool)]
+    conn.close()
+    return pool
+
+
+def word_content_for(user_id, word, allow_generate=True, known=None):
+    """The content to learn `word` through, for this learner.
+
+    Reuses the cached set until it has been used WORD_CONTENT_MAX_USES times
+    or the learner's vocabulary has grown enough to write richer sentences.
+    Without a cached set (or when generation fails or isn't allowed), falls
+    back to a vetted sentence-bank sentence, then to the word alone.
+    Returns (payload, content_id or None)."""
+    import word_content as wc
+    if not re.fullmatch(r"[\u4e00-\u9fff]{1,8}", word.get("chinese") or ""):
+        # old sentence cards and Latin-script entries: nothing to write
+        cached = word_content_get(user_id, word["id"])
+        return (cached["payload"], cached["id"]) if cached else \
+            (wc.fallback_content(word, bank_get(word["chinese"])), None)
+    cached = word_content_get(user_id, word["id"])
+    known = known if known is not None else grammar_known_vocab(user_id)
+    stale = cached and (
+        cached["uses"] >= WORD_CONTENT_MAX_USES
+        or (cached["uses"] >= 4 and len(known) > (cached["known_count"] or 0)
+            * (1 + WORD_CONTENT_REFRESH_GROWTH)))
+    if cached and not (stale and allow_generate):
+        return cached["payload"], cached["id"]
+    if allow_generate:
+        structures = wc.practising_structures(grammar_progress(user_id), date.today())
+        recent = [w for w in recent_words(user_id) if w != word["chinese"]]
+        payload = wc.generate(word, known, structures, recent)
+        if payload:
+            if payload.get("reviewed", True):
+                return payload, word_content_save(user_id, word["id"], len(known), payload)
+            return payload, None
+    if cached:
+        return cached["payload"], cached["id"]
+    return wc.fallback_content(word, bank_get(word["chinese"])), None
+
+
+# ---- diagnosis ------------------------------------------------------------
+def open_diagnoses(user_id, vocab_ids=None):
+    """vocab_id -> the word's latest unresolved diagnosis."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    q = """SELECT d.*, v.chinese, v.pinyin, v.english FROM word_diagnosis d
+           JOIN vocab v ON v.id = d.vocab_id
+           WHERE d.user_id = %s AND d.resolved_at IS NULL"""
+    params = [user_id]
+    if vocab_ids is not None:
+        q += " AND d.vocab_id = ANY(%s)"
+        params.append(list(vocab_ids))
+    cursor.execute(q + " ORDER BY d.created_at", params)
+    out = {r["vocab_id"]: dict(r) for r in cursor.fetchall()}
+    conn.close()
+    return out
+
+
+def save_diagnosis(user_id, vocab_id, skill, diag):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO word_diagnosis (user_id, vocab_id, skill, cause, evidence,
+                          confused_with) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                   (user_id, vocab_id, skill, diag["cause"],
+                    json.dumps(diag.get("evidence") or [], ensure_ascii=False),
+                    diag.get("confused_with")))
+    new_id = cursor.fetchone()[0]
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def update_diagnosis(diag_id, remedy=None, note=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    if remedy is not None:
+        cursor.execute("UPDATE word_diagnosis SET remedy = %s WHERE id = %s",
+                       (json.dumps(remedy, ensure_ascii=False), diag_id))
+    if note is not None:
+        cursor.execute("UPDATE word_diagnosis SET note = %s WHERE id = %s", (note, diag_id))
+    conn.commit()
+    conn.close()
+
+
+def resolve_diagnosis(diag_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE word_diagnosis SET resolved_at = NOW() WHERE id = %s", (diag_id,))
+    conn.commit()
+    conn.close()
+
+
+def word_attempts_all(user_id, vocab_id, limit=40):
+    """Both skills, newest first (what the diagnosis reads)."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT skill, mode, result, detail, created_at FROM word_attempts
+                      WHERE user_id = %s AND vocab_id = %s
+                      ORDER BY created_at DESC, id DESC LIMIT %s""", (user_id, vocab_id, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def word_by_chinese(chinese):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT id, chinese, pinyin, english, tag FROM vocab WHERE chinese = %s
+                      ORDER BY from_lessons DESC, freq_rank NULLS LAST LIMIT 1""", (chinese,))
+    r = cursor.fetchone()
+    conn.close()
+    return dict(r) if r else None
+
+
+def recent_words(user_id, days=14, limit=30):
+    """Words introduced in the last `days` and answered correctly at least
+    once - what grammar drills and new word sentences should recycle."""
+    from datetime import timedelta
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT v.chinese FROM word_skill s JOIN vocab v ON v.id = s.vocab_id
+                      WHERE s.user_id = %s AND s.skill = 'recognition'
+                        AND s.introduced_on >= %s AND s.introduced_on <> 'seeded'
+                        AND (s.streak >= 1 OR s.interval >= 1)
+                        AND v.chinese ~ '^[一-鿿]{1,6}$'
+                      ORDER BY s.introduced_on DESC, v.freq_rank NULLS LAST LIMIT %s""",
+                   (user_id, cutoff, limit))
+    out = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return out
+
+
+def network_stats(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT COUNT(*) FILTER (WHERE skill = 'recognition'),
+                             COUNT(*) FILTER (WHERE skill = 'production')
+                      FROM word_skill WHERE user_id = %s AND reps > 0""", (user_id,))
+    rec, prod = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM grammar_progress WHERE user_id = %s", (user_id,))
+    gram = cursor.fetchone()[0]
+    conn.close()
+    return {"recognition": rec, "production": prod, "grammar": gram}
+
+
+# ---- Sound & Pairing drills ------------------------------------------------
+def introduced_words(user_id):
+    """Every Chinese word the learner has been introduced to (recognition
+    track exists), with what the drills need."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT v.id, v.chinese, v.pinyin, v.english, v.freq_rank, v.tag
+                      FROM word_skill s JOIN vocab v ON v.id = s.vocab_id
+                      WHERE s.user_id = %s AND s.skill = 'recognition'
+                        AND v.chinese ~ '^[一-鿿]+$'""", (user_id,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def single_char_words(chars):
+    """char -> its own vocabulary entry (for 'on its own it means…')."""
+    if not chars:
+        return {}
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT DISTINCT ON (chinese) chinese, pinyin, english, freq_rank
+                      FROM vocab WHERE chinese = ANY(%s)
+                      ORDER BY chinese, from_lessons DESC, freq_rank NULLS LAST""", (list(chars),))
+    out = {r["chinese"]: dict(r) for r in cursor.fetchall()}
+    conn.close()
+    return out
+
+
+def drill_progress_get(user_id, drill):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM drill_progress WHERE user_id = %s AND drill = %s",
+                   (user_id, drill))
+    out = {r["key"]: {k: r[k] for k in ("interval", "ease", "next_review_date", "reps",
+                                         "lapses", "streak", "last_result")}
+           for r in cursor.fetchall()}
+    conn.close()
+    return out
+
+
+def drill_progress_save(user_id, drill, key, track):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO drill_progress (user_id, drill, key, interval, ease, next_review_date,
+               reps, lapses, streak, last_result)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, drill, key) DO UPDATE SET
+            interval = EXCLUDED.interval, ease = EXCLUDED.ease,
+            next_review_date = EXCLUDED.next_review_date, reps = EXCLUDED.reps,
+            lapses = EXCLUDED.lapses, streak = EXCLUDED.streak,
+            last_result = EXCLUDED.last_result
+    """, (user_id, drill, key, track.get("interval", 0), track.get("ease", 2.5),
+          track.get("next_review_date") or date.today().isoformat(), track.get("reps", 0),
+          track.get("lapses", 0), track.get("streak", 0), track.get("last_result")))
+    conn.commit()
+    conn.close()
+
+
+# ---- games ----------------------------------------------------------------
+def game_scores(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT game, best, plays FROM game_scores WHERE user_id = %s", (user_id,))
+    out = {g: {"best": b, "plays": p} for g, b, p in cursor.fetchall()}
+    conn.close()
+    return out
+
+
+def save_game_score(user_id, game, score):
+    """Record a finished game; returns True if it was a new best."""
+    before = game_scores(user_id).get(game, {}).get("best", 0)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO game_scores (user_id, game, best, plays, last_played)
+                      VALUES (%s, %s, %s, 1, %s)
+                      ON CONFLICT (user_id, game) DO UPDATE SET
+                          best = GREATEST(game_scores.best, EXCLUDED.best),
+                          plays = game_scores.plays + 1, last_played = EXCLUDED.last_played""",
+                   (user_id, game, score, date.today().isoformat()))
+    conn.commit()
+    conn.close()
+    return score > before
+
+
+def vocab_ids_for(chineses):
+    """chinese -> vocab id, for the words that are in the vocabulary."""
+    if not chineses:
+        return {}
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT DISTINCT ON (chinese) chinese, id FROM vocab WHERE chinese = ANY(%s)
+                      ORDER BY chinese, from_lessons DESC, freq_rank NULLS LAST""", (list(chineses),))
+    out = dict(cursor.fetchall())
+    conn.close()
+    return out

@@ -1,0 +1,344 @@
+{
+ "head": {
+  "file": "head.png",
+  "title": "File:Profile Silhouette 01.png",
+  "author": "Mcbdixon",
+  "licence": "CC0",
+  "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Profile_Silhouette_01.png",
+  "changes": "cropped and resized"
+ },
+ "hair": {
+  "file": "hair.jpg",
+  "title": "File:Woman with long black hair from behind.jpg",
+  "author": "Alex Neman",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Woman_with_long_black_hair_from_behind.jpg",
+  "changes": "cropped and resized"
+ },
+ "face": {
+  "file": "face.jpg",
+  "title": "File:Face – Alexander.jpg",
+  "author": "Genusfotografen (genusfotografen.se) & Wikimedia Sverige (wikimedia.se)",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Face_%E2%80%93_Alexander.jpg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "forehead": {
+  "file": "forehead.jpg",
+  "title": "File:Little boy of Laos laughing.jpg",
+  "author": "Basile Morin",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Little_boy_of_Laos_laughing.jpg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "eyebrow": {
+  "file": "eyebrow.jpg",
+  "title": "File:Black eyebrow.jpg",
+  "author": "odder",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Black_eyebrow.jpg",
+  "changes": "cropped and resized"
+ },
+ "chin": {
+  "file": "chin.jpg",
+  "title": "File:Two-days stubble chin.jpg",
+  "author": "さえぼー (Saebo)",
+  "licence": "CC0",
+  "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Two-days_stubble_chin.jpg",
+  "changes": "cropped and resized"
+ },
+ "neck": {
+  "file": "neck.jpg",
+  "title": "File:Neck - Tiger.jpg",
+  "author": "Genusfotografen (genusfotografen.se) & Wikimedia Sverige (wikimedia.se)",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Neck_-_Tiger.jpg",
+  "changes": "cropped and resized"
+ },
+ "shoulder": {
+  "file": "shoulder.jpg",
+  "title": "File:Shoulder – Caisa.jpg",
+  "author": "Genusfotografen (genusfotografen.se) & Wikimedia Sverige (wikimedia.se)",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Shoulder_%E2%80%93_Caisa.jpg",
+  "changes": "cropped and resized"
+ },
+ "arm": {
+  "file": "arm.jpg",
+  "title": "File:Extended arm.jpg",
+  "author": "Genusfotografen (genusfotografen.se) & Wikimedia Sverige (wikimedia.se)",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Extended_arm.jpg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "elbow": {
+  "file": "elbow.jpg",
+  "title": "File:Elbow Bump1.jpg",
+  "author": "J slick",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Elbow_Bump1.jpg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "wrist": {
+  "file": "wrist.png",
+  "title": "File:Sprained wrist.svg",
+  "author": "InjuryMap",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Sprained_wrist.svg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "chest": {
+  "file": "chest.jpg",
+  "title": "File:Depiction of a person suffering from chest pain.png",
+  "author": "myUpchar (myupchar.com)",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Depiction_of_a_person_suffering_from_chest_pain.png",
+  "changes": "cropped and resized"
+ },
+ "belly": {
+  "file": "belly.jpg",
+  "title": "File:Depiction of a person suffering from Irritable Bowel Syndrome (IBS).png",
+  "author": "myUpchar (myupchar.com)",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Depiction_of_a_person_suffering_from_Irritable_Bowel_Syndrome_(IBS).png",
+  "changes": "cropped and resized"
+ },
+ "back": {
+  "file": "back.jpg",
+  "title": "File:Human back on gray background.jpg",
+  "author": "Genusfotografen (genusfotografen.se) & Wikimedia Sverige (wikimedia.se)",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Human_back_on_gray_background.jpg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "waist": {
+  "file": "waist.png",
+  "title": "File:Lower back pain.svg",
+  "author": "InjuryMap",
+  "licence": "CC BY 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Lower_back_pain.svg",
+  "changes": "cropped and resized"
+ },
+ "buttocks": {
+  "file": "buttocks.png",
+  "title": "File:Gluteus maximus.png",
+  "author": "Chrizz (Swedish Wikipedia)",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Gluteus_maximus.png",
+  "changes": "cropped and resized"
+ },
+ "knee": {
+  "file": "knee.jpg",
+  "title": "File:Human knees.jpg",
+  "author": "Genusfotografen (genusfotografen.se) & Wikimedia Sverige (wikimedia.se)",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Human_knees.jpg",
+  "changes": "cropped and resized"
+ },
+ "ankle": {
+  "file": "ankle.png",
+  "title": "File:Ankle pain.svg",
+  "author": "InjuryMap",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Ankle_pain.svg",
+  "changes": "cropped and resized"
+ },
+ "stomach": {
+  "file": "stomach.png",
+  "title": "File:Digestive system - Stomach 2 -- Smart-Servier.png",
+  "author": "Laboratoires Servier (Servier Medical Art)",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Digestive_system_-_Stomach_2_--_Smart-Servier.png",
+  "changes": "padded to a square and resized"
+ },
+ "liver": {
+  "file": "liver.png",
+  "title": "File:Digestive system - Liver 2 -- Smart-Servier.png",
+  "author": "Laboratoires Servier (Servier Medical Art)",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Digestive_system_-_Liver_2_--_Smart-Servier.png",
+  "changes": "padded to a square and resized"
+ },
+ "kidney": {
+  "file": "kidney.png",
+  "title": "File:Urinary system - Kidney 2 -- Smart-Servier.png",
+  "author": "Laboratoires Servier (Servier Medical Art)",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Urinary_system_-_Kidney_2_--_Smart-Servier.png",
+  "changes": "padded to a square and resized"
+ },
+ "durian": {
+  "file": "durian.jpg",
+  "title": "File:Durian Fruit in Yunnan.jpg",
+  "author": "Rod Waddington",
+  "licence": "CC BY-SA 2.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Durian_Fruit_in_Yunnan.jpg",
+  "changes": "cropped and resized"
+ },
+ "table": {
+  "file": "table.jpg",
+  "title": "File:Tavolino DSC 0482.tif",
+  "author": "Museo Egizio",
+  "licence": "CC0",
+  "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Tavolino_DSC_0482.tif",
+  "changes": "cropped and resized"
+ },
+ "aircon": {
+  "file": "aircon.jpg",
+  "title": "File:Panasonic AIR CONDITIONER INDOOR UNIT CS-C10KJ2 (2).jpg",
+  "author": "Dinkun Chen",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Panasonic_AIR_CONDITIONER_INDOOR_UNIT_CS-C10KJ2_(2).jpg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "fridge": {
+  "file": "fridge.jpg",
+  "title": "File:US Domestic Refrigerator GE.jpg",
+  "author": "Infrogmation of New Orleans",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:US_Domestic_Refrigerator_GE.jpg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "washer": {
+  "file": "washer.jpg",
+  "title": "File:Fagor washing machine front FF6314.jpg",
+  "author": "Dany kg",
+  "licence": "Public domain",
+  "licence_url": "",
+  "source": "https://commons.wikimedia.org/wiki/File:Fagor_washing_machine_front_FF6314.jpg",
+  "changes": "padded to a square and resized"
+ },
+ "fan": {
+  "file": "fan.jpg",
+  "title": "File:National pedestal fan (1).jpg",
+  "author": "Bindydad123",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:National_pedestal_fan_(1).jpg",
+  "changes": "cropped and resized"
+ },
+ "acupuncture": {
+  "file": "acupuncture.jpg",
+  "title": "File:Hand-Akupunktur.jpg",
+  "author": "E.duerselen",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Hand-Akupunktur.jpg",
+  "changes": "cropped and resized"
+ },
+ "cupping": {
+  "file": "cupping.jpg",
+  "title": "File:Cupping-Hejamat.jpg",
+  "author": "Davoodel",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Cupping-Hejamat.jpg",
+  "changes": "cropped and resized"
+ },
+ "guasha": {
+  "file": "guasha.jpg",
+  "title": "File:Gua Sha.jpg",
+  "author": "Jugana Loder",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Gua_Sha.jpg",
+  "changes": "cropped and resized"
+ },
+ "moxa": {
+  "file": "moxa.jpg",
+  "title": "File:Moxibustion.jpg",
+  "author": "Markgran",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Moxibustion.jpg",
+  "changes": "cropped, padded to a square and resized"
+ },
+ "pulse": {
+  "file": "pulse.jpg",
+  "title": "File:Pulse evaluation.jpg",
+  "author": "Thamizhpparithi Maari",
+  "licence": "CC BY-SA 3.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Pulse_evaluation.jpg",
+  "changes": "cropped and resized"
+ },
+ "acupoint": {
+  "file": "acupoint.jpg",
+  "title": "File:Puntos de Acupuntura.JPG",
+  "author": "CeliaTR",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Puntos_de_Acupuntura.JPG",
+  "changes": "cropped and resized"
+ },
+ "herbs": {
+  "file": "herbs.jpg",
+  "title": "File:Traditional Chinese Medicine Shop, George Town, Penang.jpg",
+  "author": "OXLAEY.com",
+  "licence": "CC BY 2.0",
+  "licence_url": "https://creativecommons.org/licenses/by/2.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Traditional_Chinese_Medicine_Shop,_George_Town,_Penang.jpg",
+  "changes": "cropped and resized"
+ },
+ "herbaltea": {
+  "file": "herbaltea.jpg",
+  "title": "File:Tisane de chrysanthème.jpg",
+  "author": "So_P from région parisienne, France",
+  "licence": "CC BY 2.0",
+  "licence_url": "https://creativecommons.org/licenses/by/2.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Tisane_de_chrysanth%C3%A8me.jpg",
+  "changes": "cropped and resized"
+ },
+ "ginseng": {
+  "file": "ginseng.jpg",
+  "title": "File:Insam (ginseng).jpg",
+  "author": "국립국어원 (National Institute of Korean Language)",
+  "licence": "CC BY-SA 2.0 kr",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/2.0/kr/deed.en/",
+  "source": "https://commons.wikimedia.org/wiki/File:Insam_(ginseng).jpg",
+  "changes": "cropped and resized"
+ },
+ "goji": {
+  "file": "goji.jpg",
+  "title": "File:Dried wolfberry plate.jpg",
+  "author": "Wstefano (English Wikipedia)",
+  "licence": "Public domain",
+  "licence_url": "",
+  "source": "https://commons.wikimedia.org/wiki/File:Dried_wolfberry_plate.jpg",
+  "changes": "cropped and resized"
+ },
+ "oil": {
+  "file": "oil.jpg",
+  "title": "File:Obat Minyak Angin Cap Kapak 2.jpg",
+  "author": "SATELIT BM",
+  "licence": "CC BY-SA 4.0",
+  "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "source": "https://commons.wikimedia.org/wiki/File:Obat_Minyak_Angin_Cap_Kapak_2.jpg",
+  "changes": "cropped and resized"
+ }
+}

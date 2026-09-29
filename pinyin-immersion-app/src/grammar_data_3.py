@@ -433,9 +433,11 @@ STRUCTURES = [
        notes="跟……一样 compares equals; 像……一样 likens (often figurative).",
        contrast=("gen_yiyang", "xiang_yiyang"), markers=("一样",), level=3,
        kind="contrast", also_in=(30,)),
-    _S("yue_yue", 13, "越……越…… — the more … the more …", "天越热，人越少。/ 越快越好。",
+    _S("yue_yue", 13, "越……越…… — the more … the more …", "天越热，人越少。/ 他越走越快。",
        "Link two things that increase together.",
-       notes="越 + A, 越 + B; subjects can differ. 越快越好 = the sooner the better.",
+       notes="越 + A, 越 + B; subjects can differ. A can be an adjective (天越热) or a "
+             "verb (越走越快, 越吃越胖) - use both across the items. 越快越好 = the "
+             "sooner the better.",
        contrast=("yuelaiyue",), markers=("越",), level=3, core=True, also_in=(31, 32, 34)),
     _S("yuelaiyue", 13, "越来越 + adjective — more and more", "越来越热 / 越来越喜欢",
        "Say something keeps getting more so.",
@@ -444,8 +446,15 @@ STRUCTURES = [
        contrast=("yue_yue",), markers=("越来越",), level=2, core=True, also_in=(31, 32, 34)),
     _S("yue_v_yue", 13, "越 + verb + 越…… — the more you do it", "越吃越想吃 / 越想越生气",
        "Say doing something more makes something increase.",
-       notes="Same verb or subject: 越说越快, 越看越喜欢.",
-       markers=("越",), level=3),
+       notes="Same subject throughout: 越说越快, 越看越喜欢, 越吃越胖. The second part "
+             "is an adjective or a feeling/wanting verb (快, 胖, 喜欢, 想吃). Learners "
+             "slip by adding a degree word (越说越很快 - no 很/太/非常 after 越), "
+             "putting 越 before the subject (越他说越快 - it is 他越说越快) and "
+             "using 更 in the second half (越说更快). Write produce and rapid "
+             "situations that tempt these slips (\"the more he talks, the faster he "
+             "gets\", \"the more he eats, the fatter he gets\"), with correct answer "
+             "keys; never show a wrong sentence.",
+       contrast=("yuelaiyue",), markers=("越",), level=2, core=True),
     _S("geng", 13, "更 + adjective — even more", "我更喜欢这个。",
        "Say something is even more so (compared with before or another).",
        notes="Without 比 too: 今天更热 / 我更喜欢巴刹.",

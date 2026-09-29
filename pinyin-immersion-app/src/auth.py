@@ -86,6 +86,28 @@ def _login_screen():
     st.stop()
 
 
+def current_user():
+    """The signed-in user, signing in automatically on a deployment pinned to
+    one person; None if someone still has to choose who they are."""
+    user = st.session_state.get("user")
+    if user:
+        return user
+    pinned = _pinned_username()
+    if pinned:
+        for u in db.list_users():
+            if u["username"].lower() == pinned.lower():
+                st.session_state.user = {"id": u["id"],
+                                         "display_name": u["display_name"],
+                                         "pinned": True}
+                return st.session_state.user
+    return None
+
+
+def login_page():
+    """The sign-in screen as a page of its own, for the navigation router."""
+    require_login()
+
+
 def require_login():
     """Return the signed-in user dict, or render the login screen and stop.
 

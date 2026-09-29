@@ -90,7 +90,7 @@ def score_character(char: str, personal_freq: int) -> float:
 
 
 # ----------------------------------------------------------------------
-# SRS for handwriting — same SM-2 pattern as srs_engine
+# SRS for handwriting — the same SM-2 pattern as the vocabulary engine
 # ----------------------------------------------------------------------
 HW_GRADE_AGAIN, HW_GRADE_HARD, HW_GRADE_GOOD, HW_GRADE_EASY = 0, 1, 2, 3
 HW_EASE_FLOOR = 1.3

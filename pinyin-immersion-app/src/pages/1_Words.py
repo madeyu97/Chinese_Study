@@ -12,9 +12,15 @@ Each item tests one skill of one word in one of five ways:
 New words are introduced through their chunks and sentences first, then
 checked straight away and again a few items later. Misses come back once in
 the same session. Content for upcoming items is prepared in the background.
+
+Pinyin fades as a word matures: shown with the answer while you're still
+learning a word, tucked behind a tap once you've known it for three weeks.
+As a step of today's plan, the session starts straight away with the plan's
+limits.
 """
 
 import random
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
@@ -22,6 +28,7 @@ import streamlit as st
 
 import db_manager as db
 import grammar_curriculum as gc
+import today_plan as tp
 import vocab_engine as ve
 import word_content as wc
 import word_diagnosis as wd
@@ -38,6 +45,7 @@ S = st.session_state
 HIGHLIGHT = "color:#d9480f;font-weight:600"
 MAX_ENRICH = 6          # background content writes per session for review words
 MAX_REMEDIES = 3        # diagnoses acted on per session, so repair never swamps review
+MATURE_DAYS = 21        # from here on, pinyin waits behind a tap
 
 
 def reset():
@@ -52,11 +60,10 @@ if "words_exec" not in S:
 
 with st.sidebar:
     sidebar_user_badge()
-    st.header("📚 Words")
-    show_pinyin = st.toggle("Show pinyin with answers", value=True, key="words_pinyin")
-    if "wd_items" in S:
+    tp.sidebar("words", reset)
+    if "wd_items" in S and S.wd_items:
         st.caption(f"{min(S.wd_i, len(S.wd_items))} of {len(S.wd_items)} done")
-        if st.button("End session"):
+        if not S.get("wd_plan") and st.button("End session"):
             reset()
             st.rerun()
 
@@ -66,6 +73,27 @@ st.title("📚 Words")
 # ----------------------------------------------------------------------
 # start screen
 # ----------------------------------------------------------------------
+def begin(in_plan=False, review_cap=None, new_cap=None, unlocks=True):
+    plan = db.plan_word_session(USER_ID, review_cap=review_cap, new_cap=new_cap,
+                                unlocks=unlocks)
+    reset()
+    S.wd_items, S.wd_i, S.wd_results = plan["items"], 0, []
+    S.wd_content, S.wd_futures, S.wd_retried, S.wd_rot = {}, {}, set(), {}
+    S.wd_plan, S.wd_t0 = in_plan, time.time()
+    S.wd_date, S.wd_enriched, S.wd_remedies = str(date.today()), 0, 0
+    if plan["items"]:
+        ids = {it["word"]["id"] for it in plan["items"]}
+        S.wd_mature = {vid for (vid, skill), t in db.word_tracks(USER_ID, ids).items()
+                       if skill == ve.RECOGNITION and (t.get("interval") or 0) >= MATURE_DAYS}
+        S.wd_pool = db.word_pool(USER_ID)
+        S.wd_known = db.grammar_known_vocab(USER_ID)
+
+
+if "wd_items" not in S and tp.active("words"):
+    p_ = tp.params("words")
+    begin(True, p_.get("reviews"), p_.get("new"), p_.get("unlocks", True))
+    st.rerun()
+
 if "wd_items" not in S:
     db.sync_word_skills(USER_ID)
     due = db.count_due(USER_ID)
@@ -84,15 +112,7 @@ if "wd_items" not in S:
         st.markdown("**Words you're working on:** " + " · ".join(
             f"{d['chinese']} ({wd.CAUSE_TITLES[d['cause']].lower()})" for d in working.values()))
     if st.button("▶️ Start", type="primary", width="stretch"):
-        plan = db.plan_word_session(USER_ID)
-        if not plan["items"]:
-            st.success("Nothing due and no new words available right now.")
-            st.stop()
-        S.wd_items, S.wd_i, S.wd_results = plan["items"], 0, []
-        S.wd_content, S.wd_futures, S.wd_retried, S.wd_rot = {}, {}, set(), {}
-        S.wd_pool = db.word_pool(USER_ID)
-        S.wd_known = db.grammar_known_vocab(USER_ID)
-        S.wd_date, S.wd_enriched, S.wd_remedies = str(date.today()), 0, 0
+        begin()
         st.rerun()
     st.stop()
 
@@ -156,7 +176,15 @@ def marked(sentence, target):
 
 
 def py(text):
-    if show_pinyin and text:
+    """Pinyin with the answer while the word is still being learned; behind
+    a tap once it's mature."""
+    if not text:
+        return
+    if word["id"] in S.get("wd_mature", ()):
+        st.markdown(f"<details><summary style='color:#90a4ae;font-size:0.85rem'>pinyin</summary>"
+                    f"<span style='color:#78909c;font-size:0.9rem'>{text}</span></details>",
+                    unsafe_allow_html=True)
+    else:
         st.caption(text)
 
 
@@ -247,9 +275,14 @@ def finish(item, mode, result, detail, cid):
         elif open_d and result != "correct":
             remedy = open_d.get("remedy") or {}
             S.wd_hook = open_d.get("note") or remedy.get("mnemonic")
+    if result != "ungraded":
+        # every answered card counts towards the day, by the skill it used
+        if skill == ve.RECOGNITION:
+            kind = "read" if mode == "zh_to_meaning" else "listen"
+        else:
+            kind = "speak" if detail.get("spoken") else "type"
         try:
-            db.log_activity(USER_ID, "listen" if skill == ve.RECOGNITION else "speak",
-                            word["chinese"], ve.GRADES[result])
+            db.log_activity(USER_ID, kind, word["chinese"], ve.GRADES[result])
         except Exception:
             pass
     if result == "wrong" and (vid, skill) not in S.wd_retried:
@@ -433,7 +466,16 @@ if S.wd_i >= len(S.wd_items):
     res = S.wd_results
     first = [r for r in res if r["kind"] != "retry"]
     right = sum(r["result"] == "correct" for r in first)
-    st.success(f"Session done — {right} of {len(first)} right first time.")
+    # a session started from the Library still counts if the plan is waiting on Words
+    if tp.active("words"):
+        S.wd_plan = True            # kept, so the Continue button survives the next rerun
+    in_plan = S.get("wd_plan")
+    tp.session_done(USER_ID, "words", S.get("wd_t0"), items=len(res),
+                    step="words" if in_plan else None, once_key="wd_logged")
+    if not S.wd_items:
+        st.success("Nothing due and no new words available right now.")
+    else:
+        st.success(f"Session done — {right} of {len(first)} right first time.")
     new = {r["chinese"]: r["english"] for r in res if r["kind"] in ("new", "step2")}
     if new:
         st.markdown("**New words:** " + " · ".join(f"{zh} — {wc.short_meaning(en)}"
@@ -451,7 +493,9 @@ if S.wd_i >= len(S.wd_items):
             by_mode[r["mode"]] = (ok + (r["result"] == "correct"), n + 1)
     if by_mode:
         st.caption(" · ".join(f"{ve.MODE_TITLES[m]}: {ok}/{n}" for m, (ok, n) in by_mode.items()))
-    if st.button("▶️ Another session", type="primary", width="stretch"):
+    if in_plan:
+        tp.continue_ui(reset)
+    elif st.button("▶️ Another session", type="primary", width="stretch"):
         reset()
         st.rerun()
     st.stop()
@@ -569,7 +613,7 @@ def production():
             if mode == "spoken":
                 with st.spinner("Checking…"):
                     g = wc.grade_spoken(word, prompt["situation"], prompt["sample_hanzi"], said, spoken)
-                finish(item, mode, g["verdict"], {"said": said, "error": g["error"],
+                finish(item, mode, g["verdict"], {"said": said, "spoken": spoken, "error": g["error"],
                                                   "feedback": g["feedback"], "better": g["better"]}, cid)
             else:
                 result, detail = wc.check_answer(said, target, word["pinyin"])

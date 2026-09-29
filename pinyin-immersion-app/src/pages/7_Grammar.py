@@ -7,8 +7,13 @@ Every structure runs through five short stages: hear and identify, say it
 from a situation, tell it apart from a look-alike, rapid retrieval, and a few
 conversational questions. Structures come back on their own spaced-repetition
 schedule; the core set comes back most often.
+
+Pinyin shows with the answers for your first couple of goes at a structure,
+then waits behind a tap. As a step of today's plan, the plan's structures
+(at most two, at most one new) start straight away.
 """
 
+import time
 from datetime import date
 
 import streamlit as st
@@ -16,13 +21,15 @@ import streamlit as st
 import db_manager as db
 import grammar_curriculum as gc
 import grammar_drills as gd
+import today_plan as tp
 from audio_engine import create_audio_file
 from auth import require_login, sidebar_user_badge
 from speech_engine import transcribe_audio
 from ai_prompter import _force_simplified
 from config import GRAMMAR_NEW_PER_DAY
 
-MIN_KNOWN = 20
+MIN_KNOWN = tp.GRAMMAR_MIN_KNOWN
+PINYIN_GOES = 2          # practised this many times: pinyin waits behind a tap
 
 st.set_page_config(page_title="Grammar", page_icon="🧩", layout="centered")
 USER = require_login()
@@ -35,15 +42,22 @@ order = gc.learning_order()
 queue = gd.todays_queue(order, progress, date.today(),
                         db.grammar_new_today(USER_ID), GRAMMAR_NEW_PER_DAY)
 
+
+def reset_all():
+    for k in [k for k in S if k.startswith("gr_") and k != "gr_audio"]:
+        del S[k]
+
+
+if S.get("gr_plan") and S.gr_plan.get("date") != date.today().isoformat():
+    reset_all()                     # yesterday's plan left open in the tab
+
+
 with st.sidebar:
     sidebar_user_badge()
-    st.header("🧩 Grammar")
+    tp.sidebar("grammar", reset_all)
     st.metric("Well-studied words to build from", len(known))
     st.caption(f"{len(progress)} of {len(gc.STRUCTURES)} structures practised · "
                f"{len(queue)} ready today")
-    show_pinyin = st.toggle("Show pinyin with answers", value=True)
-    mode = st.radio("Choose", ["Today's drills", "Pick a structure"],
-                    key="gr_mode_pick")
 
 st.title("🧩 Grammar drills")
 
@@ -68,14 +82,21 @@ def play(text):
 def big(hanzi, pinyin=""):
     st.markdown(f"<div style='font-size:1.9rem;line-height:1.5'>{hanzi}</div>",
                 unsafe_allow_html=True)
-    if show_pinyin and pinyin:
+    if not pinyin:
+        return
+    if S.get("gr_pinyin_open", True):
         st.caption(pinyin)
+    else:
+        st.markdown(f"<details><summary style='color:#90a4ae;font-size:0.85rem'>pinyin</summary>"
+                    f"<span style='color:#78909c;font-size:0.9rem'>{pinyin}</span></details>",
+                    unsafe_allow_html=True)
 
 
 def start(structure_id):
-    for k in [k for k in S if k.startswith("gr_") and k not in ("gr_mode_pick", "gr_audio")]:
+    for k in [k for k in S if k.startswith("gr_") and k not in ("gr_audio", "gr_plan")]:
         del S[k]
-    S.gr_sid = structure_id
+    S.gr_sid, S.gr_t0 = structure_id, time.time()
+    S.gr_pinyin_open = (progress.get(structure_id) or {}).get("review_count", 0) < PINYIN_GOES
 
 
 def load_set(structure):
@@ -121,12 +142,24 @@ def next_item():
 # ----------------------------------------------------------------------
 # choosing a structure
 # ----------------------------------------------------------------------
+if "gr_sid" not in S and "gr_plan" not in S and tp.active("grammar"):
+    ids = [i for i in tp.params("grammar").get("ids", []) if gc.get(i)]
+    S.gr_plan = {"ids": ids, "i": 0, "t0": time.time(), "date": date.today().isoformat()}
+    if ids:
+        start(ids[0])
+    st.rerun()
+
 if "gr_sid" not in S:
-    if mode == "Today's drills":
-        if not queue:
-            st.success("All caught up — nothing due today. Pick a structure to "
-                       "practise anyway.")
-            st.stop()
+    if S.get("gr_plan"):                 # the plan's structures are done (or skipped)
+        done_n = S.gr_plan.get("done", 0)
+        tp.session_done(USER_ID, "grammar", S.gr_plan["t0"], items=done_n, step="grammar",
+                        once_key="gr_plan_logged")
+        st.success("Grammar done for today." if done_n else "Nothing to drill in grammar today.")
+        tp.continue_ui(reset_all)
+        st.stop()
+    if not queue:
+        st.success("All caught up — nothing due today.")
+    else:
         st.write(f"**{len(queue)}** structures ready today.")
         for s_ in queue[:6]:
             tag = "new" if s_.id not in progress else "review"
@@ -134,7 +167,7 @@ if "gr_sid" not in S:
         if st.button("▶️ Start", type="primary", width="stretch"):
             start(queue[0].id)
             st.rerun()
-    else:
+    with st.expander("Choose a structure yourself", expanded=not queue):
         sec = st.selectbox("Section", list(gc.SECTIONS),
                            format_func=lambda n: f"{n}. {gc.SECTIONS[n]}")
         options = gc.in_section(sec)
@@ -143,7 +176,7 @@ if "gr_sid" not in S:
         p_ = progress.get(pick.id)
         st.caption("Not practised yet." if not p_ else
                    f"Practised {p_['review_count']}× · next review {p_['next_review_date']}")
-        if st.button("▶️ Drill this", type="primary", width="stretch"):
+        if st.button("▶️ Drill this", width="stretch"):
             start(pick.id)
             st.rerun()
     st.stop()
@@ -157,7 +190,17 @@ if "gr_set" not in S:
         c1, c2 = st.columns(2)
         if c1.button("🔄 Try again"):
             st.rerun()
-        if c2.button("⏭️ Choose another"):
+        if S.get("gr_plan"):
+            gp = S.gr_plan
+            if c2.button("⏭️ Skip this structure"):
+                gp["i"] += 1
+                if gp["i"] < len(gp["ids"]):
+                    start(gp["ids"][gp["i"]])
+                else:
+                    del S["gr_sid"]
+                    gp["ids"] = []           # nothing left: the step closes below
+                st.rerun()
+        elif c2.button("⏭️ Choose another"):
             del S["gr_sid"]
             st.rerun()
         st.stop()
@@ -198,8 +241,30 @@ if S.gr_stage >= len(S.gr_stages):
         except Exception:
             pass
         S.gr_saved = (score, nxt)
+        if S.get("gr_plan"):
+            S.gr_plan["done"] = S.gr_plan.get("done", 0) + 1
+        else:
+            tp.session_done(USER_ID, "grammar", S.get("gr_t0"), items=1)
     score, nxt = S.gr_saved
     st.success(f"Done — {round(score * 100)}% · back again on {nxt}")
+    if S.get("gr_plan"):
+        gp = S.gr_plan
+        if gp["i"] + 1 < len(gp["ids"]):
+            if st.button("▶️ Next structure", type="primary", width="stretch"):
+                gp["i"] += 1
+                start(gp["ids"][gp["i"]])
+                st.rerun()
+        else:
+            tp.session_done(USER_ID, "grammar", gp["t0"], items=gp.get("done", 0),
+                            step="grammar", once_key="gr_plan_logged")
+            tp.continue_ui(reset_all)
+        st.stop()
+    if tp.active("grammar") or S.get("gr_adopted"):
+        # started from the Library, but the plan was waiting on grammar: it counts
+        S.gr_adopted = True
+        tp.finish("grammar", USER_ID, 0, items=1)
+        tp.continue_ui(reset_all)
+        st.stop()
     c1, c2 = st.columns(2)
     if c1.button("▶️ Next structure", type="primary", width="stretch"):
         rest = [s_ for s_ in queue if s_.id != structure.id]
@@ -312,9 +377,10 @@ def rapid():
         return
     big(item["answer_hanzi"], item.get("answer_pinyin", ""))
     play(item["answer_hanzi"])
-    c1, c2, c3 = st.columns(3)
-    for col, label, val in ((c1, "✅ Got it", "got"), (c2, "🟡 Nearly", "nearly"),
-                            (c3, "❌ Missed", "missed")):
+    # nothing was recorded, so this is the one place you judge yourself:
+    # just whether what you said matched
+    c1, c2 = st.columns(2)
+    for col, label, val in ((c1, "✅ I said that", "got"), (c2, "❌ I didn't", "missed")):
         if col.button(label, width="stretch"):
             record(val)
             next_item()

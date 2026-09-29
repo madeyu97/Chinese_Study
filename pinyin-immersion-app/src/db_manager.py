@@ -155,7 +155,7 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             display_name TEXT NOT NULL,
             pin_hash TEXT,
-            session_mode TEXT DEFAULT 'latest_mix',
+            session_mode TEXT DEFAULT 'random_balanced',
             created_at TIMESTAMP DEFAULT NOW()
         )
     ''')
@@ -315,6 +315,25 @@ def init_db():
             PRIMARY KEY (user_id, drill, key)
         )
     ''')
+    # The day a group was first drilled, so new groups can be capped per day.
+    cursor.execute("ALTER TABLE drill_progress ADD COLUMN IF NOT EXISTS first_seen TEXT")
+    # Time ledger: one row per finished session on any page, whether it was a
+    # step of the day's plan or chosen from the Library. The Today page reads
+    # it to know which steps are done; Together reads it for minutes studied.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS study_sessions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            day DATE NOT NULL,
+            activity TEXT NOT NULL,
+            seconds INTEGER DEFAULT 0,
+            items INTEGER DEFAULT 0,
+            in_plan BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_study_sessions "
+                   "ON study_sessions (user_id, day)")
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_scores (
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -332,6 +351,12 @@ def init_db():
     # declared — otherwise CREATE TABLE IF NOT EXISTS silently no-ops on the
     # old table and every later index fails.
     _seed_users(conn)
+    # latest_mix ignored due dates while its grades still moved the review
+    # schedule; it is retired, and anyone still on it moves to the balanced
+    # spaced-repetition draw.
+    cursor.execute("UPDATE users SET session_mode = 'random_balanced' "
+                   "WHERE session_mode = 'latest_mix' OR session_mode IS NULL")
+    conn.commit()
     _split_legacy_vocab(conn)
     # SRS state is PER USER. (The pre-multi-user table of the same name held
     # content and progress together; _migrate_to_multiuser splits it.)
@@ -520,16 +545,13 @@ def clear_caches():
 # USERS
 # ==========================================
 # (username, display name, default session mode)
-#   latest_mix      — newest words + random breadth. The original
-#                     behaviour, and the one that IGNORES due dates: SRS
-#                     grades are stored but never decide what you see.
-#   srs_latest      — due reviews first, then newest additions. Real spaced
-#                     repetition, keeping the "show me what I just added"
-#                     bias.
+#   srs_latest      — due reviews first, then newest additions.
 #   random_balanced — due reviews first, then unseen words sampled evenly
-#                     across difficulty bands. Best for a new learner.
+#                     across difficulty bands.
+#   srs_frequency   — due reviews first, then unseen words most common first.
+# (latest_mix, which ignored due dates, is retired: see init_db.)
 DEFAULT_USERS = [
-    ("matt", "玛德宇", "latest_mix"),
+    ("matt", "玛德宇", "random_balanced"),
     ("selina", "姚皢慧", "random_balanced"),
 ]
 
@@ -612,7 +634,8 @@ def get_session_mode(user_id):
     cursor.execute("SELECT session_mode FROM users WHERE id = %s", (user_id,))
     row = cursor.fetchone()
     conn.close()
-    return (row[0] if row and row[0] else "latest_mix")
+    mode = row[0] if row and row[0] else "random_balanced"
+    return "random_balanced" if mode == "latest_mix" else mode
 
 
 def set_user_pin(user_id, pin):
@@ -1209,20 +1232,6 @@ def _ensure_progress(cursor, user_id, vocab_id):
     """, (user_id, vocab_id, date.today().isoformat()))
 
 
-def flag_word_in_database(chinese_char, user_id):
-    """Bump a word's priority for THIS user only."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM vocab WHERE chinese = %s", (chinese_char,))
-    for (vid,) in cursor.fetchall():
-        _ensure_progress(cursor, user_id, vid)
-        cursor.execute("""UPDATE vocab_progress
-                          SET priority_weight = priority_weight + 10
-                          WHERE user_id = %s AND vocab_id = %s""", (user_id, vid))
-    conn.commit()
-    conn.close()
-
-
 # ======================================================================
 # DIFFICULTY BANDS
 # A brand-new learner has no performance history, so difficulty is
@@ -1301,128 +1310,66 @@ def _balanced_new_cards(candidates, needed, rng):
 
 def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
                       random_pct=RANDOM_BREADTH_PCT, mode=None):
-    """Build today's batch according to this user's session mode.
+    """Build a batch according to this user's session mode.
 
-    latest_mix      — newest words plus random breadth (original behaviour).
     random_balanced — anything genuinely due comes first (real spaced
                       repetition), then unseen words drawn at random but
                       spread evenly across difficulty bands.
+    srs_latest      — anything due first, then your newest lesson words.
     srs_frequency   — anything due first, then unseen words in frequency
                       order: the most common words in spoken Mandarin first.
-    The first three draw new cards from your lesson words only.
+    latest_mix is retired (it ignored due dates) and now means
+    random_balanced.
     """
     import random as _random
     rng = _random.Random()
     mode = mode or get_session_mode(user_id)
+    if mode not in ("random_balanced", "srs_latest", "srs_frequency"):
+        mode = "random_balanced"
 
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    if mode in ("random_balanced", "srs_latest", "srs_frequency"):
-        today = date.today().isoformat()
-        # 1. everything actually due, oldest/most-urgent first
-        cursor.execute(_VOCAB_SELECT + """
-            WHERE p.review_count > 0 AND p.next_review_date <= %s
-            ORDER BY p.priority_weight DESC, p.next_review_date ASC
-            LIMIT %s
-        """, (user_id, today, total))
-        due = [dict(r) for r in cursor.fetchall()]
-
-        # 2. fill the rest with new cards, chosen this user's way
-        needed = max(0, total - len(due))
-        session = due
-        if needed:
-            exclude = [r["id"] for r in due]
-            if mode in ("srs_latest", "srs_frequency"):
-                sql = _VOCAB_SELECT + \
-                    " WHERE (p.review_count IS NULL OR p.review_count = 0)"
-                if mode == "srs_latest":
-                    sql += " AND v.from_lessons"
-                params = [user_id]
-                if exclude:
-                    ph = ",".join(["%s"] * len(exclude))
-                    sql += f" AND v.id NOT IN ({ph})"
-                    params += exclude
-                if mode == "srs_latest":
-                    # newest additions first — what you just put in the CSV
-                    sql += " ORDER BY v.id DESC LIMIT %s"
-                else:
-                    # most common first; words outside the list come last
-                    sql += " ORDER BY v.freq_rank ASC NULLS LAST, v.id ASC LIMIT %s"
-                params.append(needed)
-                cursor.execute(sql, params)
-                session = due + [dict(r) for r in cursor.fetchall()]
-            else:
-                candidates = _fetch_all_candidates(
-                    cursor, user_id, exclude_ids=exclude)
-                session = due + _balanced_new_cards(candidates, needed, rng)
-        conn.close()
-        rng.shuffle(session)
-        return session
-
-    # ---- latest_mix (unchanged) ----
-    random_count = int(round(total * random_pct))
-    latest_count = total - random_count
-    cursor.execute(_VOCAB_SELECT + " WHERE v.from_lessons "
-                   "ORDER BY v.id DESC LIMIT %s", (user_id, latest_count))
-    latest_rows = [dict(r) for r in cursor.fetchall()]
-    latest_ids = [r['id'] for r in latest_rows]
-
-    if latest_ids:
-        ph = ','.join(['%s'] * len(latest_ids))
-        cursor.execute(_VOCAB_SELECT + f" WHERE v.id NOT IN ({ph}) "
-                       f"AND {_LESSON_OR_STUDIED} ORDER BY RANDOM() LIMIT %s",
-                       [user_id] + latest_ids + [random_count])
-    else:
-        cursor.execute(_VOCAB_SELECT + f" WHERE {_LESSON_OR_STUDIED} "
-                       "ORDER BY RANDOM() LIMIT %s", (user_id, random_count))
-    random_rows = [dict(r) for r in cursor.fetchall()]
-    conn.close()
-    session = latest_rows + random_rows
-    rng.shuffle(session)
-    return session
-
-
-def get_due_words(user_id):
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    today_str = date.today().isoformat()
+    today = date.today().isoformat()
+    # 1. everything actually due, oldest/most-urgent first
     cursor.execute(_VOCAB_SELECT + """
         WHERE p.review_count > 0 AND p.next_review_date <= %s
         ORDER BY p.priority_weight DESC, p.next_review_date ASC
-    """, (user_id, today_str))
-    due_reviews = [dict(r) for r in cursor.fetchall()]
-    needed = MAX_REVIEWS_PER_DAY - len(due_reviews)
-    if needed > 0:
-        cursor.execute(_VOCAB_SELECT + """
-            WHERE (p.review_count IS NULL OR p.review_count = 0)
-              AND v.from_lessons
-            ORDER BY COALESCE(p.priority_weight, 1) DESC, v.id DESC LIMIT %s
-        """, (user_id, needed))
-        new_words = [dict(r) for r in cursor.fetchall()]
-    else:
-        new_words = []
-    conn.close()
-    return (due_reviews + new_words)[:MAX_REVIEWS_PER_DAY]
+        LIMIT %s
+    """, (user_id, today, total))
+    due = [dict(r) for r in cursor.fetchall()]
 
-
-def update_word_progress(user_id, word_id, next_review_date, new_interval, new_ease):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO vocab_progress
-            (user_id, vocab_id, next_review_date, interval, ease_factor,
-             review_count, priority_weight)
-        VALUES (%s, %s, %s, %s, %s, 1, 1)
-        ON CONFLICT (user_id, vocab_id) DO UPDATE SET
-            next_review_date = EXCLUDED.next_review_date,
-            interval = EXCLUDED.interval,
-            ease_factor = EXCLUDED.ease_factor,
-            review_count = vocab_progress.review_count + 1,
-            priority_weight = GREATEST(1, vocab_progress.priority_weight - 2)
-    """, (user_id, word_id, next_review_date, new_interval, new_ease))
-    conn.commit()
+    # 2. fill the rest with new cards, chosen this user's way
+    needed = max(0, total - len(due))
+    session = due
+    if needed:
+        exclude = [r["id"] for r in due]
+        if mode in ("srs_latest", "srs_frequency"):
+            sql = _VOCAB_SELECT + \
+                " WHERE (p.review_count IS NULL OR p.review_count = 0)"
+            if mode == "srs_latest":
+                sql += " AND v.from_lessons"
+            params = [user_id]
+            if exclude:
+                ph = ",".join(["%s"] * len(exclude))
+                sql += f" AND v.id NOT IN ({ph})"
+                params += exclude
+            if mode == "srs_latest":
+                # newest additions first — what you just put in the CSV
+                sql += " ORDER BY v.id DESC LIMIT %s"
+            else:
+                # most common first; words outside the list come last
+                sql += " ORDER BY v.freq_rank ASC NULLS LAST, v.id ASC LIMIT %s"
+            params.append(needed)
+            cursor.execute(sql, params)
+            session = due + [dict(r) for r in cursor.fetchall()]
+        else:
+            candidates = _fetch_all_candidates(
+                cursor, user_id, exclude_ids=exclude)
+            session = due + _balanced_new_cards(candidates, needed, rng)
     conn.close()
+    rng.shuffle(session)
+    return session
 
 
 @_cached(ttl=20)
@@ -1444,43 +1391,6 @@ def get_progress_stats(user_id):
     learning = max(0, total - unseen - mastered)
     return {"total": total, "unseen": unseen,
             "learning": learning, "mastered": mastered}
-
-
-def undo_word_progress(user_id, word_id, old_next_review_date, old_interval,
-                       old_ease, old_review_count, old_priority):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO vocab_progress
-            (user_id, vocab_id, next_review_date, interval, ease_factor,
-             review_count, priority_weight)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (user_id, vocab_id) DO UPDATE SET
-            next_review_date = EXCLUDED.next_review_date,
-            interval = EXCLUDED.interval,
-            ease_factor = EXCLUDED.ease_factor,
-            review_count = EXCLUDED.review_count,
-            priority_weight = EXCLUDED.priority_weight
-    """, (user_id, word_id, old_next_review_date, old_interval, old_ease,
-          old_review_count, old_priority))
-    conn.commit()
-    conn.close()
-
-
-def get_more_words(user_id, exclude_ids, amount=5):
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    if exclude_ids:
-        ph = ','.join(['%s'] * len(exclude_ids))
-        cursor.execute(_VOCAB_SELECT + f" WHERE v.id NOT IN ({ph}) "
-                       f"AND {_LESSON_OR_STUDIED} ORDER BY RANDOM() LIMIT %s",
-                       [user_id] + list(exclude_ids) + [amount])
-    else:
-        cursor.execute(_VOCAB_SELECT + f" WHERE {_LESSON_OR_STUDIED} "
-                       "ORDER BY RANDOM() LIMIT %s", (user_id, amount))
-    rows = [dict(r) for r in cursor.fetchall()]
-    conn.close()
-    return rows
 
 
 def delete_word_from_db(word_id):
@@ -1803,6 +1713,69 @@ def get_handwriting_counts(user_id):
     due = sum(1 for c in chars if c in seen and seen[c] <= today_str)
     new = sum(1 for c in chars if c not in seen)
     return due, new
+
+
+def handwriting_new_today(user_id):
+    """Characters written for the first time today, across every source."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT COUNT(*) FROM handwriting_progress
+                      WHERE user_id = %s AND first_seen_date = %s""",
+                   (user_id, date.today().isoformat()))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n
+
+
+def handwriting_new_allowance(user_id, due):
+    """New characters still allowed today: a daily cap shared by every
+    source, and none while reviews have piled up."""
+    from config import HANDWRITING_NEW_PER_DAY, HANDWRITING_BACKLOG
+    if due > HANDWRITING_BACKLOG:
+        return 0
+    return max(0, HANDWRITING_NEW_PER_DAY - handwriting_new_today(user_id))
+
+
+def handwriting_started(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM handwriting_progress WHERE user_id = %s LIMIT 1",
+                   (user_id,))
+    ok = cursor.fetchone() is not None
+    conn.close()
+    return ok
+
+
+def handwriting_due_and_new(user_id, source=None):
+    """(due, new_available) for the learner's chosen character source."""
+    source = source or get_handwriting_source(user_id)
+    if source == "herbs":
+        hc = herb_character_counts(user_id)
+        return hc["due"], hc["new"]
+    if source == "frequency":
+        from character_curriculum import CHARACTERS
+        cp = get_curriculum_progress(user_id)
+        return len(get_curriculum_session(user_id, new_count=0)), \
+            max(0, min(len(CHARACTERS), 500) - (cp.get("started", 0) or 0))
+    return get_handwriting_counts(user_id)
+
+
+def handwriting_session_for(user_id, new_chars, max_reviews=None, source=None):
+    """A standard review session from the chosen source. `new_chars` is in
+    characters; herb names are introduced whole, about two characters each."""
+    source = source or get_handwriting_source(user_id)
+    if source == "herbs":
+        chars = get_herb_session(user_id, new_count=(new_chars + 1) // 2)
+    elif source == "frequency":
+        chars = get_curriculum_session(user_id, new_count=new_chars)
+    else:
+        chars = get_handwriting_session(user_id, new_count=new_chars)
+    if max_reviews is not None and source != "herbs":     # herb names stay whole
+        due = [c for c in chars if not c.get("is_new")]
+        if len(due) > max_reviews:
+            keep = set(id(c) for c in due[:max_reviews])
+            chars = [c for c in chars if c.get("is_new") or id(c) in keep]
+    return chars
 
 
 def get_handwriting_session(user_id, new_count=5):
@@ -2272,8 +2245,21 @@ def get_char_state(user_id, character):
 # leaderboard would be permanently discouraging for the other and would
 # stop being motivating for either.
 # ==========================================
-ACTIVITY_KINDS = {"listen": "Listening", "speak": "Speaking",
-                  "write": "Handwriting", "grammar": "Grammar", "games": "Games"}
+# One row per answered card, by the skill it used: reading a word or
+# sentence, hearing one, saying one, typing one, writing a character, a
+# grammar structure, a tone item, or a game round.
+ACTIVITY_KINDS = {"read": "Reading", "listen": "Listening", "speak": "Speaking",
+                  "type": "Typing", "write": "Handwriting", "grammar": "Grammar",
+                  "tones": "Tones", "games": "Games"}
+
+# Time ledger: which strand of study each page's minutes belong to.
+ACTIVITY_STRAND = {"words": "study", "grammar": "study", "tones": "study",
+                   "pairs": "study", "handwriting": "study",
+                   "sentences": "use", "reading": "use", "games": "play"}
+STRANDS = {"study": "Words, grammar, tones & writing",
+           "use": "Listening, reading & speaking",
+           "play": "Games"}
+MAX_SESSION_SECONDS = 45 * 60      # a tab left open doesn't count as study
 
 
 def log_activity(user_id, kind, item=None, grade=None, mistakes=0):
@@ -2355,6 +2341,70 @@ def daily_series(user_id, days=14):
     today = date.today()
     return [(today - timedelta(days=i), counts.get(today - timedelta(days=i), 0))
             for i in range(days - 1, -1, -1)]
+
+
+def log_study_session(user_id, activity, seconds, in_plan=False, items=0):
+    """Record one finished session in the time ledger. Never raises."""
+    try:
+        seconds = max(0, min(int(seconds or 0), MAX_SESSION_SECONDS))
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""INSERT INTO study_sessions
+                          (user_id, day, activity, seconds, items, in_plan)
+                          VALUES (%s, %s, %s, %s, %s, %s)""",
+                       (user_id, date.today(), activity, seconds, int(items or 0),
+                        bool(in_plan)))
+        conn.commit()
+        conn.close()
+        clear_caches()
+    except Exception as e:
+        logging.warning(f"[LEDGER] not logged: {e}")
+
+
+def plan_done_today(user_id):
+    """Plan steps finished today (as step keys)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT DISTINCT activity FROM study_sessions
+                      WHERE user_id = %s AND day = %s AND in_plan""",
+                   (user_id, date.today()))
+    out = {r[0] for r in cursor.fetchall()}
+    conn.close()
+    return out
+
+
+def mark_plan_complete(user_id):
+    """Record that today's whole plan is done (once per day)."""
+    if "plan_complete" not in plan_done_today(user_id):
+        log_study_session(user_id, "plan_complete", 0, in_plan=True)
+
+
+@_cached(ttl=20)
+def study_minutes(user_id, days=7):
+    """Minutes by activity and by strand over the last `days` days, plus the
+    number of days the whole plan was done and days with any study."""
+    from datetime import timedelta
+    since = date.today() - timedelta(days=days - 1)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT activity, SUM(seconds) FROM study_sessions
+                      WHERE user_id = %s AND day >= %s GROUP BY activity""",
+                   (user_id, since))
+    by_activity = {a: round((sec or 0) / 60) for a, sec in cursor.fetchall()
+                   if a != "plan_complete"}
+    cursor.execute("""SELECT COUNT(DISTINCT day) FILTER (WHERE activity = 'plan_complete'),
+                             COUNT(DISTINCT day) FILTER (WHERE activity <> 'plan_complete')
+                      FROM study_sessions WHERE user_id = %s AND day >= %s""",
+                   (user_id, since))
+    plan_days, study_days = cursor.fetchone()
+    conn.close()
+    by_strand = {}
+    for a, m in by_activity.items():
+        k = ACTIVITY_STRAND.get(a, "study")
+        by_strand[k] = by_strand.get(k, 0) + m
+    return {"by_activity": by_activity, "by_strand": by_strand,
+            "total": sum(by_activity.values()), "plan_days": plan_days or 0,
+            "study_days": study_days or 0}
 
 
 def recent_activity(limit=12):
@@ -3135,25 +3185,30 @@ def word_attempts(user_id, vocab_id, limit=30):
     return rows
 
 
-def plan_word_session(user_id, rng=None):
-    """Everything the session builder needs, gathered in one place."""
+def plan_word_session(user_id, rng=None, review_cap=None, new_cap=None, unlocks=True):
+    """Everything the session builder needs, gathered in one place.
+    review_cap / new_cap tighten the usual limits (the short day uses them);
+    they never loosen the daily cap on new words."""
     from config import (VOCAB_NEW_PER_SESSION, VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT,
                         VOCAB_SESSION_REVIEWS, VOCAB_UNLOCKS_PER_SESSION,
                         VOCAB_LESSON_SHARE)
     import vocab_engine as ve
+    review_cap = VOCAB_SESSION_REVIEWS if review_cap is None else min(review_cap, VOCAB_SESSION_REVIEWS)
     sync_word_skills(user_id)
     due = count_due(user_id)
-    rec = due_words(user_id, "recognition", VOCAB_SESSION_REVIEWS)
-    prod = due_words(user_id, "production", VOCAB_SESSION_REVIEWS)
+    rec = due_words(user_id, "recognition", review_cap)
+    prod = due_words(user_id, "production", review_cap)
     room = ve.new_word_allowance(due, introduced_today(user_id), VOCAB_NEW_PER_SESSION,
                                  VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT)
+    if new_cap is not None:
+        room = max(0, min(room, new_cap))
     lessons, frequency = new_word_candidates(user_id)
     new = ve.pick_new_words(lessons, frequency, room, VOCAB_LESSON_SHARE)
     # production starts only when the load is light enough for new material
-    unlock_cap = VOCAB_UNLOCKS_PER_SESSION if due <= VOCAB_BACKLOG_SOFT else 0
+    unlock_cap = VOCAB_UNLOCKS_PER_SESSION if unlocks and due <= VOCAB_BACKLOG_SOFT else 0
     unlock = production_unlockable(user_id, unlock_cap)
     ids = {w["id"] for w in rec + prod + unlock}
-    items = ve.build_session(rec, prod, unlock, new, VOCAB_SESSION_REVIEWS, unlock_cap,
+    items = ve.build_session(rec, prod, unlock, new, review_cap, unlock_cap,
                              mode_error_rates(user_id), word_tracks(user_id, ids), rng)
     import word_diagnosis as wd
     open_d = open_diagnoses(user_id, [it["word"]["id"] for it in items])
@@ -3418,8 +3473,8 @@ def drill_progress_save(user_id, drill, key, track):
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO drill_progress (user_id, drill, key, interval, ease, next_review_date,
-               reps, lapses, streak, last_result)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               reps, lapses, streak, last_result, first_seen)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (user_id, drill, key) DO UPDATE SET
             interval = EXCLUDED.interval, ease = EXCLUDED.ease,
             next_review_date = EXCLUDED.next_review_date, reps = EXCLUDED.reps,
@@ -3427,9 +3482,22 @@ def drill_progress_save(user_id, drill, key, track):
             last_result = EXCLUDED.last_result
     """, (user_id, drill, key, track.get("interval", 0), track.get("ease", 2.5),
           track.get("next_review_date") or date.today().isoformat(), track.get("reps", 0),
-          track.get("lapses", 0), track.get("streak", 0), track.get("last_result")))
+          track.get("lapses", 0), track.get("streak", 0), track.get("last_result"),
+          date.today().isoformat()))
     conn.commit()
     conn.close()
+
+
+def drill_new_today(user_id, drill):
+    """Groups (tone) or families (pair) met for the first time today."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT COUNT(*) FROM drill_progress WHERE user_id = %s
+                      AND drill = %s AND first_seen = %s""",
+                   (user_id, drill, date.today().isoformat()))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n
 
 
 # ---- games ----------------------------------------------------------------
@@ -3469,3 +3537,52 @@ def vocab_ids_for(chineses):
     out = dict(cursor.fetchall())
     conn.close()
     return out
+
+
+# ---- sentence practice (Listen & speak) ------------------------------------
+def sentence_practice_words(user_id, limit=40):
+    """Words already introduced, for sentence listening and speaking: due
+    recognition first, then words introduced in the last fortnight (weakest
+    first), then the rest at random. Never a word you haven't met, so this
+    page adds no new material. Each row carries both skill tracks."""
+    from datetime import timedelta
+    today = date.today().isoformat()
+    fortnight = (date.today() - timedelta(days=14)).isoformat()
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute(f"""
+        SELECT {_WORD_COLS},
+               r.interval AS rec_interval, r.next_review_date AS rec_due,
+               r.introduced_on, p.next_review_date AS prod_due,
+               p.interval AS prod_interval
+        FROM word_skill r JOIN vocab v ON v.id = r.vocab_id
+        LEFT JOIN word_skill p ON p.user_id = r.user_id AND p.vocab_id = r.vocab_id
+                               AND p.skill = 'production'
+        WHERE r.user_id = %s AND r.skill = 'recognition'
+          AND v.chinese ~ '^[一-鿿]{{1,8}}$'
+        ORDER BY (COALESCE(r.next_review_date, '') <= %s) DESC,
+                 (COALESCE(r.introduced_on, '') >= %s) DESC,
+                 r.interval ASC, RANDOM()
+        LIMIT %s
+    """, (user_id, today, fortnight, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def find_words(query, limit=20):
+    """Vocabulary entries matching hanzi, pinyin or English, for the editor."""
+    q = (query or "").strip()
+    if not q:
+        return []
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT id, chinese, pinyin, english, tag, freq_rank, from_lessons
+                      FROM vocab WHERE chinese = %s OR chinese LIKE %s
+                         OR pinyin ILIKE %s OR english ILIKE %s
+                      ORDER BY (chinese = %s) DESC, freq_rank NULLS LAST, id
+                      LIMIT %s""",
+                   (q, f"%{q}%", f"%{q}%", f"%{q}%", q, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows

@@ -134,3 +134,26 @@ VOCAB_SESSION_REVIEWS = 25
 VOCAB_UNLOCKS_PER_SESSION = 4
 # Share of new words drawn from your lesson list (the rest follow frequency).
 VOCAB_LESSON_SHARE = 0.4
+
+
+# ==========================================
+# DAILY LIMITS ON NEW MATERIAL (every page)
+# ==========================================
+# New characters written per day, across all handwriting sources; none while
+# more than HANDWRITING_BACKLOG characters are due.
+HANDWRITING_NEW_PER_DAY = 5
+HANDWRITING_BACKLOG = 30
+# New tone groups / character families per day, per drill.
+SOUND_NEW_PER_DAY = 3
+
+
+# ==========================================
+# TODAY'S PLAN
+# ==========================================
+# Full day: every step at its usual size. Short day: a few of the most
+# urgent reviews, then a little listening - it still counts as a day.
+PLAN_SHORT_REVIEWS = 10
+PLAN_HANDWRITING_REVIEWS = 15
+PLAN_GRAMMAR_STRUCTURES = 2
+PLAN_SENTENCES_LISTEN = 3
+PLAN_SENTENCES_SPEAK = 3

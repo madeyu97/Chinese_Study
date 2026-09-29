@@ -1,14 +1,17 @@
 # src/pages/8_Games.py
 """
-🎮 Games - picture games for when you're too tired for a full session.
+🎮 Play - picture games for spare minutes: something to open instead of a
+feed. Extra practice on top of today's plan, not a replacement for it.
 
-Four quick games linking pictures to words (body, clothing, food, home,
-places, nature, animals, TCM clinic). Words can be shown with pinyin or as
-characters only. Answers register on tap; scores, streaks and best scores
-keep it light.
+Four quick games linking pictures to words (body, clothing, food, hawker
+food, market & local fruit, home, places, nature, animals, TCM clinic, TCM
+herbs). Words can be shown with pinyin or as characters only. Answers
+register on tap; scores, streaks and best scores keep it light. Time played
+goes into the ledger as play.
 """
 
 import random
+import time
 
 import streamlit as st
 
@@ -19,7 +22,7 @@ from audio_engine import create_audio_file
 from auth import require_login, sidebar_user_badge
 from game_images import credit_lines, img_tag
 
-st.set_page_config(page_title="Games", page_icon="🎮", layout="centered")
+st.set_page_config(page_title="Play", page_icon="🎮", layout="centered")
 USER = require_login()
 USER_ID = USER["id"]
 S = st.session_state
@@ -31,21 +34,20 @@ def reset():
         del S[k]
 
 
+SHOW = ["Characters + pinyin", "Characters only"]
+WORDS = ["All — learn new ones too", "Only words I've met"]
+# kept outside the widgets, which Streamlit forgets while a game is on screen
+PREFS = S.setdefault("games_prefs", {"show": SHOW[0], "cats": list(gi.CATEGORIES),
+                                     "words": WORDS[0]})
+
 with st.sidebar:
     sidebar_user_badge()
-    st.header("🎮 Games")
-    show_pinyin = st.radio("Show words as", ["Characters + pinyin", "Characters only"],
-                           key="games_show") == "Characters + pinyin"
-    cats = st.multiselect("Topics", list(gi.CATEGORIES), default=list(gi.CATEGORIES),
-                          format_func=lambda c: f"{gi.CATEGORIES[c][2]} {gi.CATEGORIES[c][1]}",
-                          key="games_cats", disabled="gm_game" in S)
-    only_met = st.radio("Words", ["All — learn new ones too", "Only words I've met"],
-                        key="games_words", disabled="gm_game" in S) == "Only words I've met"
     if "gm_game" in S and st.button("End game", width="stretch"):
         reset()
         st.rerun()
 
-st.title("🎮 Games")
+st.title("🎮 Play")
+show_pinyin = PREFS["show"] == SHOW[0]
 
 
 # ----------------------------------------------------------------------
@@ -91,9 +93,10 @@ def record(item, correct, game):
 
 def start(game):
     reset()
+    only_met = PREFS["words"] == WORDS[1]
     met = {w["chinese"] for w in db.introduced_words(USER_ID)} if only_met else None
-    pool, topped = gm.word_pool(cats or list(gi.CATEGORIES), met, only_met)
-    S.gm_game, S.gm_topped = game, topped
+    pool, topped = gm.word_pool(PREFS["cats"] or list(gi.CATEGORIES), met, only_met)
+    S.gm_game, S.gm_topped, S.gm_t0 = game, topped, time.time()
     S.gm_vocab = db.vocab_ids_for([i["chinese"] for i in pool])
     if game == "memory":
         S.gm_cards, S.gm_up, S.gm_matched, S.gm_moves = gm.memory_board(pool), [], set(), 0
@@ -107,7 +110,16 @@ def start(game):
 # game picker
 # ----------------------------------------------------------------------
 if "gm_game" not in S:
-    st.caption("Quick picture games for tired days — still linking words to meaning.")
+    st.caption("Quick picture games for spare minutes — every round still links a word to "
+               "its meaning. Today's plan comes first; this is the extra.")
+    with st.expander("Topics and display"):
+        PREFS["show"] = st.radio("Show words as", SHOW, index=SHOW.index(PREFS["show"]),
+                                 key="games_show", horizontal=True)
+        PREFS["cats"] = st.multiselect(
+            "Topics", list(gi.CATEGORIES), default=PREFS["cats"],
+            format_func=lambda c: f"{gi.CATEGORIES[c][2]} {gi.CATEGORIES[c][1]}", key="games_cats")
+        PREFS["words"] = st.radio("Words", WORDS, index=WORDS.index(PREFS["words"]),
+                                  key="games_words", horizontal=True)
     best = db.game_scores(USER_ID)
     for key, (icon, name, blurb) in gm.GAMES.items():
         b = best.get(key)
@@ -131,6 +143,8 @@ if S.get("gm_topped"):
 def finish(score):
     if "gm_saved" not in S:
         S.gm_saved = db.save_game_score(USER_ID, game, score)
+        db.log_study_session(USER_ID, "games", time.time() - S.get("gm_t0", time.time()),
+                             items=len(S.get("gm_rounds") or S.get("gm_cards") or []))
     return S.gm_saved
 
 

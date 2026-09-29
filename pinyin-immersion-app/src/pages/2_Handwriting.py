@@ -13,28 +13,35 @@ Struggle-aware drilling:
     >3 mistakes, and pin its next review to tomorrow.
   • A dedicated "Drill my weak characters" mode ranks characters by recent
     mistake rate; pick any and loop each until written clean twice in a row.
+
+New characters are capped per day across every source (and held back while
+reviews pile up). As a step of today's plan, a review session from your
+chosen source starts straight away.
 """
 
+import time
 import uuid
+from datetime import date
 
 import streamlit as st
 
+import today_plan as tp
 from auth import require_login, sidebar_user_badge
+from config import HANDWRITING_NEW_PER_DAY
 from hanzi_component import hanzi_drill
 from db_manager import (
-    get_herb_session,
     herb_character_counts,
     import_herbs_from_csv,
     list_studied_characters,
-    get_curriculum_session,
     get_curriculum_progress,
     get_handwriting_source,
     set_handwriting_source,
-    get_handwriting_session,
     get_focus_session,
     get_struggle_session,
     get_weak_characters,
-    get_handwriting_counts,
+    handwriting_due_and_new,
+    handwriting_new_allowance,
+    handwriting_session_for,
     update_handwriting_progress,
     get_handwriting_stats,
     get_char_state,
@@ -44,132 +51,86 @@ st.set_page_config(page_title="Handwriting", page_icon="✍️", layout="centere
 
 USER = require_login()
 USER_ID = USER["id"]
+S = st.session_state
+SESSION_KEYS = ("hw_payload", "hw_sid", "hw_processed", "hw_done", "hw_final",
+                "hw_state_seed", "hw_plan", "hw_t0", "hw_logged", "hw_plan_empty", "hw_day")
+SOURCES = {
+    "vocab": "Characters from my vocabulary",
+    "frequency": "500 most common characters",
+    "herbs": "本草 Herb names",
+}
 
-# ----------------------------------------------------------------------
-# SIDEBAR
-# ----------------------------------------------------------------------
+
+def end_session():
+    for k in SESSION_KEYS:
+        S.pop(k, None)
+
+
+if (S.get("hw_plan") or S.get("hw_plan_empty")) and S.get("hw_day") != date.today().isoformat():
+    end_session()                   # yesterday's plan left open in the tab
+
 with st.sidebar:
     sidebar_user_badge()
-    st.header("✍️ Handwriting")
-
-    _SOURCES = {
-        "frequency": "500 most common characters",
-        "vocab": "Characters from my vocabulary",
-        "herbs": "本草 Herb names",
-    }
-    _src = get_handwriting_source(USER_ID)
-    _pick = st.radio("Character source", options=list(_SOURCES),
-                     index=list(_SOURCES).index(_src) if _src in _SOURCES else 1,
-                     format_func=lambda k: _SOURCES[k], key="hw_source")
-    if _pick != _src:
-        set_handwriting_source(USER_ID, _pick)
-        for k in ("hw_payload", "hw_sid", "hw_processed", "hw_done",
-                  "hw_final", "hw_state_seed"):
-            st.session_state.pop(k, None)
-        st.rerun()
-
-    if _pick == "frequency":
-        cp = get_curriculum_progress(USER_ID)
-        # Read defensively: a page and its data layer can briefly disagree
-        # after a partial deploy, and a missing key should degrade the
-        # display rather than take the whole page down.
-        _total = cp.get("total", 500) or 500
-        _started = cp.get("started", 0)
-        _mastered = cp.get("mastered", 0)
-        st.metric("Characters studied", f"{_started}/{_total}")
-        st.progress(min(1.0, _started / _total))
-        _cov = cp.get("text_coverage")
-        _mcov = cp.get("mastered_coverage")
-        _line = ""
-        if _cov is not None:
-            _line = (f"Those characters make up ~**{_cov}%** of everything "
-                     f"you'll read. ")
-        _line += f"{_mastered} mastered"
-        _line += f" (~{_mcov}%)." if _mcov is not None else "."
-        st.caption(_line)
-        _in_order = cp.get("in_order")
-        if _in_order is not None and _in_order < _started:
-            st.caption(f"Working strictly in order, you're at #{_in_order} "
-                       f"- the rest came from vocabulary practice.")
-        st.markdown("---")
-    hw_stats = get_handwriting_stats(USER_ID)
-    total = hw_stats["total_chars_available"]
-    st.metric("Characters in your vocab", total)
-    if total:
-        st.write(f"**✏️ Practiced:** {hw_stats['practiced']}")
-        st.progress(min(1.0, hw_stats["practiced"] / total))
-        if st.button("View / drill these", key="browse_practiced",
-                     width="stretch"):
-            st.session_state.hw_browse = "all"
-            st.rerun()
-        st.write(f"**🏆 Mastered:** {hw_stats['mastered']}")
-        st.progress(min(1.0, hw_stats["mastered"] / total))
-        if st.button("View / drill these", key="browse_mastered",
-                     width="stretch"):
-            st.session_state.hw_browse = "mastered"
-            st.rerun()
-        st.caption("Mastered = review pushed 21+ days out.")
+    tp.sidebar("handwriting", end_session)
 
 
 # ----------------------------------------------------------------------
 # RESULT INTAKE — incremental, per-attempt, handles repeated characters
 # ----------------------------------------------------------------------
 def process_results(value):
-    if not value or value.get("session_id") != st.session_state.get("hw_sid"):
+    if not value or value.get("session_id") != S.get("hw_sid"):
         return
     results = value.get("results", [])
-    done_before = st.session_state.hw_processed
+    done_before = S.hw_processed
     for r in results[done_before:]:
         ch = r["character"]
         # Fetch the character's *current* stored state each time so the
         # recent-grade / recent-mistake windows roll correctly even when a
         # character is drilled several times in one session.
-        state = get_char_state(USER_ID, ch) or st.session_state.hw_state_seed.get(ch, {})
+        state = get_char_state(USER_ID, ch) or S.hw_state_seed.get(ch, {})
         update_handwriting_progress(
             USER_ID, ch, int(r["grade"]), state, mistakes=int(r.get("mistakes", 0)))
-    st.session_state.hw_processed = len(results)
+    S.hw_processed = len(results)
     if value.get("done"):
-        st.session_state.hw_done = True
-        st.session_state.hw_final = results
+        S.hw_done = True
+        S.hw_final = results
 
 
-def launch(chars, mode):
-    st.session_state.hw_payload = {
-        "session_id": str(uuid.uuid4()), "chars": chars, "mode": mode}
-    st.session_state.hw_sid = st.session_state.hw_payload["session_id"]
-    st.session_state.hw_processed = 0
-    st.session_state.hw_done = False
+def launch(chars, mode, in_plan=False, rerun=True):
+    S.hw_payload = {"session_id": str(uuid.uuid4()), "chars": chars, "mode": mode}
+    S.hw_sid = S.hw_payload["session_id"]
+    S.hw_processed = 0
+    S.hw_done = False
+    S.hw_plan, S.hw_t0, S.hw_day = in_plan, time.time(), date.today().isoformat()
+    S.pop("hw_logged", None)
     # seed states so the first grade of each char has its SRS/history context
-    st.session_state.hw_state_seed = {c["character"]: c for c in chars}
-    st.rerun()
+    S.hw_state_seed = {c["character"]: c for c in chars}
+    if rerun:
+        st.rerun()
 
 
-def _review_from_vocab():
-    """Session built from characters in the words you've studied."""
-    due, new_available = get_handwriting_counts(USER_ID)
-    c1, c2 = st.columns(2)
-    c1.metric("Due for review", due)
-    c2.metric("New available", new_available)
-    new_count = st.slider("New characters this session", 0, 15, 5)
-    st.caption(
-        "Cue = word, pinyin and meaning — never the character itself. "
-        "New characters run watch → trace → write; reviews go straight to "
-        "writing. Miss a character more than 3× and it comes back later in "
-        "the session, with its next review pulled to tomorrow.")
-    if st.button("▶️ Start review", type="primary", width="stretch",
-                 disabled=(due + min(new_count, new_available) == 0)):
-        chars = get_handwriting_session(USER_ID, new_count=new_count)
+# ----------------------------------------------------------------------
+# TODAY'S PLAN: start straight away
+# ----------------------------------------------------------------------
+if "hw_payload" not in S and (tp.active("handwriting") or S.get("hw_plan_empty")):
+    if not S.get("hw_plan_empty"):
+        p_ = tp.params("handwriting")
+        due, _avail = handwriting_due_and_new(USER_ID)
+        new = min(p_.get("new", 0), handwriting_new_allowance(USER_ID, due))
+        chars = handwriting_session_for(USER_ID, new, max_reviews=p_.get("reviews"))
         if chars:
-            launch(chars, "standard")
-        else:
-            st.info("Nothing to drill yet — study some vocabulary first.")
-
+            launch(chars, "standard", in_plan=True)
+        S.hw_plan_empty, S.hw_day = True, date.today().isoformat()
+        tp.session_done(USER_ID, "handwriting", time.time(), step="handwriting")
+    st.success("Nothing to write today.")
+    tp.continue_ui(end_session)
+    st.stop()
 
 
 # ----------------------------------------------------------------------
-# CHARACTER BROWSER - reached by clicking a sidebar counter
+# CHARACTER BROWSER - reached from "My characters"
 # ----------------------------------------------------------------------
-if st.session_state.get("hw_browse") and "hw_payload" not in st.session_state:
+if S.get("hw_browse") and "hw_payload" not in S:
     SCOPES = {
         "all": "Everything I've practised",
         "learning": "Still learning",
@@ -177,13 +138,12 @@ if st.session_state.get("hw_browse") and "hw_payload" not in st.session_state:
         "due": "Due for review",
         "weak": "Giving me trouble",
     }
-    scope = st.session_state.hw_browse
+    scope = S.hw_browse
     st.title("📖 My characters")
 
     scope = st.selectbox("Show", list(SCOPES), format_func=lambda k: SCOPES[k],
-                         index=list(SCOPES).index(scope)
-                         if scope in SCOPES else 0)
-    st.session_state.hw_browse = scope
+                         index=list(SCOPES).index(scope) if scope in SCOPES else 0)
+    S.hw_browse = scope
 
     chars = list_studied_characters(USER_ID, scope)
     if not chars:
@@ -219,112 +179,100 @@ if st.session_state.get("hw_browse") and "hw_payload" not in st.session_state:
                      width="stretch", disabled=not picked):
             session_chars = get_struggle_session(USER_ID, picked)
             if session_chars:
-                st.session_state.pop("hw_browse", None)
+                S.pop("hw_browse", None)
                 launch(session_chars, "standard")
         if c2.button(f"🔁 Drill all {len(chars)} in this list",
                      width="stretch", disabled=not chars):
             session_chars = get_struggle_session(
                 USER_ID, [e["character"] for e in chars][:60])
             if session_chars:
-                st.session_state.pop("hw_browse", None)
+                S.pop("hw_browse", None)
                 launch(session_chars, "standard")
 
     if st.button("← Back", width="stretch"):
-        st.session_state.pop("hw_browse", None)
+        S.pop("hw_browse", None)
         st.rerun()
     st.stop()
+
 
 # ----------------------------------------------------------------------
 # SETUP SCREEN
 # ----------------------------------------------------------------------
-if "hw_payload" not in st.session_state:
-    st.title("✍️ Handwriting Drill")
+if "hw_payload" not in S:
+    st.title("✍️ Handwriting")
 
-    tab_review, tab_weak, tab_focus = st.tabs(
-        ["📆 Review session", "🎯 Drill weak characters", "🔍 Focus on a word"])
+    tab_review, tab_weak, tab_focus, tab_mine = st.tabs(
+        ["📆 Review", "🎯 Weak characters", "🔍 A word", "📖 My characters"])
 
     # --- standard review session ---
     with tab_review:
-        _source = get_handwriting_source(USER_ID)
+        source = get_handwriting_source(USER_ID)
+        picked_source = st.selectbox(
+            "Characters from", list(SOURCES), format_func=SOURCES.get,
+            index=list(SOURCES).index(source) if source in SOURCES else 0, key="hw_source")
+        if picked_source != source:
+            set_handwriting_source(USER_ID, picked_source)
+            source = picked_source
 
-        # ---- 本草 herb characters ----
-        if _source == "herbs":
-            hc = herb_character_counts(USER_ID)
-            if not hc["herbs"]:
-                st.warning("No herb list loaded yet.")
-                st.markdown(
-                    "Export your Herb Dojo list to "
-                    "`pinyin-immersion-app/data/herbs.csv` with at least a "
-                    "**Chinese** column (Pinyin, English and Category are "
-                    "used if present), then press the button below.")
-                if st.button("🔄 Load herbs.csv", width="stretch"):
-                    added, skipped, err = import_herbs_from_csv()
-                    if err:
-                        st.error(err)
-                    else:
-                        st.success(f"Imported {added} herbs.")
-                        st.rerun()
-            else:
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Herbs", hc["herbs"])
-                c2.metric("Characters", hc["characters"])
-                c3.metric("Due", hc["due"])
+        if source == "herbs" and not herb_character_counts(USER_ID)["herbs"]:
+            st.warning("No herb list loaded yet.")
+            st.markdown(
+                "Export your Herb Dojo list to "
+                "`pinyin-immersion-app/data/herbs.csv` with at least a "
+                "**Chinese** column (Pinyin, English and Category are "
+                "used if present), then press the button below.")
+            if st.button("🔄 Load herbs.csv", width="stretch"):
+                added, skipped, err = import_herbs_from_csv()
+                if err:
+                    st.error(err)
+                else:
+                    st.success(f"Imported {added} herbs.")
+                    st.rerun()
+        else:
+            due, available = handwriting_due_and_new(USER_ID, source)
+            room = min(handwriting_new_allowance(USER_ID, due), available)
+            c1, c2 = st.columns(2)
+            c1.metric("Due for review", due)
+            c2.metric("New today", f"{room} of {HANDWRITING_NEW_PER_DAY}")
+            if due and not room and available:
+                st.caption("New characters wait while reviews catch up, or until tomorrow.")
+            if source == "herbs":
+                hc = herb_character_counts(USER_ID)
                 if hc.get("tier1_characters"):
-                    st.caption(f"Tier-1 herbs alone account for "
-                               f"**{hc['tier1_characters']}** characters - "
-                               f"the ones worth knowing first.")
-                new_count = st.slider("New herbs this session", 0, 12, 4,
-                                      key="herb_new")
+                    st.caption(f"{hc['herbs']} herbs · {hc['characters']} characters. Tier-1 "
+                               f"herbs alone account for **{hc['tier1_characters']}** characters "
+                               f"- the ones worth knowing first.")
                 st.caption(
-                    "Whole herb names, tier-1 herbs first: you write 麻 then "
-                    "黃 with 麻黃 on screen throughout, so the name sticks "
-                    "rather than two unrelated characters. "
-                    "Each card shows the herb it comes from and breaks the "
-                    "character into radicals — which for herbs is unusually "
-                    "informative: 艹 marks a plant, 木 something woody, "
-                    "虫 an insect, 石 a mineral.")
-                if st.button("▶️ Start herb session", type="primary",
-                             width="stretch"):
-                    chars = get_herb_session(USER_ID, new_count=new_count)
-                    if chars:
-                        launch(chars, "standard")
-                    else:
-                        st.success("Nothing due right now.")
+                    "Whole herb names, tier-1 herbs first: you write 麻 then 黃 with 麻黃 "
+                    "on screen throughout, so the name sticks rather than two unrelated "
+                    "characters. Each card breaks the character into radicals — 艹 marks a "
+                    "plant, 木 something woody, 虫 an insect, 石 a mineral.")
+            elif source == "frequency":
+                st.caption(
+                    "Working through the 500 most common characters in frequency order. "
+                    "Anything due comes first, then the next new ones. Where no word of "
+                    "yours contains a character, its own pinyin and meaning are the cue.")
+            else:
+                st.caption(
+                    "Cue = word, pinyin and meaning — never the character itself. New "
+                    "characters run watch → trace → write; reviews go straight to writing. "
+                    "Miss a character more than 3× and it comes back later in the session, "
+                    "with its next review pulled to tomorrow.")
+            if st.button("▶️ Start", type="primary", width="stretch",
+                         disabled=(due + room == 0)):
+                chars = handwriting_session_for(USER_ID, room, source=source)
+                if chars:
+                    launch(chars, "standard")
+                else:
+                    st.success("Nothing due right now.")
+            if source == "herbs":
                 with st.expander("Reload herb list"):
-                    if st.button("🔄 Re-import herbs.csv",
-                                 width="stretch"):
+                    if st.button("🔄 Re-import herbs.csv", width="stretch"):
                         added, skipped, err = import_herbs_from_csv()
                         if err:
                             st.error(err)
                         else:
                             st.success(f"Imported {added} new herbs.")
-
-        # ---- 500 most common characters ----
-        elif _source == "frequency":
-            cp = get_curriculum_progress(USER_ID)
-            preview = get_curriculum_session(USER_ID, new_count=0)
-            c1, c2 = st.columns(2)
-            c1.metric("Due for review", len(preview))
-            c2.metric("Not yet started",
-                      cp.get("total", 500) - cp.get("started", 0))
-            new_count = st.slider("New characters this session", 0, 15, 5,
-                                  key="freq_new")
-            st.caption(
-                "Working through the 500 most common characters in frequency "
-                "order. Anything due comes first, then the next new ones. "
-                "Where no word of yours contains a character, its own pinyin "
-                "and meaning are used as the cue.")
-            if st.button("▶️ Start review", type="primary",
-                         width="stretch"):
-                chars = get_curriculum_session(USER_ID, new_count=new_count)
-                if chars:
-                    launch(chars, "standard")
-                else:
-                    st.success("Nothing due, and the curriculum is complete!")
-
-        # ---- characters from my vocabulary ----
-        else:
-            _review_from_vocab()
 
     # --- weakness drill ---
     with tab_weak:
@@ -369,35 +317,68 @@ if "hw_payload" not in st.session_state:
             else:
                 st.warning("No Chinese characters found in that text.")
 
+    # --- my characters ---
+    with tab_mine:
+        if get_handwriting_source(USER_ID) == "frequency":
+            cp = get_curriculum_progress(USER_ID)
+            _total = cp.get("total", 500) or 500
+            _started = cp.get("started", 0)
+            st.metric("Of the 500 most common", f"{_started}/{_total}")
+            st.progress(min(1.0, _started / _total))
+            _cov = cp.get("text_coverage")
+            if _cov is not None:
+                st.caption(f"Those characters make up ~**{_cov}%** of everything you'll "
+                           f"read · {cp.get('mastered', 0)} mastered.")
+        hw_stats = get_handwriting_stats(USER_ID)
+        total = hw_stats["total_chars_available"]
+        st.metric("Characters in your vocab", total)
+        if total:
+            st.write(f"**✏️ Practised:** {hw_stats['practiced']}")
+            st.progress(min(1.0, hw_stats["practiced"] / total))
+            st.write(f"**🏆 Mastered:** {hw_stats['mastered']}")
+            st.progress(min(1.0, hw_stats["mastered"] / total))
+            st.caption("Mastered = review pushed 21+ days out.")
+        c1, c2 = st.columns(2)
+        if c1.button("View / drill practised", key="browse_practiced", width="stretch"):
+            S.hw_browse = "all"
+            st.rerun()
+        if c2.button("View / drill mastered", key="browse_mastered", width="stretch"):
+            S.hw_browse = "mastered"
+            st.rerun()
+
     st.stop()
 
 # ----------------------------------------------------------------------
 # ACTIVE DRILL
 # ----------------------------------------------------------------------
-value = hanzi_drill(session=st.session_state.hw_payload,
-                    key=f"drill_{st.session_state.hw_sid}", default=None)
+value = hanzi_drill(session=S.hw_payload, key=f"drill_{S.hw_sid}", default=None)
 process_results(value)
 
-mode_label = "struggle loop" if st.session_state.hw_payload["mode"] == "struggle" else "review"
-st.caption(f"💾 {st.session_state.hw_processed} attempts saved · {mode_label}")
+mode_label = "struggle loop" if S.hw_payload["mode"] == "struggle" else "review"
+st.caption(f"💾 {S.hw_processed} attempts saved · {mode_label}")
 
-if st.session_state.get("hw_done"):
+if S.get("hw_done"):
     counts = [0, 0, 0, 0]
-    for r in st.session_state.get("hw_final", []):
+    for r in S.get("hw_final", []):
         counts[int(r["grade"])] += 1
     st.success(
         f"Session saved — Easy {counts[3]} · Good {counts[2]} · "
         f"Hard {counts[1]} · Again {counts[0]}")
-    if st.button("🔄 New session", type="primary", width="stretch"):
-        for k in ("hw_payload", "hw_sid", "hw_processed", "hw_done",
-                  "hw_final", "hw_state_seed"):
-            st.session_state.pop(k, None)
+    if tp.active("handwriting"):
+        S.hw_plan = True            # a Library session counts if the plan is waiting on it
+    in_plan = S.get("hw_plan")
+    tp.session_done(USER_ID, "handwriting", S.get("hw_t0"), items=len(S.get("hw_final", [])),
+                    step="handwriting" if in_plan else None, once_key="hw_logged")
+    if in_plan:
+        tp.continue_ui(end_session)
+    elif st.button("🔄 New session", type="primary", width="stretch"):
+        end_session()
         st.rerun()
 else:
     with st.expander("End session early"):
         st.caption("Progress so far is already saved.")
         if st.button("🏁 End now", width="stretch"):
-            for k in ("hw_payload", "hw_sid", "hw_processed", "hw_done",
-                      "hw_final", "hw_state_seed"):
-                st.session_state.pop(k, None)
+            tp.session_done(USER_ID, "handwriting", S.get("hw_t0"), items=S.get("hw_processed", 0),
+                            step="handwriting" if S.get("hw_plan") else None, once_key="hw_logged")
+            end_session()
             st.rerun()

@@ -7,18 +7,22 @@ graphics (CC-BY 4.0) named by code point - "tw:1f455" - or photos and
 illustrations from Wikimedia Commons - "wm:durian", "wm:knee" - whose
 author, licence and source are recorded in data/game_images/credits.json.
 
-Malaysian usage throughout: 恤衫, 冰厨, 冷气, 锁匙, 朱古力, 雪糕, 黄梨, 德士…
+Malaysian usage throughout: 恤衫, 冰厨, 冷气, 锁匙, 朱古力, 雪糕, 黄梨, 德士, 巴刹, 镬,
+水蓊, 四脚蛇, 马来盏…
 """
 
 CATEGORIES = {
     "body": ("身体", "Body", "💪"),
     "clothing": ("衣服", "Clothing", "👕"),
     "food": ("食物", "Food & drink", "🍜"),
+    "hawker": ("小贩美食", "Hawker food", "🍢"),
+    "market": ("巴刹和水果", "Market & local fruit", "🥭"),
     "home": ("家里", "Home & daily life", "🏠"),
     "places": ("交通和地方", "Transport & places", "🚌"),
     "nature": ("大自然", "Nature & weather", "🌳"),
     "animals": ("动物", "Animals", "🐈"),
     "tcm": ("中医诊所", "TCM clinic", "🌿"),
+    "herbs": ("中药材", "TCM herbs", "🌱"),
 }
 
 _I = lambda cat, zh, py, en, img: {"category": cat, "chinese": zh, "pinyin": py,
@@ -63,6 +67,10 @@ ITEMS = [
     _I("body", "肾", "shèn", "kidney", "wm:kidney"),
     _I("body", "骨头", "gǔ tou", "bone", "tw:1f9b4"),
     _I("body", "血", "xuè", "blood", "tw:1fa78"),
+    _I("body", "拳头", "quán tou", "fist", "wm:fist"),
+    _I("body", "脚趾", "jiǎo zhǐ", "toe", "wm:toe"),
+    _I("body", "脚底", "jiǎo dǐ", "sole of the foot", "wm:sole"),
+    _I("body", "睫毛", "jié máo", "eyelash", "wm:eyelash"),
 
     # ---- clothing ---------------------------------------------------------
     _I("clothing", "恤衫", "xù shān", "shirt / T-shirt", "tw:1f455"),
@@ -124,6 +132,65 @@ ITEMS = [
     _I("food", "盐", "yán", "salt", "tw:1f9c2"),
     _I("food", "冰", "bīng", "ice", "tw:1f9ca"),
 
+    # ---- hawker food ------------------------------------------------------
+    _I("hawker", "炒粿条", "chǎo guǒ tiáo", "char kway teow", "wm:charkwayteow"),
+    _I("hawker", "叻沙", "lè shā", "laksa", "wm:laksa"),
+    _I("hawker", "椰浆饭", "yē jiāng fàn", "nasi lemak", "wm:nasilemak"),
+    _I("hawker", "肉骨茶", "ròu gǔ chá", "bak kut teh", "wm:bakkutteh"),
+    _I("hawker", "云吞面", "yún tūn miàn", "wantan mee", "wm:wantanmee"),
+    _I("hawker", "海南鸡饭", "hǎi nán jī fàn", "Hainanese chicken rice", "wm:chickenrice"),
+    _I("hawker", "沙爹", "shā diē", "satay", "wm:satay"),
+    _I("hawker", "印度煎饼", "yìn dù jiān bǐng", "roti canai", "wm:roticanai"),
+    _I("hawker", "煎蕊", "jiān ruǐ", "cendol", "wm:cendol"),
+    _I("hawker", "拉茶", "lā chá", "teh tarik", "wm:tehtarik"),
+    _I("hawker", "虾面", "xiā miàn", "prawn mee (Penang)", "wm:prawnmee"),
+    _I("hawker", "蚝煎", "háo jiān", "oyster omelette", "wm:oysteromelette"),
+    _I("hawker", "炒饭", "chǎo fàn", "fried rice", "wm:friedrice"),
+    _I("hawker", "包子", "bāo zi", "steamed bun (pau)", "wm:pau"),
+    _I("hawker", "点心", "diǎn xin", "dim sum", "wm:dimsum"),
+    _I("hawker", "豆浆", "dòu jiāng", "soy milk", "wm:soymilk"),
+    _I("hawker", "油条", "yóu tiáo", "fried dough stick", "wm:youtiao"),
+    _I("hawker", "咖椰面包", "kā yē miàn bāo", "kaya toast", "wm:kayatoast"),
+    _I("hawker", "半生熟蛋", "bàn shēng shú dàn", "half-boiled eggs", "wm:halfboiled"),
+    _I("hawker", "红豆冰", "hóng dòu bīng", "ais kacang", "wm:aiskacang"),
+    _I("hawker", "萝卜糕", "luó bo gāo", "carrot cake (chai tow kway)", "wm:carrotcake"),
+    _I("hawker", "薄饼", "báo bǐng", "popiah", "wm:popiah"),
+    _I("hawker", "咖喱面", "gā lí miàn", "curry mee", "wm:currymee"),
+    _I("hawker", "粥", "zhōu", "congee / porridge", "wm:congee"),
+    _I("hawker", "豆腐花", "dòu fu huā", "tau fu fah", "wm:taufufah"),
+    _I("hawker", "甘蔗水", "gān zhè shuǐ", "sugarcane juice", "wm:sugarcane"),
+    _I("hawker", "啰惹", "luō rě", "rojak", "wm:rojak"),
+    _I("hawker", "曼煎糕", "màn jiān gāo", "apam balik", "wm:apambalik"),
+
+    # ---- market & local fruit -------------------------------------------
+    _I("market", "巴刹", "bā shā", "wet market (pasar)", "wm:pasar"),
+    _I("market", "红毛丹", "hóng máo dān", "rambutan", "wm:rambutan"),
+    _I("market", "山竹", "shān zhú", "mangosteen", "wm:mangosteen"),
+    _I("market", "木瓜", "mù guā", "papaya", "wm:papaya"),
+    _I("market", "番石榴", "fān shí liu", "guava", "wm:guava"),
+    _I("market", "杨桃", "yáng táo", "starfruit", "wm:starfruit"),
+    _I("market", "龙眼", "lóng yǎn", "longan", "wm:longan"),
+    _I("market", "荔枝", "lì zhī", "lychee", "wm:lychee"),
+    _I("market", "菠萝蜜", "bō luó mì", "jackfruit", "wm:jackfruit"),
+    _I("market", "火龙果", "huǒ lóng guǒ", "dragon fruit", "wm:dragonfruit"),
+    _I("market", "水蓊", "shuǐ wěng", "wax apple (jambu air)", "wm:waxapple"),
+    _I("market", "柚子", "yòu zi", "pomelo", "wm:pomelo"),
+    _I("market", "酸柑", "suān gān", "calamansi lime", "wm:calamansi"),
+    _I("market", "红毛榴莲", "hóng máo liú lián", "soursop", "wm:soursop"),
+    _I("market", "人心果", "rén xīn guǒ", "sapodilla (ciku)", "wm:ciku"),
+    _I("market", "番薯", "fān shǔ", "sweet potato", "wm:sweetpotato"),
+    _I("market", "羊角豆", "yáng jiǎo dòu", "okra (lady's fingers)", "wm:okra"),
+    _I("market", "蕹菜", "wèng cài", "water spinach (kangkung)", "wm:kangkung"),
+    _I("market", "豆芽", "dòu yá", "bean sprouts", "wm:beansprouts"),
+    _I("market", "茄子", "qié zi", "aubergine / brinjal", "wm:eggplant"),
+    _I("market", "苦瓜", "kǔ guā", "bitter gourd", "wm:bittergourd"),
+    _I("market", "豆腐", "dòu fu", "tofu", "wm:tofu"),
+    _I("market", "螃蟹", "páng xiè", "crab", "wm:crab"),
+    _I("market", "鱿鱼", "yóu yú", "squid", "wm:squid"),
+    _I("market", "班兰叶", "bān lán yè", "pandan leaves", "wm:pandan"),
+    _I("market", "马来盏", "mǎ lái zhǎn", "belacan (shrimp paste)", "wm:belacan"),
+    _I("market", "黄姜", "huáng jiāng", "turmeric", "wm:turmeric"),
+
     # ---- home & daily life ------------------------------------------------
     _I("home", "床", "chuáng", "bed", "tw:1f6cf"),
     _I("home", "椅子", "yǐ zi", "chair", "tw:1fa91"),
@@ -158,6 +225,16 @@ ITEMS = [
     _I("home", "礼物", "lǐ wù", "present", "tw:1f381"),
     _I("home", "信", "xìn", "letter", "tw:2709"),
     _I("home", "蜡烛", "là zhú", "candle", "tw:1f56f"),
+    _I("home", "沙发", "shā fā", "sofa", "wm:sofa"),
+    _I("home", "毛巾", "máo jīn", "towel", "wm:towel"),
+    _I("home", "雨伞", "yǔ sǎn", "umbrella", "wm:umbrella"),
+    _I("home", "镬", "huò", "wok", "wm:wok"),
+    _I("home", "电饭煲", "diàn fàn bāo", "rice cooker", "wm:ricecooker"),
+    _I("home", "水壶", "shuǐ hú", "kettle", "wm:kettle"),
+    _I("home", "扫把", "sào bǎ", "broom", "wm:broom"),
+    _I("home", "衣架", "yī jià", "clothes hanger", "wm:hanger"),
+    _I("home", "马桶", "mǎ tǒng", "toilet", "wm:toilet"),
+    _I("home", "楼梯", "lóu tī", "stairs", "wm:stairs"),
 
     # ---- transport & places -----------------------------------------------
     _I("places", "车", "chē", "car", "tw:1f697"),
@@ -180,6 +257,15 @@ ITEMS = [
     _I("places", "海边", "hǎi biān", "beach / seaside", "tw:1f3d6"),
     _I("places", "山", "shān", "mountain / hill", "tw:26f0"),
     _I("places", "桥", "qiáo", "bridge", "tw:1f309"),
+    _I("places", "咖啡店", "kā fēi diàn", "coffee shop (kopitiam)", "wm:kopitiam"),
+    _I("places", "夜市", "yè shì", "night market (pasar malam)", "wm:nightmarket"),
+    _I("places", "庙", "miào", "temple", "wm:temple"),
+    _I("places", "清真寺", "qīng zhēn sì", "mosque", "wm:mosque"),
+    _I("places", "机场", "jī chǎng", "airport", "wm:airport"),
+    _I("places", "停车场", "tíng chē chǎng", "car park", "wm:carpark"),
+    _I("places", "公园", "gōng yuán", "park", "wm:park"),
+    _I("places", "电梯", "diàn tī", "lift", "wm:lift"),
+    _I("places", "巴士站", "bā shì zhàn", "bus stop", "wm:busstop"),
 
     # ---- nature & weather -------------------------------------------------
     _I("nature", "太阳", "tài yáng", "sun", "tw:2600"),
@@ -197,6 +283,13 @@ ITEMS = [
     _I("nature", "花", "huā", "flower", "tw:1f338"),
     _I("nature", "草", "cǎo", "grass / herb", "tw:1f33f"),
     _I("nature", "叶子", "yè zi", "leaf", "tw:1f343"),
+    _I("nature", "椰树", "yē shù", "coconut tree", "wm:coconuttree"),
+    _I("nature", "稻田", "dào tián", "paddy field", "wm:paddyfield"),
+    _I("nature", "瀑布", "pù bù", "waterfall", "wm:waterfall"),
+    _I("nature", "河", "hé", "river", "wm:river"),
+    _I("nature", "石头", "shí tou", "stone / rock", "wm:stone"),
+    _I("nature", "森林", "sēn lín", "forest / jungle", "wm:forest"),
+    _I("nature", "岛", "dǎo", "island", "wm:island"),
 
     # ---- animals ------------------------------------------------------------
     _I("animals", "狗", "gǒu", "dog", "tw:1f415"),
@@ -219,6 +312,16 @@ ITEMS = [
     _I("animals", "蚂蚁", "mǎ yǐ", "ant", "tw:1f41c"),
     _I("animals", "蚊子", "wén zi", "mosquito", "tw:1f99f"),
     _I("animals", "蟑螂", "zhāng láng", "cockroach", "tw:1fab3"),
+    _I("animals", "红毛猩猩", "hóng máo xīng xing", "orangutan", "wm:orangutan"),
+    _I("animals", "犀鸟", "xī niǎo", "hornbill", "wm:hornbill"),
+    _I("animals", "四脚蛇", "sì jiǎo shé", "monitor lizard", "wm:monitorlizard"),
+    _I("animals", "壁虎", "bì hǔ", "gecko (cicak)", "wm:gecko"),
+    _I("animals", "鳄鱼", "è yú", "crocodile", "wm:crocodile"),
+    _I("animals", "青蛙", "qīng wā", "frog", "wm:frog"),
+    _I("animals", "蜜蜂", "mì fēng", "bee", "wm:bee"),
+    _I("animals", "苍蝇", "cāng ying", "fly", "wm:fly"),
+    _I("animals", "松鼠", "sōng shǔ", "squirrel", "wm:squirrel"),
+    _I("animals", "马来貘", "mǎ lái mò", "Malayan tapir", "wm:tapir"),
 
     # ---- TCM clinic ------------------------------------------------------------
     _I("tcm", "针灸", "zhēn jiǔ", "acupuncture", "wm:acupuncture"),
@@ -243,6 +346,27 @@ ITEMS = [
     _I("tcm", "头晕", "tóu yūn", "dizzy", "tw:1f635-200d-1f4ab"),
     _I("tcm", "受伤", "shòu shāng", "to be injured", "tw:1f915"),
     _I("tcm", "医生", "yī shēng", "doctor", "tw:1f9d1-200d-2695-fe0f"),
+
+    # ---- TCM herbs ------------------------------------------------------------
+    _I("herbs", "当归", "dāng guī", "dang gui (angelica root)", "wm:danggui"),
+    _I("herbs", "红枣", "hóng zǎo", "red dates (jujube)", "wm:hongzao"),
+    _I("herbs", "菊花", "jú huā", "chrysanthemum", "wm:juhua"),
+    _I("herbs", "陈皮", "chén pí", "dried tangerine peel", "wm:chenpi"),
+    _I("herbs", "肉桂", "ròu guì", "cinnamon bark", "wm:rougui"),
+    _I("herbs", "生姜", "shēng jiāng", "fresh ginger", "wm:shengjiang"),
+    _I("herbs", "党参", "dǎng shēn", "codonopsis root", "wm:dangshen"),
+    _I("herbs", "山药", "shān yào", "Chinese yam", "wm:shanyao"),
+    _I("herbs", "莲子", "lián zǐ", "lotus seeds", "wm:lianzi"),
+    _I("herbs", "薄荷", "bò he", "mint", "wm:bohe"),
+    _I("herbs", "罗汉果", "luó hàn guǒ", "monk fruit", "wm:luohanguo"),
+    _I("herbs", "冬虫夏草", "dōng chóng xià cǎo", "cordyceps", "wm:chongcao"),
+    _I("herbs", "灵芝", "líng zhī", "lingzhi mushroom", "wm:lingzhi"),
+    _I("herbs", "八角", "bā jiǎo", "star anise", "wm:bajiao"),
+    _I("herbs", "桂圆", "guì yuán", "dried longan", "wm:guiyuan"),
+    _I("herbs", "燕窝", "yàn wō", "bird's nest", "wm:yanwo"),
+    _I("herbs", "杏仁", "xìng rén", "apricot kernels", "wm:xingren"),
+    _I("herbs", "金银花", "jīn yín huā", "honeysuckle flowers", "wm:jinyinhua"),
+    _I("herbs", "蒲公英", "pú gōng yīng", "dandelion", "wm:pugongying"),
 ]
 
 

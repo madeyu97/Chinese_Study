@@ -10,25 +10,33 @@ word and pick its tone, then say it and compare with the model.
 Pairings: characters that form several of your words (想 → 想要 · 想法 ·
 想念). Pick the word for a meaning, complete the pair, or give a word's
 meaning - so the character is tied to real vocabulary, not dictionary senses.
+
+New groups and families are capped per day. As a step of today's plan, the
+tone drill starts straight away.
 """
 
 import random
+import time
 from datetime import date
 
 import streamlit as st
 
 import db_manager as db
 import sound_drill as sd
+import today_plan as tp
 import vocab_engine as ve
 from audio_engine import create_audio_file
 from auth import require_login, sidebar_user_badge
+from config import SOUND_NEW_PER_DAY
 
-st.set_page_config(page_title="Sound & Pairing", page_icon="🔊", layout="centered")
+st.set_page_config(page_title="Tones & pairings", page_icon="🎵", layout="centered")
 USER = require_login()
 USER_ID = USER["id"]
 S = st.session_state
 HIGHLIGHT = "color:#d9480f;font-weight:600"
 DRILLS = {"tone": "🎵 Tones", "pair": "🔗 Pairings"}
+ACTIVITY = {"tone": "tones", "pair": "pairs"}
+LOG_KIND = {"tone": "tones", "pair": "read"}
 
 
 def reset():
@@ -36,16 +44,43 @@ def reset():
         del S[k]
 
 
+if S.get("sp_plan") and S.get("sp_date") != date.today().isoformat():
+    reset()                         # yesterday's plan left open in the tab
+
 with st.sidebar:
     sidebar_user_badge()
-    st.header("🔊 Sound & Pairing")
-    drill = st.radio("Drill", list(DRILLS), format_func=DRILLS.get, key="sound_drill_pick",
-                     disabled="sp_items" in S)
-    if "sp_items" in S and st.button("End session"):
+    tp.sidebar("tones", reset)
+    if "sp_items" in S and not S.get("sp_plan") and st.button("End session"):
         reset()
         st.rerun()
 
-st.title("🔊 Sound & Pairing")
+st.title("🎵 Tones & pairings")
+
+
+def new_allowed(drill_):
+    return max(0, SOUND_NEW_PER_DAY - db.drill_new_today(USER_ID, drill_))
+
+
+def begin(drill_, mat_, new_cap, in_plan=False):
+    items = sd.build_session(drill_, mat_, db.drill_progress_get(USER_ID, drill_), date.today(),
+                             new_cap=new_cap)
+    reset()
+    S.sp_items, S.sp_i, S.sp_results, S.sp_drill = items, 0, [], drill_
+    S.sp_plan, S.sp_t0, S.sp_date = in_plan, time.time(), date.today().isoformat()
+    S.sound_last = drill_
+
+
+if "sp_items" not in S and tp.active("tones"):
+    begin("tone", sd.tone_groups(db.introduced_words(USER_ID)),
+          min(tp.params("tones").get("new", 0), new_allowed("tone")), in_plan=True)
+    st.rerun()
+
+drill = "tone"
+if "sp_items" not in S:
+    drill = st.segmented_control("Drill", list(DRILLS), format_func=DRILLS.get,
+                                 default=S.get("sound_last", "tone"), required=True,
+                                 key="sound_drill_pick",
+                                 label_visibility="collapsed") or "tone"
 
 
 def play(text):
@@ -95,12 +130,15 @@ if "sp_items" not in S:
         st.info("Nothing to drill yet — this builds from words you've been introduced to on "
                 "the Words page.")
         st.stop()
+    room = new_allowed(drill)
+    st.caption(f"New {'groups' if drill == 'tone' else 'families'} still allowed today: "
+               f"{room} of {SOUND_NEW_PER_DAY}.")
     if st.button("▶️ Start", type="primary", width="stretch"):
-        items = sd.build_session(drill, mat, progress, date.today())
-        if not items:
+        begin(drill, mat, room)
+        if not S.sp_items:
+            reset()
             st.success("Nothing due, and no new groups for today.")
             st.stop()
-        S.sp_items, S.sp_i, S.sp_results, S.sp_drill = items, 0, [], drill
         st.rerun()
     st.stop()
 
@@ -118,13 +156,23 @@ if S.sp_i >= len(S.sp_items):
             track = ve.update_track(progress.get(key, {}), sd.group_result(res))
             db.drill_progress_save(USER_ID, S.sp_drill, key, track)
         S.sp_saved = by_key
+    if tp.active("tones") and S.sp_drill == "tone":
+        S.sp_plan = True            # a Library round counts if the plan is waiting on tones
+    in_plan = S.get("sp_plan")
+    tp.session_done(USER_ID, ACTIVITY[S.sp_drill], S.get("sp_t0"), items=len(S.sp_results),
+                    step="tones" if in_plan else None, once_key="sp_logged")
     by_key = S.sp_saved
     right = sum(r["right"] for r in S.sp_results)
-    st.success(f"Done — {right} of {len(S.sp_results)} right.")
+    if S.sp_results:
+        st.success(f"Done — {right} of {len(S.sp_results)} right.")
+    else:
+        st.success("Nothing due, and no new groups for today.")
     shaky = [k for k, res in by_key.items() if not all(res)]
     if shaky:
         st.caption("Coming back sooner: " + " · ".join(shaky))
-    if st.button("▶️ Another round", type="primary", width="stretch"):
+    if in_plan:
+        tp.continue_ui(reset)
+    elif st.button("▶️ Another round", type="primary", width="stretch"):
         reset()
         st.rerun()
     st.stop()
@@ -160,6 +208,7 @@ if ans is None:
                             {"kind": "drill", "chose": picked, "answer": item["answer"],
                              "key": item["key"]})
         S.sp_results.append({"key": item["key"], "right": right, "type": item["type"]})
+        db.log_activity(USER_ID, LOG_KIND[S.sp_drill], w["chinese"], 2 if right else 0)
         S.sp_ans = {"right": right, "picked": picked}
         st.rerun()
     st.stop()

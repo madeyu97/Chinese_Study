@@ -1011,6 +1011,9 @@ def db_tests():
         at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
         at.run()
         assert not at.exception, at.exception
+        assert at.title[0].value == "今天 Today", "the app opens on Today"
+        labels = [b.label for b in at.button]
+        assert any(l.startswith("▶️ Start") for l in labels) and "🎮 Play a game" in labels
 
     @test("Sound & Pairing page: both drills run from introduced words and schedule each group")
     def t_sd_page():
@@ -1032,7 +1035,9 @@ def db_tests():
                 at = AppTest.from_file("pages/4_Sound_and_Pairing.py", default_timeout=120)
                 at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
                 at.run()
-                at.sidebar.radio[0].set_value(drill).run()
+                assert not at.sidebar.radio, "the drill choice lives on the page now"
+                pick = [g for g in at.get("button_group") if g.key == "sound_drill_pick"][0]
+                pick.set_value(drill).run()
                 assert "from your words" in at.markdown[0].value
                 next(b for b in at.button if "Start" in b.label).click().run()
                 for _ in range(40):
@@ -1095,8 +1100,10 @@ def db_tests():
                 if game == "picture":       # credits for every Commons picture on the picker screen
                     exp = next(e for e in at.expander if e.label == "Picture credits")
                     md = exp.markdown[0].value
-                    assert "Twemoji" in md and sum(l.startswith("- **") for l in md.splitlines()) == 38
-                at.sidebar.radio[0].set_value(show).run()
+                    n_wm = sum(i["image"].startswith("wm:") for i in gitems.ITEMS)
+                    assert "Twemoji" in md and sum(l.startswith("- **") for l in md.splitlines()) == n_wm
+                assert not at.sidebar.radio, "game settings live on the page now"
+                at.radio(key="games_show").set_value(show).run()
                 next(b for b in at.button if b.key == f"pick_{game}").click().run()
                 for _ in range(120):
                     assert not at.exception, (game, at.exception)
@@ -1140,6 +1147,361 @@ def db_tests():
         assert not _wd.is_troubled({}, [a for a in atts if a["skill"] == "recognition"])
         assert all(v == 0 for v in _wd.diagnose(atts)["scores"].values()), "games contribute no evidence"
 
+
+    # ------------------------------------------------------------------
+    # Today's plan, the ledger, and the retired session style
+    # ------------------------------------------------------------------
+    def _fresh_learner():
+        """The second user, wiped clean and introduced to twelve common words
+        (none due), so a plan has new words, sentences and maybe tones."""
+        uid = db.list_users()[1]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress", "word_diagnosis",
+                    "drill_progress", "grammar_progress", "handwriting_progress", "study_sessions",
+                    "activity_log"):
+            cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
+        cur.execute("""SELECT id FROM vocab WHERE freq_rank <= 60 AND chinese ~ '^[一-鿿]{1,3}$'
+                       AND COALESCE(tag, '') <> 'China' ORDER BY freq_rank LIMIT 12""")
+        for (vid,) in cur.fetchall():
+            cur.execute("""INSERT INTO word_skill (user_id, vocab_id, skill, interval, next_review_date,
+                           reps, streak, introduced_on) VALUES (%s, %s, 'recognition', 5, '2099-01-01', 3, 2,
+                           'seeded')""", (uid, vid))
+        conn.commit(); conn.close()
+        return uid
+
+    def _fake_exercise(word, **_k):
+        zh = word["chinese"] if isinstance(word, dict) else word
+        return {"chinese": f"我说{zh}。", "pinyin": "wǒ shuō", "english_correct": f"I say {zh}.",
+                "english_distractors": ["I eat.", "I sleep.", "I run."], "word_breakdown": [],
+                "grammar_point": {}, "particle_note": None, "generation_mode": "listen"}
+
+    def _fake_content(user_id, word, allow_generate=True, known=None):
+        t = word["chinese"]
+        return ({"meaning": wcon.short_meaning(word["english"]), "chunks": [],
+                 "sentences": [{"hanzi": f"我说{t}。", "pinyin": "", "english": "s", "structure": None}],
+                 "confusables": [], "prompts": [], "introduced_words": [], "source": "generated",
+                 "reviewed": True}, None)
+
+    def _has(at, key):
+        try:
+            at.session_state[key]
+            return True
+        except KeyError:
+            return False
+
+    def _answer_step(at):
+        """Answer whatever card is on screen correctly (Words, Tones, Listen & speak)."""
+        labels = [b.label for b in at.button]
+        btn = lambda l: next(b for b in at.button if b.label == l)
+        if "Got it — test me" in labels:
+            return btn("Got it — test me").click().run()
+        for prefix, right in (("wd_mc_", lambda: next(o["text"] for o in at.session_state["wd_setup"]["options"]
+                                                      if o["kind"] == "correct")),
+                              ("sp_mc_", lambda: (lambda it: next(o["label"] for o in it["options"]
+                                                                  if o["value"] == it["answer"]))(
+                                  at.session_state["sp_items"][at.session_state["sp_i"]])),
+                              ("sn_mc_", lambda: at.session_state["sn_ex"]["english_correct"])):
+            r = [x for x in at.radio if (x.key or "").startswith(prefix)]
+            if r and r[0].value is None:
+                r[0].set_value(right()).run()
+                return btn("Check").click().run()
+        for prefix, right in (("sn_type_", lambda: at.session_state["sn_ex"]["chinese"]),
+                              ("wd_type_", lambda: at.session_state["wd_items"][at.session_state["wd_i"]]
+                               ["word"]["chinese"])):
+            t = [x for x in at.text_input if (x.key or "").startswith(prefix)]
+            if t and not t[0].value:
+                t[0].set_value(right()).run()
+                return btn("Check").click().run()
+        if "Next ▶️" not in labels:
+            raise AssertionError(f"stuck: buttons {labels}, title {[t.value for t in at.title]}, "
+                                 f"md {[m.value for m in at.markdown][:5]}, "
+                                 f"info {[m.value for m in at.info]} {[m.value for m in at.success]}")
+        return btn("Next ▶️").click().run()
+
+    @test("ledger: sessions capped at 45 min, plan steps and completion recorded once, minutes by strand")
+    def t_ledger():
+        uid = db.list_users()[1]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM study_sessions WHERE user_id = %s", (uid,)); conn.commit(); conn.close()
+        db.log_study_session(uid, "words", 99999, in_plan=True, items=20)
+        db.log_study_session(uid, "reading", 600)
+        db.log_study_session(uid, "games", 300)
+        assert db.plan_done_today(uid) == {"words"}
+        db.mark_plan_complete(uid); db.mark_plan_complete(uid)
+        m = db.study_minutes(uid, 7)
+        assert m["by_activity"] == {"words": 45, "reading": 10, "games": 5}, m
+        assert m["by_strand"] == {"study": 45, "use": 10, "play": 5} and m["total"] == 60
+        assert m["plan_days"] == 1 and m["study_days"] == 1
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM study_sessions WHERE user_id = %s AND activity = 'plan_complete'", (uid,))
+        assert cur.fetchone()[0] == 1
+        conn.close()
+
+    @test("latest_mix is retired: stored choices migrate, and the name falls back to spaced repetition")
+    def t_latest_mix_retired():
+        uid = db.list_users()[1]["id"]
+        db.set_session_mode(uid, "latest_mix")
+        assert db.get_session_mode(uid) == "random_balanced"
+        db.init_db()
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM users WHERE session_mode = 'latest_mix'")
+        assert cur.fetchone()[0] == 0
+        conn.close()
+        assert all(u["session_mode"] != "latest_mix" for u in db.list_users())
+
+    @test("daily caps: new tone groups and new characters counted per day; word sessions take tighter caps")
+    def t_daily_caps():
+        uid = _fresh_learner()
+        db.drill_progress_save(uid, "tone", "xiang", {"interval": 1})
+        db.drill_progress_save(uid, "tone", "xiang", {"interval": 3})     # a review isn't new
+        db.drill_progress_save(uid, "tone", "shi", {"interval": 1})
+        assert db.drill_new_today(uid, "tone") == 2 and db.drill_new_today(uid, "pair") == 0
+        db.update_handwriting_progress(uid, "好", 2, {})
+        from config import HANDWRITING_NEW_PER_DAY, HANDWRITING_BACKLOG
+        assert db.handwriting_new_today(uid) == 1
+        assert db.handwriting_new_allowance(uid, 0) == HANDWRITING_NEW_PER_DAY - 1
+        assert db.handwriting_new_allowance(uid, HANDWRITING_BACKLOG + 1) == 0
+        assert db.handwriting_started(uid)
+        plan = db.plan_word_session(uid, new_cap=0, unlocks=False)
+        assert not [i for i in plan["items"] if i["kind"] in ("new", "unlock")]
+        plan = db.plan_word_session(uid, new_cap=2)
+        assert len([i for i in plan["items"] if i["kind"] == "new"]) == 2
+
+    @test("Today: one Start runs the whole plan page to page, auto-started, then logs it as done")
+    def t_today_flow():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        uid = _fresh_learner()
+        real = (db.word_content_for, db.bank_get, audio_engine.create_audio_file)
+        db.word_content_for, db.bank_get = _fake_content, _fake_exercise
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            at = AppTest.from_file("main_app.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.run()
+            assert not at.exception, at.exception
+            planned = [s_["key"] for s_ in tplan.build_plan(tplan.gather_state(uid))]
+            assert planned[0] == "words" and planned[-1] == "sentences", planned
+            next(b for b in at.button if b.label.startswith("▶️ Start")).click().run()
+            # AppTest follows st.switch_page within a run but not afterwards; the
+            # browser does, so the test keeps up by hand
+            at.switch_page(tplan.STEPS["words"][2])
+            assert _has(at, "wd_items") and at.session_state["wd_plan"], "Words starts by itself"
+            assert len([i for i in at.session_state["wd_items"] if i["kind"] == "new"]) == 5
+            visited = ["words"]
+            for _ in range(400):
+                assert not at.exception, at.exception
+                if any("today's plan done" in x.value for x in at.success):
+                    break
+                cont = [b for b in at.button if b.label.startswith("Continue ▶")]
+                if cont:
+                    cont[0].click().run()
+                    nxt = at.session_state["tp"]["order"][0]
+                    visited.append(nxt)
+                    at.switch_page(tplan.STEPS[nxt][2])
+                    continue
+                _answer_step(at)
+            assert any("today's plan done" in x.value for x in at.success)
+            assert visited == planned, (visited, planned)
+            # speaking cards were typed and graded by the app: no self-grade buttons anywhere
+            assert not [b for b in at.button if b.label.startswith(("Again", "Hard", "Good", "Easy"))]
+            next(b for b in at.button if b.label == "🏠 Back to Today").click().run()
+            at.switch_page(tplan.TODAY_PAGE).run()
+            assert not at.exception, at.exception
+            assert any("Today's plan is done" in x.value for x in at.success)
+        finally:
+            db.word_content_for, db.bank_get, audio_engine.create_audio_file = real
+        done = db.plan_done_today(uid)
+        assert set(planned) | {"plan_complete"} <= done, done
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT DISTINCT kind FROM activity_log WHERE user_id = %s", (uid,))
+        kinds = {r[0] for r in cur.fetchall()}
+        conn.close()
+        assert {"read", "listen", "type"} <= kinds and "speak" not in kinds, kinds
+
+    @test("Listen & speak: moves a schedule only when that skill is due; never introduces words")
+    def t_sentences_page():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        from datetime import date as _d
+        uid = _fresh_learner()
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("""SELECT vocab_id FROM word_skill WHERE user_id = %s ORDER BY vocab_id LIMIT 1""", (uid,))
+        due_vid = cur.fetchone()[0]
+        cur.execute("UPDATE word_skill SET next_review_date = %s WHERE user_id = %s AND vocab_id = %s",
+                    (_d.today().isoformat(), uid, due_vid))
+        conn.commit(); conn.close()
+        before = {(r[0]): r[1] for r in _rows(uid)}
+        real = (db.bank_get, audio_engine.create_audio_file)
+        db.bank_get = _fake_exercise
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            at = AppTest.from_file("pages/9_Sentences.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.run()
+            assert not at.sidebar.radio and not at.number_input, "no session style or size to choose"
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            cards = at.session_state["sn_cards"]
+            assert [c["mode"] for c in cards] == ["listen", "speak"] * 3
+            assert cards[0]["word"]["id"] == due_vid, "due words come first"
+            for _ in range(60):
+                assert not at.exception, at.exception
+                if any("Another round" in b.label for b in at.button):
+                    break
+                _answer_step(at)
+            assert any("Another round" in b.label for b in at.button)
+        finally:
+            db.bank_get, audio_engine.create_audio_file = real
+        after = {(r[0]): r[1] for r in _rows(uid)}
+        assert set(after) == set(before), "no new words introduced"
+        assert after[due_vid] > _d.today().isoformat(), "the due word's review moved on"
+        assert all(after[v] == before[v] for v in before if v != due_vid), "nothing else moved"
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM word_skill WHERE user_id = %s AND skill = 'production'", (uid,))
+        assert cur.fetchone()[0] == 0, "speaking never creates a production track"
+        cur.execute("SELECT activity, in_plan FROM study_sessions WHERE user_id = %s", (uid,))
+        assert cur.fetchall() == [("sentences", False)]
+        conn.close()
+
+    def _rows(uid):
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT vocab_id, next_review_date FROM word_skill WHERE user_id = %s "
+                    "AND skill = 'recognition'", (uid,))
+        rows = cur.fetchall(); conn.close()
+        return rows
+
+
+    @test("plan steps on Grammar and Handwriting start by themselves and close the step")
+    def t_plan_pages():
+        from streamlit.testing.v1 import AppTest
+        from datetime import date as _d
+        import audio_engine
+        uid = _fresh_learner()
+        ids = [s_.id for s_ in gcur.learning_order()[:2]]
+        plan_state = lambda order, params: {"date": _d.today().isoformat(), "short": False,
+                                            "order": order, "params": params, "done": [], "skipped": []}
+        real = (db.grammar_known_vocab, db.grammar_pick_set, db.grammar_mark_served,
+                gdr.grade_answer, audio_engine.create_audio_file)
+        db.grammar_known_vocab = lambda user_id: GR_KNOWN * 2
+        db.grammar_pick_set = lambda user_id, sid, n: {"id": 0, "payload": _gr_payload()}
+        db.grammar_mark_served = lambda set_id: None
+        gdr.grade_answer = lambda structure, task, reference, said, spoken=True: {
+            "verdict": "correct", "feedback": "", "better": reference}
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            at = AppTest.from_file("pages/7_Grammar.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.session_state["tp"] = plan_state(["grammar", "sentences"], {"grammar": {"ids": ids}})
+            at.run()
+            assert at.session_state["gr_sid"] == ids[0], "the plan's first structure starts by itself"
+            assert not at.sidebar.radio and not at.sidebar.toggle
+            for _ in range(120):
+                assert not at.exception, at.exception
+                labels = [b.label for b in at.button]
+                if any(l.startswith("Continue ▶") for l in labels):
+                    break
+                btn = lambda l: next(b for b in at.button if b.label == l)
+                if "▶️ Next structure" in labels:
+                    btn("▶️ Next structure").click().run(); continue
+                mc = [r for r in at.radio if (r.key or "").startswith("mc_")]
+                if mc and mc[0].value is None and "Check" in labels:
+                    stage = at.session_state["gr_stages"][at.session_state["gr_stage"]]
+                    items = (at.session_state["gr_set"]["contrast"]["items"] if stage == "contrast"
+                             else at.session_state["gr_set"][stage])
+                    it = items[at.session_state["gr_item"]]
+                    mc[0].set_value(it["options"][it["answer"]]).run()
+                    btn("Check").click().run(); continue
+                ty = [t for t in at.text_input if (t.key or "").startswith("type_")]
+                if ty and not ty[0].value and "Check" in labels:
+                    ty[0].set_value("我不喝咖啡。").run()
+                    btn("Check").click().run(); continue
+                if "Reveal" in labels:
+                    btn("Reveal").click().run(); continue
+                if "✅ I said that" in labels:
+                    assert "🟡 Nearly" not in labels, "two honest buttons, not three"
+                    btn("✅ I said that").click().run(); continue
+                btn("Next ▶️").click().run()
+            assert any(b.label == "Continue ▶  🎧 Listen & speak" for b in at.button)
+            prog = db.grammar_progress(uid)
+            assert set(ids) <= set(prog), "both structures scheduled"
+            assert "grammar" in db.plan_done_today(uid)
+
+            # handwriting: nothing to write from the vocabulary yet -> the step closes itself
+            db.set_handwriting_source(uid, "vocab")
+            at = AppTest.from_file("pages/2_Handwriting.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.session_state["tp"] = plan_state(["handwriting"], {"handwriting": {"reviews": 15, "new": 3}})
+            at.run()
+            assert not at.exception, at.exception
+            assert "Nothing to write today." in [x.value for x in at.success]
+            assert "handwriting" in db.plan_done_today(uid)
+            # from the frequency list there's always something: a session launches with the plan's cap
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("DELETE FROM study_sessions WHERE user_id = %s AND activity = 'handwriting'", (uid,))
+            conn.commit(); conn.close()
+            db.set_handwriting_source(uid, "frequency")
+            at = AppTest.from_file("pages/2_Handwriting.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.session_state["tp"] = plan_state(["handwriting"], {"handwriting": {"reviews": 15, "new": 3}})
+            at.run()
+            assert not at.exception, at.exception
+            chars = at.session_state["hw_payload"]["chars"]
+            assert at.session_state["hw_plan"] and len(chars) == 3 and all(c["is_new"] for c in chars)
+        finally:
+            (db.grammar_known_vocab, db.grammar_pick_set, db.grammar_mark_served,
+             gdr.grade_answer, audio_engine.create_audio_file) = real
+            db.set_handwriting_source(uid, "vocab")
+
+
+    @test("a Library session finishes a plan step that was waiting on it, and Continue still works")
+    def t_plan_adopts():
+        from streamlit.testing.v1 import AppTest
+        from datetime import date as _d
+        import audio_engine
+        uid = _fresh_learner()
+        real = (db.word_content_for, db.bank_get, audio_engine.create_audio_file)
+        db.word_content_for, db.bank_get = _fake_content, _fake_exercise
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            at = AppTest.from_file("main_app.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.run()
+            at.switch_page("pages/1_Words.py").run()
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            assert at.session_state["wd_plan"] is False
+            at.session_state["tp"] = {"date": _d.today().isoformat(), "short": False,
+                                      "order": ["words", "sentences"],
+                                      "params": {"sentences": {"listen": 1, "speak": 0}},
+                                      "done": [], "skipped": []}
+            for _ in range(80):
+                assert not at.exception, at.exception
+                if any(b.label.startswith("Continue ▶") for b in at.button):
+                    break
+                _answer_step(at)
+            assert not any("Another session" in b.label for b in at.button)
+            next(b for b in at.button if b.label.startswith("Continue ▶")).click().run()
+            assert not at.exception, at.exception
+            assert at.session_state["tp"]["order"] == ["sentences"]
+            assert _has(at, "sn_cards"), "Continue went on to Listen & speak"
+        finally:
+            db.word_content_for, db.bank_get, audio_engine.create_audio_file = real
+        assert "words" in db.plan_done_today(uid)
+
+    @test("every page opens from the menu; no method choices left in the sidebar")
+    def t_pages_smoke():
+        from streamlit.testing.v1 import AppTest
+        uid = db.list_users()[0]["id"]
+        at = AppTest.from_file("main_app.py", default_timeout=120)
+        at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+        at.run()
+        for page in ("pages/8_Games.py", "pages/1_Words.py", "pages/7_Grammar.py", "pages/9_Sentences.py",
+                     "pages/4_Sound_and_Pairing.py", "pages/2_Handwriting.py", "pages/6_Reading.py",
+                     "pages/5_Together.py", "pages/10_Admin.py", "pages/0_Today.py"):
+            at.switch_page(page).run()
+            assert not at.exception, (page, at.exception)
+            sb = at.sidebar
+            assert not (sb.radio or sb.toggle or sb.slider or sb.selectbox or sb.multiselect), page
+
     t_bank()
     t_flags()
     t_games_page()
@@ -1166,6 +1528,14 @@ def db_tests():
     t_char_lists()
     t_herbs()
     t_reading_rotation()
+    t_ledger()
+    t_latest_mix_retired()
+    t_daily_caps()
+    t_today_flow()
+    t_sentences_page()
+    t_plan_pages()
+    t_plan_adopts()
+    t_pages_smoke()
 
 
 # ======================================================================
@@ -1235,6 +1605,22 @@ def t_gr_curriculum():
             assert "CONTRAST DRILL" in p and all(gcur.get(c).pattern in p for c in s.contrast)
     le = gdr.build_prompt(gcur.get("le_verb"), GR_KNOWN)
     assert "past tense" in le and "completed action" in le
+
+
+@test("grammar: 越 + verb + 越 is core, arrives with 越来越, and its drills cover verbs and the common slips")
+def t_gr_yue_verb():
+    s, general = gcur.get("yue_v_yue"), gcur.get("yue_yue")
+    order = [x.id for x in gcur.learning_order()]
+    assert s.core and s.level <= gcur.get("yuelaiyue").level
+    assert abs(order.index("yue_v_yue") - order.index("yuelaiyue")) <= 2
+    assert order.index("yue_v_yue") < order.index("yue_yue")
+    assert "yuelaiyue" in s.contrast
+    p = gdr.build_prompt(s, GR_KNOWN, contrasts=[gcur.get(c) for c in s.contrast])
+    for slip in ("越说越很快", "他越说越快", "越说更快", "never show a wrong sentence"):
+        assert slip in p, slip
+    assert "越走越快" in general.pattern and "verb" in general.notes
+    iv, _e, _n = gdr.schedule(40, 2.5, 3, core=s.core)
+    assert iv == 21, "reviewed at least every three weeks"
 
 
 @test("grammar syllabus: every one of the supplied lines is drilled; group 30 = contrast drills; group 36 = core")
@@ -1751,6 +2137,83 @@ def t_sd_session():
     assert sdr.group_result([False, False]) == "wrong"
 
 
+@test("sound drill: the page's daily allowance caps new groups in a session")
+def t_sd_new_cap():
+    import random as _r
+    from datetime import date as _d
+    groups = sdr.tone_groups(SD_WORDS)
+    assert sdr.build_session("tone", groups, {}, _d(2026, 1, 1), _r.Random(0), new_cap=0) == []
+    one = sdr.build_session("tone", groups, {}, _d(2026, 1, 1), _r.Random(0), new_cap=1)
+    assert len({i["key"] for i in one}) == 1
+
+
+# ======================================================================
+# TODAY'S PLAN
+# ======================================================================
+import today_plan as tplan
+
+
+def _plan_state(**over):
+    st_ = {"done": set(),
+           "words": {"due": 30, "new_room": 5, "new_available": 40},
+           "tones": {"due": 2, "fresh": 10, "new_room": 3},
+           "grammar": {"known": 150, "due": [("g1", "了"), ("g2", "把"), ("g3", "被")],
+                       "fresh": [("g9", "越来越"), ("g10", "连…都")]},
+           "handwriting": {"started": True, "due": 40, "new_room": 5, "new_available": 100},
+           "sentences": {"words": 200}}
+    st_.update(over)
+    return st_
+
+
+@test("plan: fixed order, reviews first; caps on new words, tones, grammar and writing")
+def t_plan_build():
+    steps = tplan.build_plan(_plan_state())
+    keys = [s_["key"] for s_ in steps]
+    assert keys == ["words", "tones", "grammar", "handwriting", "sentences"], keys
+    by = {s_["key"]: s_ for s_ in steps}
+    assert by["words"]["params"] == {"reviews": 25, "new": 5, "unlocks": True}
+    assert by["words"]["detail"].startswith("25 reviews · 5 new words")
+    # tones: due groups first, new ones only to fill a five-group session
+    assert by["tones"]["params"]["new"] == 3
+    # grammar: at most two structures, reviews before new, never more than one new
+    assert by["grammar"]["params"]["ids"] == ["g1", "g2"]
+    light = tplan.build_plan(_plan_state(grammar={"known": 150, "due": [], "fresh": [("g9", "越来越"), ("g10", "x")]}))
+    assert {s_["key"]: s_ for s_ in light}["grammar"]["params"]["ids"] == ["g9"]
+    # writing: reviews capped for the plan, a few new
+    assert by["handwriting"]["params"] == {"reviews": 15, "new": 3}
+    assert by["sentences"]["params"] == {"listen": 3, "speak": 3}
+    assert tplan.minutes_left(steps) == sum(s_["minutes"] for s_ in steps) > 20
+    # new words: never more than the queue can supply or the day allows
+    few = tplan.build_plan(_plan_state(words={"due": 0, "new_room": 5, "new_available": 2}))
+    assert few[0]["params"]["new"] == 2 and few[0]["detail"] == "2 new words"
+
+
+@test("plan: short day is a few reviews and a little listening; done steps stay visible")
+def t_plan_short():
+    steps = tplan.build_plan(_plan_state(), short=True)
+    assert [s_["key"] for s_ in steps] == ["words", "sentences"]
+    assert steps[0]["params"] == {"reviews": 10, "new": 0, "unlocks": False}
+    assert steps[1]["params"] == {"listen": 3, "speak": 0}
+    assert tplan.minutes_left(steps) <= 10
+    done = tplan.build_plan(_plan_state(done={"words", "grammar"}), short=True)
+    assert [(s_["key"], s_["done"]) for s_ in done] == [("words", True), ("grammar", True), ("sentences", False)]
+    assert tplan.next_step(done)["key"] == "sentences"
+
+
+@test("plan: steps appear only when there's something to do (writing once started, grammar at 20 words)")
+def t_plan_gates():
+    quiet = _plan_state(words={"due": 0, "new_room": 0, "new_available": 0},
+                        tones={"due": 0, "fresh": 0, "new_room": 3},
+                        grammar={"known": 12, "due": [("g1", "了")], "fresh": []},
+                        handwriting={"started": False, "due": 0, "new_room": 5, "new_available": 9},
+                        sentences={"words": 5})
+    assert tplan.build_plan(quiet) == []
+    # backlog: new words held back, and the plan says why
+    held = tplan.build_plan(_plan_state(words={"due": 90, "new_room": 0, "new_available": 40}))
+    assert "held back" in held[0]["detail"] and held[0]["params"]["new"] == 0
+    assert tplan.next_step([]) is None
+
+
 # ======================================================================
 # GAMES
 # ======================================================================
@@ -1794,8 +2257,9 @@ def t_games_commons():
     assert importlib.util.find_spec("game_art") is None, "hand-drawn art replaced by sourced pictures"
     credits = gimg.credits()
     used = [i["image"][3:] for i in gitems.ITEMS if i["image"].startswith("wm:")]
-    assert len(used) == len(set(used)) == 38 and set(used) == set(credits), "every picture used once, none spare"
-    free = re.compile(r"(CC0|Public domain|CC BY(-SA)? [0-9.]+( [a-z]{2})?)$")
+    assert len(used) == len(set(used)) and set(used) == set(credits), "every picture used once, none spare"
+    assert len(used) >= 38
+    free = re.compile(r"(CC0|Public domain|CC BY(-SA)? [0-9.]+( [a-z]{2,3})?)$")
     for name, c in credits.items():
         path = gimg.IMAGE_DIR / c["file"]
         assert path.suffix in (".jpg", ".png") and path.stat().st_size <= 60_000, (name, path.stat().st_size)
@@ -1809,7 +2273,7 @@ def t_games_commons():
         assert c["licence"] in ("CC0", "Public domain") or c["licence_url"].startswith("https://creativecommons.org/"), name
         assert c["changes"], name
     lines = gimg.credit_lines(gitems.ITEMS)
-    assert len(lines) == 38 and all(credits[n]["author"] in l.replace("\\", "") for n, l in zip(used, lines))
+    assert len(lines) == len(used) and all(credits[n]["author"] in l.replace("\\", "") for n, l in zip(used, lines))
     svgs = {p.stem for p in gimg.IMAGE_DIR.glob("*.svg")}
     assert svgs == {i["image"][3:] for i in gitems.ITEMS if i["image"].startswith("tw:")}, "no stray Twemoji"
     assert {p.name for p in gimg.IMAGE_DIR.iterdir()} == (
@@ -1931,7 +2395,7 @@ if __name__ == "__main__":
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
     print("Grammar drills:")
-    t_gr_curriculum(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_generate()
+    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_generate()
     t_gr_generate_fails_closed(); t_gr_audit_fixes(); t_gr_grade_schedule()
     print("Vocabulary engine:")
     t_ve_schedule(); t_ve_production_gate(); t_ve_modes(); t_ve_allowance(); t_ve_session()
@@ -1940,7 +2404,9 @@ if __name__ == "__main__":
     print("Word diagnosis:")
     t_integration(); t_wd_trouble(); t_wd_diagnose(); t_wd_remedies(); t_wd_written()
     print("Sound & Pairing:")
-    t_sd_groups(); t_sd_audio(); t_sd_pairs(); t_sd_session()
+    t_sd_groups(); t_sd_audio(); t_sd_pairs(); t_sd_session(); t_sd_new_cap()
+    print("Today's plan:")
+    t_plan_build(); t_plan_short(); t_plan_gates()
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("Frequency list:")

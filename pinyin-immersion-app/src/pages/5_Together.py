@@ -8,8 +8,9 @@ been doing without any messaging service in between.
 A deliberate design choice: this compares EFFORT, not lifetime totals.
 One of you has months of head start, so a raw leaderboard would be
 permanently discouraging for one and meaningless for the other. What's
-shown instead is this week's cards, streaks, consistency and accuracy -
-things either person can win on any given day.
+shown instead is this week's plan days, minutes, streaks and accuracy -
+things either person can win on any given day - and how the minutes split
+between studying items, using the language, and play.
 """
 
 import streamlit as st
@@ -51,36 +52,53 @@ if pending:
 # ----------------------------------------------------------------------
 me = db.activity_totals(USER_ID)
 them = db.activity_totals(OTHER_ID)
+my_time = db.study_minutes(USER_ID, 7)
+their_time = db.study_minutes(OTHER_ID, 7)
 my_streak = db.activity_streak(USER_ID)
 their_streak = db.activity_streak(OTHER_ID)
 
 st.subheader("This week")
 c1, c2 = st.columns(2)
-for col, name, tot, streak in (
-        (c1, USER["display_name"], me, my_streak),
-        (c2, other["display_name"], them, their_streak)):
+for col, name, tot, tm, streak in (
+        (c1, USER["display_name"], me, my_time, my_streak),
+        (c2, other["display_name"], them, their_time, their_streak)):
     with col:
         st.markdown(f"### {name}")
-        st.metric("Cards this week", tot["week_total"],
-                  delta=f"{tot['today']} today")
+        st.metric("Days the plan was done", f"{tm['plan_days']} of 7")
+        st.metric("Minutes studied", tm["total"])
         st.metric("Day streak", f"{streak} 🔥" if streak else "0")
-        if tot["accuracy"] is not None:
-            st.metric("Accuracy", f"{tot['accuracy']}%")
+        st.caption(f"{tot['week_total']} cards · {tot['today']} today"
+                   + (f" · {tot['accuracy']}% right" if tot["accuracy"] is not None else ""))
 
-lead = me["week_total"] - them["week_total"]
+lead = my_time["plan_days"] - their_time["plan_days"]
+days = "day" if abs(lead) == 1 else "days"
 if lead > 0:
-    st.info(f"You're ahead by **{lead}** cards this week.")
+    st.info(f"You've done the plan on **{lead}** more {days} than "
+            f"{other['display_name']} this week.")
 elif lead < 0:
-    st.warning(f"{other['display_name']} is ahead by **{abs(lead)}** cards "
-               f"this week.")
+    st.warning(f"{other['display_name']} has done the plan on **{abs(lead)}** more "
+               f"{days} this week.")
 else:
-    st.info("Dead level this week.")
+    st.info("Level on plan days this week.")
+
+# ----------------------------------------------------------------------
+# WHERE THE TIME WENT
+# ----------------------------------------------------------------------
+st.markdown("---")
+st.subheader("Where the minutes went, last 7 days")
+st.dataframe([{"": label,
+               USER["display_name"]: my_time["by_strand"].get(key, 0),
+               other["display_name"]: their_time["by_strand"].get(key, 0)}
+              for key, label in db.STRANDS.items()], hide_index=True, width="stretch")
+st.caption("Studying items builds knowledge; using the language — listening, reading and "
+           "speaking whole sentences — is what turns it into fluency. Over a month, aim for "
+           "the second row to catch up with the first.")
 
 # ----------------------------------------------------------------------
 # BY SKILL
 # ----------------------------------------------------------------------
 st.markdown("---")
-st.subheader("By skill, last 7 days")
+st.subheader("Cards by skill, last 7 days")
 rows = []
 for key, label in db.ACTIVITY_KINDS.items():
     rows.append({

@@ -13,6 +13,8 @@ face used in the writing drill - recognising printed type is a different
 skill from writing, and the one you need for signs, menus and messages.
 """
 
+import time
+
 import streamlit as st
 
 import db_manager as db
@@ -23,6 +25,20 @@ from config import GENERATION_MODEL
 # How many readable sentences must exist before the page starts revisiting
 # old ones instead of generating something new.
 REVISIT_AFTER = 15
+# Time on one sentence counted towards the ledger, at most.
+MAX_SECONDS_PER_SENTENCE = 300
+
+
+def shown(chinese):
+    """A new sentence is on screen: log it as reading, and the time spent on
+    the previous one."""
+    now = time.time()
+    last = st.session_state.get("reading_t")
+    if last:
+        db.log_study_session(USER_ID, "reading", min(now - last, MAX_SECONDS_PER_SENTENCE),
+                             items=1)
+    st.session_state.reading_t = now
+    db.log_activity(USER_ID, "read", chinese)
 
 st.set_page_config(page_title="Reading", page_icon="📖", layout="centered")
 
@@ -108,6 +124,7 @@ if col1.button("📖 Next sentence", type="primary", width="stretch"):
         st.session_state.reading_current = chosen
         st.session_state.reading_revealed = set()
         db.reading_mark_seen(USER_ID, chosen["id"])
+        shown(chosen["chinese"])
         st.rerun()
     else:
         st.session_state.reading_current = "GENERATE"
@@ -132,6 +149,7 @@ if st.session_state.reading_current == "GENERATE":
             (p for p in pool if p["chinese"] == sentence),
             {"id": None, "chinese": sentence, "english": english, "unknown": []})
         st.session_state.reading_revealed = set()
+        shown(sentence)
         st.caption(report)
         st.rerun()
     else:

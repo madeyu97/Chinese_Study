@@ -273,10 +273,12 @@ def pick_keys(candidates, progress, today, n=GROUPS_PER_SESSION, new_cap=MAX_GRO
     return (due + fresh)[:n]
 
 
-def build_session(drill, groups_or_families, progress, today, rng=None):
+def build_session(drill, groups_or_families, progress, today, rng=None, new_cap=MAX_GROUPS_NEW):
+    """new_cap: new groups allowed this session (the page passes what is left
+    of the day's allowance)."""
     rng = rng or random.Random()
     by_key = {g["key"] if drill == "tone" else g["char"]: g for g in groups_or_families}
-    keys = pick_keys(list(by_key), progress, today)
+    keys = pick_keys(list(by_key), progress, today, new_cap=max(0, min(new_cap, MAX_GROUPS_NEW)))
     items = []
     for k in keys:
         g = by_key[k]

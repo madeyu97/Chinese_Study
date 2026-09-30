@@ -1,4 +1,4 @@
-# src/pages/2_Handwriting.py
+# src/views/2_Handwriting.py
 """
 Handwriting drill.
 

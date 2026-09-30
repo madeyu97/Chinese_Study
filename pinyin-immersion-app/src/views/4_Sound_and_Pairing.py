@@ -1,4 +1,4 @@
-# src/pages/4_Sound_and_Pairing.py
+# src/views/4_Sound_and_Pairing.py
 """
 🔊 Sound & Pairing - tone discrimination and character-to-word association,
 built only from words you've already been introduced to.
@@ -12,7 +12,8 @@ Pairings: characters that form several of your words (想 → 想要 · 想法 �
 meaning - so the character is tied to real vocabulary, not dictionary senses.
 
 New groups and families are capped per day. As a step of today's plan, the
-tone drill starts straight away.
+tone drill starts straight away. A round in progress is saved as you go, so
+leaving the app picks up at the same item.
 """
 
 import random
@@ -22,6 +23,7 @@ from datetime import date
 import streamlit as st
 
 import db_manager as db
+import session_store as store
 import sound_drill as sd
 import today_plan as tp
 import vocab_engine as ve
@@ -39,13 +41,22 @@ ACTIVITY = {"tone": "tones", "pair": "pairs"}
 LOG_KIND = {"tone": "tones", "pair": "read"}
 
 
+SAVED = ("sp_items", "sp_i", "sp_results", "sp_drill", "sp_plan", "sp_date", "sp_ans",
+         "sp_saved", "sp_logged")
+
+
 def reset():
     for k in [k for k in S if k.startswith("sp_")]:
         del S[k]
+    store.drop(USER_ID, "sound")
 
 
 if S.get("sp_plan") and S.get("sp_date") != date.today().isoformat():
     reset()                         # yesterday's plan left open in the tab
+if "sp_items" not in S:
+    store.resume(USER_ID, "sound", SAVED, clock="sp_t0")
+if "sp_items" in S and S.sp_i < len(S.sp_items):
+    store.keep(USER_ID, "sound", SAVED, clock="sp_t0")
 
 with st.sidebar:
     sidebar_user_badge()
@@ -55,6 +66,7 @@ with st.sidebar:
         st.rerun()
 
 st.title("🎵 Tones & pairings")
+store.notice()
 
 
 def new_allowed(drill_):
@@ -161,6 +173,7 @@ if S.sp_i >= len(S.sp_items):
     in_plan = S.get("sp_plan")
     tp.session_done(USER_ID, ACTIVITY[S.sp_drill], S.get("sp_t0"), items=len(S.sp_results),
                     step="tones" if in_plan else None, once_key="sp_logged")
+    store.drop(USER_ID, "sound")          # results saved: nothing to pick up
     by_key = S.sp_saved
     right = sum(r["right"] for r in S.sp_results)
     if S.sp_results:

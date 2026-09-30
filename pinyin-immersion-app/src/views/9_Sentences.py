@@ -1,4 +1,4 @@
-# src/pages/9_Sentences.py
+# src/views/9_Sentences.py
 """
 🎧 Listen & speak - whole sentences built on words you already know.
 
@@ -11,7 +11,8 @@ Two kinds of card, alternating:
 Only words you've already been introduced to appear, so this page adds no
 new material. A card moves a word's schedule only if that skill is due -
 listening moves recognition, speaking moves production - so practising here
-never double-counts the Words page.
+never double-counts the Words page. A session in progress is saved as you
+go, so leaving the app picks up at the same card.
 """
 
 import difflib
@@ -25,6 +26,7 @@ from datetime import date
 import streamlit as st
 
 import db_manager as db
+import session_store as store
 import today_plan as tp
 import vocab_engine as ve
 import word_content as wc
@@ -42,13 +44,23 @@ RESULT_OF_GRADE = {0: "wrong", 1: "close", 2: "correct", 3: "easy"}
 ICON = {"correct": "✅", "easy": "✅", "close": "🟡", "wrong": "❌", "ungraded": "⚪"}
 
 
+SAVED = ("sn_cards", "sn_i", "sn_results", "sn_plan", "sn_date", "sn_ex", "sn_ex_i",
+         "sn_opts", "sn_ans", "sn_logged")
+
+
 def reset():
     for k in [k for k in S if k.startswith("sn_")]:
         del S[k]
+    store.drop(USER_ID, "sentences")
 
 
 if S.get("sn_date") and S.sn_date != str(date.today()):
     reset()
+if "sn_cards" not in S and store.resume(USER_ID, "sentences", SAVED, clock="sn_t0"):
+    if S.get("sn_ex"):                    # the audio file didn't survive; make it again
+        S.sn_audio = create_audio_file(S.sn_ex["chinese"])
+if "sn_cards" in S and S.sn_i < len(S.sn_cards):
+    store.keep(USER_ID, "sentences", SAVED, clock="sn_t0")
 
 with st.sidebar:
     sidebar_user_badge()
@@ -58,6 +70,7 @@ with st.sidebar:
         st.rerun()
 
 st.title("🎧 Listen & speak")
+store.notice()
 
 
 # ----------------------------------------------------------------------
@@ -125,6 +138,7 @@ if S.sn_i >= len(S.sn_cards):
     in_plan = S.sn_plan
     tp.session_done(USER_ID, "sentences", S.sn_t0, items=items_done(),
                     step="sentences" if in_plan else None, once_key="sn_logged")
+    store.drop(USER_ID, "sentences")
     heard = [r for r in S.sn_results if r["mode"] == "listen" and r["result"] != "skipped"]
     said = [r for r in S.sn_results if r["mode"] == "speak" and r["result"] not in ("skipped", "ungraded")]
     if not S.sn_results:

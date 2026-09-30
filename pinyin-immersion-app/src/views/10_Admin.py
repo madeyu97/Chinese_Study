@@ -1,4 +1,4 @@
-# src/pages/10_Admin.py
+# src/views/10_Admin.py
 """
 🛠️ Settings: the sentence bank and the shared word list.
 

@@ -93,6 +93,20 @@ def is_match(a, b):
     return a["item"]["chinese"] == b["item"]["chinese"] and a["face"] != b["face"]
 
 
+def accept_matches(cards, reported, already=()):
+    """The board reports which cards are matched; keep only real pairs (a
+    picture and its word) on top of those already accepted."""
+    ok = set(already)
+    by_word = {}
+    for n in set(reported or []):
+        if isinstance(n, int) and 0 <= n < len(cards):
+            by_word.setdefault(cards[n]["item"]["chinese"], []).append(n)
+    for ns in by_word.values():
+        if len(ns) == 2 and is_match(cards[ns[0]], cards[ns[1]]):
+            ok.update(ns)
+    return ok
+
+
 def points(correct, streak):
     """10 a hit, plus a streak bonus up to +10."""
     return 10 + 2 * min(streak, 5) if correct else 0

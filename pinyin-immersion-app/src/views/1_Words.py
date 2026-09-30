@@ -1,4 +1,4 @@
-# src/pages/1_Words.py
+# src/views/1_Words.py
 """
 📚 Words - vocabulary learned through chunks, natural sentences and
 retrieval, not as a list.
@@ -16,7 +16,8 @@ the same session. Content for upcoming items is prepared in the background.
 Pinyin fades as a word matures: shown with the answer while you're still
 learning a word, tucked behind a tap once you've known it for three weeks.
 As a step of today's plan, the session starts straight away with the plan's
-limits.
+limits. A session in progress is saved as you go (session_store), so leaving
+the app mid-session picks up at the same card.
 """
 
 import random
@@ -28,6 +29,7 @@ import streamlit as st
 
 import db_manager as db
 import grammar_curriculum as gc
+import session_store as store
 import today_plan as tp
 import vocab_engine as ve
 import word_content as wc
@@ -46,17 +48,29 @@ HIGHLIGHT = "color:#d9480f;font-weight:600"
 MAX_ENRICH = 6          # background content writes per session for review words
 MAX_REMEDIES = 3        # diagnoses acted on per session, so repair never swamps review
 MATURE_DAYS = 21        # from here on, pinyin waits behind a tap
+# what a session in progress is saved as; content, audio and the background
+# jobs are fetched again on return
+SAVED = ("wd_items", "wd_i", "wd_results", "wd_retried", "wd_rot", "wd_plan", "wd_date",
+         "wd_enriched", "wd_remedies", "wd_mature", "wd_ans", "wd_setup", "wd_setup_i",
+         "wd_intro_done", "wd_diag", "wd_rem", "wd_hook", "wd_logged")
 
 
 def reset():
     for k in [k for k in S if k.startswith("wd_")]:
         del S[k]
+    store.drop(USER_ID, "words")
 
 
 if S.get("wd_date") and S.wd_date != str(date.today()):
     reset()
 if "words_exec" not in S:
     S.words_exec = ThreadPoolExecutor(max_workers=2)
+if "wd_items" not in S and store.resume(USER_ID, "words", SAVED, clock="wd_t0"):
+    S.wd_content, S.wd_futures = {}, {}
+    if S.wd_items:
+        S.wd_pool, S.wd_known = db.word_pool(USER_ID), db.grammar_known_vocab(USER_ID)
+if "wd_items" in S and S.wd_i < len(S.wd_items):
+    store.keep(USER_ID, "words", SAVED, clock="wd_t0")
 
 with st.sidebar:
     sidebar_user_badge()
@@ -68,6 +82,7 @@ with st.sidebar:
             st.rerun()
 
 st.title("📚 Words")
+store.notice()
 
 
 # ----------------------------------------------------------------------
@@ -472,6 +487,7 @@ if S.wd_i >= len(S.wd_items):
     in_plan = S.get("wd_plan")
     tp.session_done(USER_ID, "words", S.get("wd_t0"), items=len(res),
                     step="words" if in_plan else None, once_key="wd_logged")
+    store.drop(USER_ID, "words")          # finished: nothing to pick up
     if not S.wd_items:
         st.success("Nothing due and no new words available right now.")
     else:

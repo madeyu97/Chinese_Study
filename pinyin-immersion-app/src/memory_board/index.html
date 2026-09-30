@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Memory match board for the Play page (src/views/8_Games.py).
+
+  Tap a card to turn it over. Two cards up: if they're the same word (one
+  picture, one word) they stay up; if not, they turn back after a moment.
+  Everything happens here, instantly; after each turn the board reports
+  {sid, matched, moves} back to Python, which checks the pairs, scores the
+  game and saves it so a game survives leaving the page.
+
+  args: sid, cards [{pair, face: "image"|"word", img, zh, py, en}],
+        show_pinyin, state {matched: [indices], moves}
+-->
+<style>
+  :root {
+    --back: #5c6bc0; --back-edge: #7986cb; --face: #ffffff; --edge: #c5cae9;
+    --text: #263238; --muted: #78909c; --good: #2e7d32;
+  }
+  body.dark {
+    --back: #3f51b5; --back-edge: #5c6bc0; --face: #262730; --edge: #3d4466;
+    --text: #fafafa; --muted: #9aa5b1; --good: #66bb6a;
+  }
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body { font-family: "Source Sans Pro", "Noto Sans SC", "PingFang SC", sans-serif;
+         color: var(--text); }
+  #grid { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 8px;
+          padding: 2px; }
+  .card { position: relative; aspect-ratio: 1 / 1; border: 0; padding: 0; margin: 0;
+          background: transparent; cursor: pointer; perspective: 700px;
+          -webkit-tap-highlight-color: transparent; font: inherit; color: inherit; }
+  .card:disabled { cursor: default; }
+  .inner { position: absolute; inset: 0; transition: transform 0.32s ease;
+           transform-style: preserve-3d; }
+  .card.up .inner { transform: rotateY(180deg); }
+  .side { position: absolute; inset: 0; border-radius: 12px; backface-visibility: hidden;
+          -webkit-backface-visibility: hidden; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; overflow: hidden; }
+  .back { background: var(--back); border: 2px solid var(--back-edge);
+          color: rgba(255,255,255,0.28); font-size: 2rem; font-weight: 700; }
+  .face { background: var(--face); border: 1px solid var(--edge); transform: rotateY(180deg);
+          text-align: center; }
+  .face img { width: 78%; height: 78%; object-fit: contain; border-radius: 8px; }
+  .zh { font-size: clamp(1.1rem, 6vw, 1.7rem); line-height: 1.25; padding: 0 4px; }
+  .py { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+  .card.matched .face { border: 2px solid var(--good); opacity: 0.55; }
+  .card.matched .face::after { content: "✓"; position: absolute; top: 4px; right: 8px;
+                               color: var(--good); font-weight: 700; }
+  #count { font-size: 0.85rem; color: var(--muted); margin: 0 2px 8px; }
+  #status { min-height: 1.5em; margin: 10px 2px 2px; font-size: 1rem; }
+  #status .good { color: var(--good); font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="count"></div>
+<div id="grid" role="grid" aria-label="Memory cards"></div>
+<div id="status" aria-live="polite"></div>
+<script>
+"use strict";
+// ---- Streamlit component protocol (same vanilla approach as hw_component) ----
+function stMsg(type, data) {
+  window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*");
+}
+function stReady()      { stMsg("streamlit:componentReady", { apiVersion: 1 }); }
+function stHeight()     { stMsg("streamlit:setFrameHeight", { height: document.body.scrollHeight + 6 }); }
+function stValue(value) { stMsg("streamlit:setComponentValue", { dataType: "json", value: value }); }
+
+const FLIP_BACK_MS = 900;
+let G = null;   // {sid, cards, showPinyin, matched: Set, up: [], moves, locked}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function faceHtml(c) {
+  if (c.face === "image") return `<img src="${c.img}" alt="">`;
+  return `<div class="zh">${esc(c.zh)}</div>` + (G.showPinyin ? `<div class="py">${esc(c.py)}</div>` : "");
+}
+
+function columns() {
+  return (document.body.clientWidth || window.innerWidth) >= 520 ? 4 : 3;
+}
+
+function build() {
+  const grid = document.getElementById("grid");
+  grid.style.setProperty("--cols", columns());
+  grid.innerHTML = "";
+  G.cards.forEach((c, n) => {
+    const b = document.createElement("button");
+    b.className = "card";
+    b.dataset.n = n;
+    b.innerHTML = `<div class="inner"><div class="side back">华</div>` +
+                  `<div class="side face">${faceHtml(c)}</div></div>`;
+    b.addEventListener("click", () => tap(n));
+    grid.appendChild(b);
+  });
+  grid.querySelectorAll("img").forEach((i) => i.addEventListener("load", stHeight));
+  paint();
+}
+
+function paint() {
+  document.getElementById("count").textContent =
+    `Turns: ${G.moves} · pairs found: ${G.matched.size / 2} of ${G.cards.length / 2}`;
+  document.querySelectorAll(".card").forEach((b) => {
+    const n = Number(b.dataset.n);
+    const up = G.matched.has(n) || G.up.includes(n);
+    b.classList.toggle("up", up);
+    b.classList.toggle("matched", G.matched.has(n));
+    b.disabled = G.matched.has(n);
+    b.setAttribute("aria-label", up ? `Card ${n + 1}: ${G.cards[n].face === "word" ? G.cards[n].zh : "picture"}`
+                                    : `Card ${n + 1}, face down`);
+  });
+}
+
+function say(html) { document.getElementById("status").innerHTML = html; stHeight(); }
+
+function report() {
+  stValue({ sid: G.sid, matched: Array.from(G.matched).sort((a, b) => a - b), moves: G.moves });
+}
+
+function tap(n) {
+  if (!G || G.locked || G.matched.has(n) || G.up.includes(n)) return;
+  G.up.push(n);
+  paint();
+  if (G.up.length < 2) return;
+  G.moves += 1;
+  paint();
+  const [a, b] = G.up;
+  const ca = G.cards[a], cb = G.cards[b];
+  if (ca.pair === cb.pair && ca.face !== cb.face) {
+    G.matched.add(a); G.matched.add(b);
+    G.up = [];
+    paint();
+    const w = ca.face === "word" ? ca : cb;
+    say(`<span class="good">✓ ${esc(w.zh)}</span> ${esc(w.py)} — ${esc(w.en)}`);
+    report();
+    return;
+  }
+  G.locked = true;
+  say("Not a pair.");
+  report();
+  setTimeout(() => { G.up = []; G.locked = false; paint(); say(""); }, FLIP_BACK_MS);
+}
+
+window.addEventListener("message", (e) => {
+  const d = e.data || {};
+  if (d.type !== "streamlit:render") return;
+  const args = d.args || {};
+  const theme = d.theme || {};
+  document.body.classList.toggle("dark", theme.base === "dark");
+  if (G && G.sid === args.sid) { stHeight(); return; }       // same game: keep playing
+  const st = args.state || {};
+  G = { sid: args.sid, cards: args.cards || [], showPinyin: !!args.show_pinyin,
+        matched: new Set(st.matched || []), up: [], moves: st.moves || 0, locked: false };
+  build();
+  say(G.moves ? "" : "Tap a card to turn it over.");       // a resumed game is announced by the page
+});
+
+window.addEventListener("resize", () => {
+  const grid = document.getElementById("grid");
+  if (grid) grid.style.setProperty("--cols", columns());
+  stHeight();
+});
+
+stReady();
+stHeight();
+</script>
+</body>
+</html>

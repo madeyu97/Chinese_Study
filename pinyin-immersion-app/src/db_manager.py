@@ -334,6 +334,21 @@ def init_db():
     ''')
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_study_sessions "
                    "ON study_sessions (user_id, day)")
+    # A session in progress on any page (words, sentences, grammar, tones, a
+    # game, today's plan), one per learner and page, so it survives a
+    # dropped connection. See session_store.py.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS saved_sessions (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            day DATE NOT NULL,
+            state JSONB NOT NULL,
+            elapsed REAL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT NOW(),
+            PRIMARY KEY (user_id, name)
+        )
+    ''')
+    cursor.execute("DROP TABLE IF EXISTS game_state")      # replaced by saved_sessions
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_scores (
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -3524,6 +3539,52 @@ def save_game_score(user_id, game, score):
     conn.commit()
     conn.close()
     return score > before
+
+
+def saved_session_put(user_id, name, state_json, elapsed=0):
+    """Save a session in progress (state_json is a JSON string)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""INSERT INTO saved_sessions (user_id, name, day, state, elapsed, updated_at)
+                      VALUES (%s, %s, %s, %s::jsonb, %s, NOW())
+                      ON CONFLICT (user_id, name) DO UPDATE SET
+                          day = EXCLUDED.day, state = EXCLUDED.state,
+                          elapsed = EXCLUDED.elapsed, updated_at = NOW()""",
+                   (user_id, name, date.today(), state_json, float(elapsed or 0)))
+    conn.commit()
+    conn.close()
+
+
+def saved_session_get(user_id, name, same_day=True, max_age_hours=24):
+    """{state, elapsed} for a saved session, if it's recent enough: saved
+    today when same_day, otherwise within max_age_hours. Never raises."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""SELECT state, elapsed, day FROM saved_sessions
+                          WHERE user_id = %s AND name = %s
+                            AND updated_at > NOW() - (%s || ' hours')::interval""",
+                       (user_id, name, str(max_age_hours)))
+        row = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        logging.warning(f"[STORE] saved {name} unreadable: {e}")
+        return None
+    if not row or (same_day and row[2] != date.today()):
+        return None
+    return {"state": row[0], "elapsed": row[1]}
+
+
+def saved_session_del(user_id, name):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM saved_sessions WHERE user_id = %s AND name = %s",
+                       (user_id, name))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.warning(f"[STORE] saved {name} not cleared: {e}")
 
 
 def vocab_ids_for(chineses):

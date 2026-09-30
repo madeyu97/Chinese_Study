@@ -1,4 +1,4 @@
-# src/pages/7_Grammar.py
+# src/views/7_Grammar.py
 """
 语法 Grammar drills - hearing, recognising and saying each structure, built
 only from words you already know well.
@@ -10,7 +10,8 @@ schedule; the core set comes back most often.
 
 Pinyin shows with the answers for your first couple of goes at a structure,
 then waits behind a tap. As a step of today's plan, the plan's structures
-(at most two, at most one new) start straight away.
+(at most two, at most one new) start straight away. A drill in progress is
+saved as you go, so leaving the app picks up at the same item.
 """
 
 import time
@@ -21,6 +22,7 @@ import streamlit as st
 import db_manager as db
 import grammar_curriculum as gc
 import grammar_drills as gd
+import session_store as store
 import today_plan as tp
 from audio_engine import create_audio_file
 from auth import require_login, sidebar_user_badge
@@ -43,13 +45,23 @@ queue = gd.todays_queue(order, progress, date.today(),
                         db.grammar_new_today(USER_ID), GRAMMAR_NEW_PER_DAY)
 
 
+SAVED = ("gr_sid", "gr_set", "gr_stages", "gr_stage", "gr_item", "gr_results", "gr_ans",
+         "gr_saved", "gr_fresh", "gr_pinyin_open", "gr_plan", "gr_plan_logged", "gr_adopted",
+         "gr_recent")
+
+
 def reset_all():
     for k in [k for k in S if k.startswith("gr_") and k != "gr_audio"]:
         del S[k]
+    store.drop(USER_ID, "grammar")
 
 
 if S.get("gr_plan") and S.gr_plan.get("date") != date.today().isoformat():
     reset_all()                     # yesterday's plan left open in the tab
+if "gr_sid" not in S and "gr_plan" not in S:
+    store.resume(USER_ID, "grammar", SAVED, clock="gr_t0")
+if "gr_sid" in S and not ("gr_stages" in S and S.gr_stage >= len(S.gr_stages)):
+    store.keep(USER_ID, "grammar", SAVED, clock="gr_t0")
 
 
 with st.sidebar:
@@ -60,6 +72,7 @@ with st.sidebar:
                f"{len(queue)} ready today")
 
 st.title("🧩 Grammar drills")
+store.notice()
 
 if len(known) < MIN_KNOWN:
     st.info(f"You have **{len(known)}** well-studied words. Grammar drills are built "
@@ -245,6 +258,11 @@ if S.gr_stage >= len(S.gr_stages):
             S.gr_plan["done"] = S.gr_plan.get("done", 0) + 1
         else:
             tp.session_done(USER_ID, "grammar", S.get("gr_t0"), items=1)
+        gp_ = S.get("gr_plan")
+        if gp_ and gp_["i"] + 1 < len(gp_["ids"]):
+            store.keep(USER_ID, "grammar", SAVED, clock="gr_t0")   # saved once, on to the next
+        else:
+            store.drop(USER_ID, "grammar")
     score, nxt = S.gr_saved
     st.success(f"Done — {round(score * 100)}% · back again on {nxt}")
     if S.get("gr_plan"):

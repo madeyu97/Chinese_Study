@@ -12,6 +12,10 @@ want it but never the first question.
               Handwriting · Reading
     Settings  Sentence bank & words
 
+The page scripts live in views/, not pages/: Streamlit treats a folder named
+pages/ as an old-style menu, and on a freshly started server that made the
+first visit to a link like /play show "Page not found".
+
 app2.py runs this same file for the second deployment; who the app belongs
 to is decided by the APP_USER secret (see auth.py).
 """
@@ -29,23 +33,23 @@ if current_user() is None:
 
 PAGES = {
     "": [
-        st.Page("pages/0_Today.py", title="Today", icon="🏠", default=True),
-        st.Page("pages/8_Games.py", title="Play", icon="🎮", url_path="play"),
-        st.Page("pages/5_Together.py", title="Together", icon="🏆", url_path="together"),
+        st.Page("views/0_Today.py", title="Today", icon="🏠", default=True),
+        st.Page("views/8_Games.py", title="Play", icon="🎮", url_path="play"),
+        st.Page("views/5_Together.py", title="Together", icon="🏆", url_path="together"),
     ],
     "Library": [
-        st.Page("pages/1_Words.py", title="Words", icon="📚", url_path="words"),
-        st.Page("pages/7_Grammar.py", title="Grammar", icon="🧩", url_path="grammar"),
-        st.Page("pages/9_Sentences.py", title="Listen & speak", icon="🎧",
+        st.Page("views/1_Words.py", title="Words", icon="📚", url_path="words"),
+        st.Page("views/7_Grammar.py", title="Grammar", icon="🧩", url_path="grammar"),
+        st.Page("views/9_Sentences.py", title="Listen & speak", icon="🎧",
                 url_path="sentences"),
-        st.Page("pages/4_Sound_and_Pairing.py", title="Tones & pairings", icon="🎵",
+        st.Page("views/4_Sound_and_Pairing.py", title="Tones & pairings", icon="🎵",
                 url_path="tones"),
-        st.Page("pages/2_Handwriting.py", title="Handwriting", icon="✍️",
+        st.Page("views/2_Handwriting.py", title="Handwriting", icon="✍️",
                 url_path="handwriting"),
-        st.Page("pages/6_Reading.py", title="Reading", icon="📖", url_path="reading"),
+        st.Page("views/6_Reading.py", title="Reading", icon="📖", url_path="reading"),
     ],
     "Settings": [
-        st.Page("pages/10_Admin.py", title="Sentence bank & words", icon="🛠️",
+        st.Page("views/10_Admin.py", title="Sentence bank & words", icon="🛠️",
                 url_path="admin"),
     ],
 }

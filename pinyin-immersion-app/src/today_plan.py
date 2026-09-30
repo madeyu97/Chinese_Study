@@ -17,9 +17,11 @@ day is a few urgent reviews and a little listening, and still counts.
 build_plan() is pure (it decides what goes in). The rest keeps track of a
 plan in progress as you move from page to page: each page asks active(key)
 to know it should start straight away with the plan's limits, and calls
-session_done() at its summary.
+session_done() at its summary. The plan in progress is saved with each
+change, so it survives a dropped connection like the sessions do.
 """
 
+import json
 import logging
 import math
 import time
@@ -31,15 +33,15 @@ from config import (GRAMMAR_NEW_PER_DAY, PLAN_GRAMMAR_STRUCTURES, PLAN_HANDWRITI
                     VOCAB_NEW_PER_SESSION, VOCAB_SESSION_REVIEWS)
 
 STEPS = {
-    "words": ("📚", "Words", "pages/1_Words.py"),
-    "tones": ("🎵", "Tones", "pages/4_Sound_and_Pairing.py"),
-    "grammar": ("🧩", "Grammar", "pages/7_Grammar.py"),
-    "handwriting": ("✍️", "Handwriting", "pages/2_Handwriting.py"),
-    "sentences": ("🎧", "Listen & speak", "pages/9_Sentences.py"),
+    "words": ("📚", "Words", "views/1_Words.py"),
+    "tones": ("🎵", "Tones", "views/4_Sound_and_Pairing.py"),
+    "grammar": ("🧩", "Grammar", "views/7_Grammar.py"),
+    "handwriting": ("✍️", "Handwriting", "views/2_Handwriting.py"),
+    "sentences": ("🎧", "Listen & speak", "views/9_Sentences.py"),
 }
 STEP_ORDER = list(STEPS)
-TODAY_PAGE = "pages/0_Today.py"
-GAMES_PAGE = "pages/8_Games.py"
+TODAY_PAGE = "views/0_Today.py"
+GAMES_PAGE = "views/8_Games.py"
 
 GRAMMAR_MIN_KNOWN = 20        # grammar drills are built only from words you know
 SENTENCES_MIN_WORDS = 8       # sentence practice needs a few introduced words
@@ -210,6 +212,20 @@ def _today():
     return date.today().isoformat()
 
 
+def _uid():
+    return (_S().get("user") or {}).get("id")
+
+
+def _save_plan():
+    import db_manager as db
+    uid = _uid()
+    if uid and _S().get("tp"):
+        try:
+            db.saved_session_put(uid, "plan", json.dumps(_S()["tp"], ensure_ascii=False))
+        except Exception as e:
+            logging.warning(f"[PLAN] not saved: {e}")
+
+
 def start(steps, short=False):
     """Begin (or resume) today's plan from its first unfinished step.
     Returns that step, or None if everything is done."""
@@ -218,11 +234,22 @@ def start(steps, short=False):
                   "order": [s["key"] for s in todo],
                   "params": {s["key"]: s["params"] for s in todo},
                   "done": [], "skipped": []}
+    _save_plan()
     return todo[0] if todo else None
 
 
 def plan():
-    tp = _S().get("tp")
+    S = _S()
+    if "tp" not in S and not S.get("_tp_restored"):
+        # a new browser session: pick up today's plan if one was under way
+        S["_tp_restored"] = True
+        uid = _uid()
+        if uid:
+            import db_manager as db
+            row = db.saved_session_get(uid, "plan", same_day=True)
+            if row and isinstance(row["state"], dict):
+                S["tp"] = row["state"]
+    tp = S.get("tp")
     return tp if tp and tp.get("date") == _today() else None
 
 
@@ -250,6 +277,7 @@ def finish(key, user_id, seconds, items=0):
         return
     tp["order"].remove(key)
     tp["done"].append(key)
+    _save_plan()
     db.log_study_session(user_id, key, seconds, in_plan=True, items=items)
     if not tp["order"]:
         db.mark_plan_complete(user_id)
@@ -277,6 +305,7 @@ def skip(key):
     if tp and key in tp["order"]:
         tp["order"].remove(key)
         tp["skipped"].append(key)
+        _save_plan()
 
 
 def _go(page, reset=None):

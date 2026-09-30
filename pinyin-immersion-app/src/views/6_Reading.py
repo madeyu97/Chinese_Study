@@ -1,4 +1,4 @@
-# src/pages/6_Reading.py
+# src/views/6_Reading.py
 """
 读 Reading - recognising, in ordinary type, the characters you can write.
 

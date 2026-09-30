@@ -879,7 +879,7 @@ def db_tests():
         import audio_engine
         uid = db.list_users()[0]["id"]
         conn = db.get_connection(); cur = conn.cursor()
-        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress"):
+        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress", "saved_sessions"):
             cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
         conn.commit(); conn.close()
         real_content, real_audio = db.word_content_for, audio_engine.create_audio_file
@@ -893,7 +893,7 @@ def db_tests():
         db.word_content_for = fake_content
         audio_engine.create_audio_file = lambda text, voice=None: None
         try:
-            at = AppTest.from_file("pages/1_Words.py", default_timeout=120)
+            at = AppTest.from_file("views/1_Words.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
             at.run(); at.button[0].click().run()
             wrong_once, done = True, False
@@ -929,7 +929,8 @@ def db_tests():
         import audio_engine
         uid = db.list_users()[0]["id"]
         conn = db.get_connection(); cur = conn.cursor()
-        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress", "word_diagnosis"):
+        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress", "word_diagnosis",
+                    "saved_sessions"):
             cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
         cur.execute("SELECT id FROM vocab WHERE chinese = '买'"); buy_id = cur.fetchone()[0]
         # 买 has lapsed twice, mostly missed by ear
@@ -949,7 +950,7 @@ def db_tests():
              "reviewed": True}, None)
         audio_engine.create_audio_file = lambda text, voice=None: None
         try:
-            at = AppTest.from_file("pages/1_Words.py", default_timeout=120)
+            at = AppTest.from_file("views/1_Words.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
             at.run(); at.button[0].click().run()
             assert at.session_state["wd_items"][0]["word"]["chinese"] == "买"
@@ -987,7 +988,7 @@ def db_tests():
         from streamlit.testing.v1 import AppTest
         uid = db.list_users()[0]["id"]
         conn = db.get_connection(); cur = conn.cursor()
-        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress"):
+        for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress", "saved_sessions"):
             cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
         cur.execute("SELECT id FROM vocab WHERE chinese = '冷气'"); a = cur.fetchone()[0]
         cur.execute("SELECT id FROM vocab WHERE chinese = '冰厨'"); b = cur.fetchone()[0]
@@ -1021,7 +1022,7 @@ def db_tests():
         import audio_engine
         uid = db.list_users()[0]["id"]
         conn = db.get_connection(); cur = conn.cursor()
-        for tbl in ("word_attempts", "word_skill", "drill_progress"):
+        for tbl in ("word_attempts", "word_skill", "drill_progress", "saved_sessions"):
             cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
         cur.execute("SELECT id FROM vocab WHERE freq_rank <= 400")
         for (vid,) in cur.fetchall():
@@ -1032,7 +1033,7 @@ def db_tests():
         audio_engine.create_audio_file = lambda text, voice=None: None
         try:
             for drill in ("tone", "pair"):
-                at = AppTest.from_file("pages/4_Sound_and_Pairing.py", default_timeout=120)
+                at = AppTest.from_file("views/4_Sound_and_Pairing.py", default_timeout=120)
                 at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
                 at.run()
                 assert not at.sidebar.radio, "the drill choice lives on the page now"
@@ -1061,6 +1062,63 @@ def db_tests():
         assert cur.fetchone()[0] > 0
         conn.close()
 
+    @test("Games: a game in progress survives leaving the app, a bogus pair is refused, End game clears it")
+    def t_games_resume():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        import memory_component as mcomp
+        uid = db.list_users()[0]["id"]
+        db.saved_session_del(uid, "games")
+        real_audio, real_board = audio_engine.create_audio_file, mcomp.memory_board
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        def session():
+            at = AppTest.from_file("views/8_Games.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            return at
+        try:
+            # a quiz: answer two rounds, then "leave" (a brand-new session)
+            at = session(); at.run()
+            next(b for b in at.button if b.key == "pick_word").click().run()
+            for _ in range(2):
+                rnd = at.session_state["gm_rounds"][at.session_state["gm_i"]]
+                g = [x for x in at.get("button_group") if (x.key or "").startswith("gm_pick_")][0]
+                g.set_value(["A", "B", "C", "D"][rnd["options"].index(rnd["target"])]).run()
+                next(b for b in at.button if b.label == "Next ▶️").click().run()
+            rounds, score = at.session_state["gm_rounds"], at.session_state["gm_score"]
+            back = session(); back.run()
+            assert not back.exception, back.exception
+            assert back.session_state["gm_i"] == 2 and back.session_state["gm_score"] == score
+            assert back.session_state["gm_rounds"] == rounds
+            assert "Picked up where you left off." in [c.value for c in back.caption]
+            assert "Round 3 of" in back.get("progress")[0].proto.text
+            # End game on the page (not only in the sidebar) clears the saved copy
+            next(b for b in back.button if b.key == "gm_end").click().run()
+            assert db.saved_session_get(uid, "games", same_day=False) is None and "pick_memory" in [b.key for b in back.button]
+
+            # memory: two pairs found, one bogus "pair" claimed, then leave
+            at = session(); at.run()
+            next(b for b in at.button if b.key == "pick_memory").click().run()
+            cards, sid = at.session_state["gm_cards"], at.session_state["gm_sid"]
+            pairs = {}
+            for n, c in enumerate(cards):
+                pairs.setdefault(c["item"]["chinese"], []).append(n)
+            p1, p2 = list(pairs.values())[:2]
+            wrong = [list(pairs.values())[2][0], list(pairs.values())[3][0]]
+            mcomp.memory_board = lambda **k: {"sid": sid, "matched": sorted(p1 + p2 + wrong), "moves": 4}
+            at.run()
+            assert at.session_state["gm_matched"] == set(p1 + p2), "only real pairs count"
+            assert at.session_state["gm_moves"] == 4
+            seen = {}
+            mcomp.memory_board = lambda **k: seen.update(k) or None
+            back = session(); back.run()
+            assert not back.exception, back.exception
+            assert seen["sid"] == sid and seen["state"] == {"matched": sorted(p1 + p2), "moves": 4}
+            assert len(seen["cards"]) == 12 and all(c["img"].startswith("data:image/")
+                                                    for c in seen["cards"] if c["face"] == "image")
+        finally:
+            audio_engine.create_audio_file, mcomp.memory_board = real_audio, real_board
+            db.saved_session_del(uid, "games")
+
     @test("connection pool: more simultaneous users than connections wait their turn, nothing is reset")
     def t_pool_busy():
         import threading, time as _t
@@ -1080,21 +1138,36 @@ def db_tests():
             db.reset_pool = real_reset
         assert not errors and not resets, (errors[:2], len(resets))
 
+    def fake_board(sid, cards, show_pinyin, state, key=None, default=None):
+        """Stands in for the tappable board: each run, one more pair found,
+        one turn each - perfect play."""
+        matched = set(state["matched"])
+        by_pair = {}
+        for n, c in enumerate(cards):
+            by_pair.setdefault(c["pair"], []).append(n)
+        left = [ns for ns in by_pair.values() if not set(ns) <= matched]
+        if left:
+            matched |= set(left[0])
+        return {"sid": sid, "matched": sorted(matched), "moves": state["moves"] + (1 if left else 0)}
+
     @test("Games page: all four games play through, in both display modes; results stay out of diagnosis")
     def t_games_page():
         from streamlit.testing.v1 import AppTest
         import audio_engine
+        import memory_component as mcomp
         uid = db.list_users()[0]["id"]
         conn = db.get_connection(); cur = conn.cursor()
         cur.execute("DELETE FROM game_scores WHERE user_id = %s", (uid,))
         cur.execute("DELETE FROM word_attempts WHERE user_id = %s", (uid,))
         conn.commit(); conn.close()
-        real_audio = audio_engine.create_audio_file
+        db.saved_session_del(uid, "games")
+        real_audio, real_board = audio_engine.create_audio_file, mcomp.memory_board
         audio_engine.create_audio_file = lambda text, voice=None: None
+        mcomp.memory_board = fake_board
         try:
             for game, show in (("picture", "Characters + pinyin"), ("word", "Characters only"),
                                ("listen", "Characters only"), ("memory", "Characters + pinyin")):
-                at = AppTest.from_file("pages/8_Games.py", default_timeout=120)
+                at = AppTest.from_file("views/8_Games.py", default_timeout=120)
                 at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
                 at.run()
                 if game == "picture":       # credits for every Commons picture on the picker screen
@@ -1110,16 +1183,8 @@ def db_tests():
                     if any("Play again" in b.label for b in at.button):
                         break
                     if game == "memory":
-                        cards, up = at.session_state["gm_cards"], at.session_state["gm_up"]
-                        matched = at.session_state["gm_matched"]
-                        pills = [p for p in at.get("button_group") if (p.key or "").startswith("gm_mem_")][0]
-                        # turn over one card, then its partner
-                        if len(up) == 1:
-                            want = next(n for n, c in enumerate(cards) if n != up[0] and n not in matched
-                                        and c["item"]["chinese"] == cards[up[0]]["item"]["chinese"])
-                        else:
-                            want = next(n for n in range(len(cards)) if n not in matched and n not in up)
-                        pills.set_value(str(want + 1)).run()
+                        assert not at.get("button_group"), "cards are tapped on the board, not picked from a list"
+                        at.run()                    # the board reports one more pair
                         continue
                     if at.session_state.get("gm_ans") is None:
                         rnd = at.session_state["gm_rounds"][at.session_state["gm_i"]]
@@ -1135,7 +1200,8 @@ def db_tests():
                 if game == "memory":
                     assert at.session_state["gm_moves"] == 6, "perfect play: one turn per pair"
         finally:
-            audio_engine.create_audio_file = real_audio
+            audio_engine.create_audio_file, mcomp.memory_board = real_audio, real_board
+        assert db.saved_session_get(uid, "games", same_day=False) is None, "a finished game leaves nothing to resume"
         scores = db.game_scores(uid)
         assert scores["picture"]["best"] > 0 and scores["memory"]["best"] == 100
         # game results are logged, but never read as evidence of a troubled word
@@ -1158,7 +1224,7 @@ def db_tests():
         conn = db.get_connection(); cur = conn.cursor()
         for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress", "word_diagnosis",
                     "drill_progress", "grammar_progress", "handwriting_progress", "study_sessions",
-                    "activity_log"):
+                    "activity_log", "saved_sessions"):
             cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
         cur.execute("""SELECT id FROM vocab WHERE freq_rank <= 60 AND chinese ~ '^[一-鿿]{1,3}$'
                        AND COALESCE(tag, '') <> 'China' ORDER BY freq_rank LIMIT 12""")
@@ -1336,7 +1402,7 @@ def db_tests():
         db.bank_get = _fake_exercise
         audio_engine.create_audio_file = lambda text, voice=None: None
         try:
-            at = AppTest.from_file("pages/9_Sentences.py", default_timeout=120)
+            at = AppTest.from_file("views/9_Sentences.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
             at.run()
             assert not at.sidebar.radio and not at.number_input, "no session style or size to choose"
@@ -1389,7 +1455,7 @@ def db_tests():
             "verdict": "correct", "feedback": "", "better": reference}
         audio_engine.create_audio_file = lambda text, voice=None: None
         try:
-            at = AppTest.from_file("pages/7_Grammar.py", default_timeout=120)
+            at = AppTest.from_file("views/7_Grammar.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
             at.session_state["tp"] = plan_state(["grammar", "sentences"], {"grammar": {"ids": ids}})
             at.run()
@@ -1428,7 +1494,7 @@ def db_tests():
 
             # handwriting: nothing to write from the vocabulary yet -> the step closes itself
             db.set_handwriting_source(uid, "vocab")
-            at = AppTest.from_file("pages/2_Handwriting.py", default_timeout=120)
+            at = AppTest.from_file("views/2_Handwriting.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
             at.session_state["tp"] = plan_state(["handwriting"], {"handwriting": {"reviews": 15, "new": 3}})
             at.run()
@@ -1440,7 +1506,7 @@ def db_tests():
             cur.execute("DELETE FROM study_sessions WHERE user_id = %s AND activity = 'handwriting'", (uid,))
             conn.commit(); conn.close()
             db.set_handwriting_source(uid, "frequency")
-            at = AppTest.from_file("pages/2_Handwriting.py", default_timeout=120)
+            at = AppTest.from_file("views/2_Handwriting.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
             at.session_state["tp"] = plan_state(["handwriting"], {"handwriting": {"reviews": 15, "new": 3}})
             at.run()
@@ -1466,7 +1532,7 @@ def db_tests():
             at = AppTest.from_file("main_app.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
             at.run()
-            at.switch_page("pages/1_Words.py").run()
+            at.switch_page("views/1_Words.py").run()
             next(b for b in at.button if b.label == "▶️ Start").click().run()
             assert at.session_state["wd_plan"] is False
             at.session_state["tp"] = {"date": _d.today().isoformat(), "short": False,
@@ -1487,16 +1553,125 @@ def db_tests():
             db.word_content_for, db.bank_get, audio_engine.create_audio_file = real
         assert "words" in db.plan_done_today(uid)
 
+
+    def _new_session(uid, path="main_app.py"):
+        from streamlit.testing.v1 import AppTest
+        at = AppTest.from_file(path, default_timeout=120)
+        at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+        return at
+
+    @test("dropped connection mid-plan: Words resumes at the same card, still a plan step, and the plan carries on")
+    def t_words_resume():
+        import audio_engine
+        uid = _fresh_learner()
+        real = (db.word_content_for, db.bank_get, audio_engine.create_audio_file)
+        db.word_content_for, db.bank_get = _fake_content, _fake_exercise
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            at = _new_session(uid); at.run()
+            next(b for b in at.button if b.label.startswith("▶️ Start")).click().run()
+            at.switch_page(tplan.STEPS["words"][2])
+            for _ in range(5):
+                _answer_step(at)
+            i, items, results = (at.session_state["wd_i"], at.session_state["wd_items"],
+                                 at.session_state["wd_results"])
+            ans = at.session_state["wd_ans"] if _has(at, "wd_ans") else None
+            assert 0 < len(results) and i < len(items)
+            # the phone locks; Streamlit forgets the session; the app is opened again
+            back = _new_session(uid); back.run()
+            back.switch_page(tplan.STEPS["words"][2]).run()
+            assert not back.exception, back.exception
+            S = back.session_state
+            assert S["wd_i"] == i and S["wd_items"] == items and S["wd_results"] == results
+            assert (S["wd_ans"] if _has(back, "wd_ans") else None) == ans, "same answer on screen"
+            assert isinstance(S["wd_retried"], set) and S["wd_plan"] is True
+            assert S["tp"]["order"][0] == "words", "today's plan came back too"
+            assert "Picked up where you left off." in [c.value for c in back.caption]
+            for _ in range(80):
+                assert not back.exception, back.exception
+                if any(b.label.startswith("Continue ▶") for b in back.button):
+                    break
+                _answer_step(back)
+            assert any(b.label.startswith("Continue ▶") for b in back.button), "the plan moves on"
+            assert "words" in db.plan_done_today(uid)
+            assert db.saved_session_get(uid, "words") is None, "a finished session isn't kept"
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM study_sessions WHERE user_id = %s AND activity = 'words'", (uid,))
+            assert cur.fetchone()[0] == 1, "logged once, not twice"
+            conn.close()
+        finally:
+            db.word_content_for, db.bank_get, audio_engine.create_audio_file = real
+
+    @test("dropped connection: Listen & speak, Tones and Grammar pick up at the same item")
+    def t_pages_resume():
+        import audio_engine
+        uid = _fresh_learner()
+        real = (db.bank_get, audio_engine.create_audio_file, db.grammar_known_vocab,
+                db.grammar_pick_set, db.grammar_mark_served, gdr.grade_answer)
+        db.bank_get = _fake_exercise
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        db.grammar_known_vocab = lambda user_id: GR_KNOWN * 2
+        db.grammar_pick_set = lambda user_id, sid, n: {"id": 0, "payload": _gr_payload()}
+        db.grammar_mark_served = lambda set_id: None
+        gdr.grade_answer = lambda structure, task, reference, said, spoken=True: {
+            "verdict": "correct", "feedback": "", "better": reference}
+        try:
+            # Listen & speak: one card answered, the next one's answer on screen
+            at = _new_session(uid, "views/9_Sentences.py"); at.run()
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            _answer_step(at); _answer_step(at); _answer_step(at)     # check, next, check
+            snap = {k: at.session_state[k] for k in ("sn_i", "sn_cards", "sn_results", "sn_ans", "sn_ex")}
+            back = _new_session(uid, "views/9_Sentences.py"); back.run()
+            assert not back.exception, back.exception
+            assert {k: back.session_state[k] for k in snap} == snap
+            assert "Next ▶️" in [b.label for b in back.button], "the answered card, as it was"
+
+            # Tones: two items in (enough words met to make tone groups)
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("""INSERT INTO word_skill (user_id, vocab_id, skill, interval, next_review_date, reps,
+                           introduced_on) SELECT %s, id, 'recognition', 3, '2099-01-01', 3, 'seeded'
+                           FROM vocab WHERE freq_rank <= 400 ON CONFLICT DO NOTHING""", (uid,))
+            conn.commit(); conn.close()
+            at = _new_session(uid, "views/4_Sound_and_Pairing.py"); at.run()
+            next(b for b in at.button if "Start" in b.label).click().run()
+            _answer_step(at); _answer_step(at); _answer_step(at)     # check, next, check
+            snap = {k: at.session_state[k] for k in ("sp_i", "sp_items", "sp_results", "sp_ans")}
+            assert snap["sp_i"] == 1
+            back = _new_session(uid, "views/4_Sound_and_Pairing.py"); back.run()
+            assert not back.exception, back.exception
+            assert {k: back.session_state[k] for k in snap} == snap
+
+            # Grammar: part-way through a structure
+            at = _new_session(uid, "views/7_Grammar.py"); at.run()
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            for _ in range(3):
+                mc = [r for r in at.radio if (r.key or "").startswith("mc_")][0]
+                it = at.session_state["gr_set"]["identify"][at.session_state["gr_item"]]
+                mc.set_value(it["options"][it["answer"]]).run()
+                next(b for b in at.button if b.label == "Check").click().run()
+                next(b for b in at.button if b.label == "Next ▶️").click().run()
+            snap = {k: at.session_state[k] for k in ("gr_sid", "gr_stage", "gr_item", "gr_results")}
+            assert snap["gr_stage"] == 1
+            back = _new_session(uid, "views/7_Grammar.py"); back.run()
+            assert not back.exception, back.exception
+            assert {k: back.session_state[k] for k in snap} == snap
+            assert back.session_state["gr_set"] == at.session_state["gr_set"], "same drill, not a new one"
+        finally:
+            (db.bank_get, audio_engine.create_audio_file, db.grammar_known_vocab,
+             db.grammar_pick_set, db.grammar_mark_served, gdr.grade_answer) = real
+
     @test("every page opens from the menu; no method choices left in the sidebar")
     def t_pages_smoke():
         from streamlit.testing.v1 import AppTest
         uid = db.list_users()[0]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM saved_sessions WHERE user_id = %s", (uid,)); conn.commit(); conn.close()
         at = AppTest.from_file("main_app.py", default_timeout=120)
         at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
         at.run()
-        for page in ("pages/8_Games.py", "pages/1_Words.py", "pages/7_Grammar.py", "pages/9_Sentences.py",
-                     "pages/4_Sound_and_Pairing.py", "pages/2_Handwriting.py", "pages/6_Reading.py",
-                     "pages/5_Together.py", "pages/10_Admin.py", "pages/0_Today.py"):
+        for page in ("views/8_Games.py", "views/1_Words.py", "views/7_Grammar.py", "views/9_Sentences.py",
+                     "views/4_Sound_and_Pairing.py", "views/2_Handwriting.py", "views/6_Reading.py",
+                     "views/5_Together.py", "views/10_Admin.py", "views/0_Today.py"):
             at.switch_page(page).run()
             assert not at.exception, (page, at.exception)
             sb = at.sidebar
@@ -1505,6 +1680,7 @@ def db_tests():
     t_bank()
     t_flags()
     t_games_page()
+    t_games_resume()
     t_pool_busy()
     t_sd_page()
     t_integration_db()
@@ -1535,6 +1711,8 @@ def db_tests():
     t_sentences_page()
     t_plan_pages()
     t_plan_adopts()
+    t_words_resume()
+    t_pages_resume()
     t_pages_smoke()
 
 
@@ -2137,6 +2315,29 @@ def t_sd_session():
     assert sdr.group_result([False, False]) == "wrong"
 
 
+@test("session store: sets, tuples and number-keyed dicts survive the trip through JSON")
+def t_store_codec():
+    import json as _j
+    import session_store as ss
+    state = {"retried": {(12, "recognition"), (7, "production")}, "rot": {12: 1, 7: 0},
+             "matched": {0, 3}, "saved": (0.8, "2026-10-01"), "items": [{"id": 1, "tag": None}],
+             "empty": {}, "names": {"a": 1}}
+    back = ss._dec(_j.loads(ss._blob(ss._enc(state))))
+    assert back == state, back
+
+
+@test("memory board: only real picture-word pairs are accepted from the board")
+def t_games_accept():
+    items = [{"chinese": zh} for zh in ("手", "脚", "头")]
+    cards = [{"item": items[0], "face": "image"}, {"item": items[1], "face": "word"},
+             {"item": items[0], "face": "word"}, {"item": items[1], "face": "image"},
+             {"item": items[2], "face": "image"}, {"item": items[2], "face": "word"}]
+    assert gms.accept_matches(cards, [0, 2]) == {0, 2}
+    assert gms.accept_matches(cards, [0, 1]) == set(), "two different words aren't a pair"
+    assert gms.accept_matches(cards, [0, 2, 1, 3, 4], already={4, 5}) == {0, 1, 2, 3, 4, 5}
+    assert gms.accept_matches(cards, [99, -1, "x", None]) == set()
+
+
 @test("sound drill: the page's daily allowance caps new groups in a session")
 def t_sd_new_cap():
     import random as _r
@@ -2404,7 +2605,7 @@ if __name__ == "__main__":
     print("Word diagnosis:")
     t_integration(); t_wd_trouble(); t_wd_diagnose(); t_wd_remedies(); t_wd_written()
     print("Sound & Pairing:")
-    t_sd_groups(); t_sd_audio(); t_sd_pairs(); t_sd_session(); t_sd_new_cap()
+    t_sd_groups(); t_sd_audio(); t_sd_pairs(); t_sd_session(); t_sd_new_cap(); t_games_accept(); t_store_codec()
     print("Today's plan:")
     t_plan_build(); t_plan_short(); t_plan_gates()
     print("Games:")

@@ -1,4 +1,4 @@
-# src/pages/8_Games.py
+# src/views/8_Games.py
 """
 🎮 Play - picture games for spare minutes: something to open instead of a
 feed. Extra practice on top of today's plan, not a replacement for it.
@@ -8,19 +8,26 @@ food, market & local fruit, home, places, nature, animals, TCM clinic, TCM
 herbs). Words can be shown with pinyin or as characters only. Answers
 register on tap; scores, streaks and best scores keep it light. Time played
 goes into the ledger as play.
+
+Memory match is a board of cards you tap to turn over (src/memory_board).
+A game in progress is saved to the database after every move, so leaving
+the page - or the app - and coming back picks up where you left off.
 """
 
 import random
 import time
+import uuid
 
 import streamlit as st
 
 import db_manager as db
 import game_items as gi
 import games as gm
+import memory_component as mc
+import session_store as store
 from audio_engine import create_audio_file
 from auth import require_login, sidebar_user_badge
-from game_images import credit_lines, img_tag
+from game_images import credit_lines, data_uri, img_tag
 
 st.set_page_config(page_title="Play", page_icon="🎮", layout="centered")
 USER = require_login()
@@ -29,9 +36,31 @@ S = st.session_state
 LETTERS = ["A", "B", "C", "D"]
 
 
+# what a game in progress is saved as (widget keys and audio are left out)
+SAVED = ("gm_game", "gm_sid", "gm_topped", "gm_vocab", "gm_show", "gm_cards", "gm_matched",
+         "gm_moves", "gm_rounds", "gm_i", "gm_score", "gm_streak", "gm_best_streak",
+         "gm_missed", "gm_ans")
+
+
 def reset():
+    """End the game: forget it here and in the saved copy."""
     for k in [k for k in S if k.startswith("gm_")]:
         del S[k]
+    store.drop(USER_ID, "games")
+
+
+def persist():
+    """Save the game in progress, so it survives leaving the page or the app."""
+    store.keep(USER_ID, "games", SAVED, clock="gm_t0")
+
+
+def restore():
+    """Pick up a saved game, if there is one from the last day."""
+    if store.resume(USER_ID, "games", SAVED, clock="gm_t0", same_day=False, max_age_hours=24):
+        if S.get("gm_game") in gm.GAMES:
+            return True
+        reset()
+    return False
 
 
 SHOW = ["Characters + pinyin", "Characters only"]
@@ -42,12 +71,11 @@ PREFS = S.setdefault("games_prefs", {"show": SHOW[0], "cats": list(gi.CATEGORIES
 
 with st.sidebar:
     sidebar_user_badge()
-    if "gm_game" in S and st.button("End game", width="stretch"):
-        reset()
-        st.rerun()
 
 st.title("🎮 Play")
-show_pinyin = PREFS["show"] == SHOW[0]
+if "gm_game" not in S:
+    restore()
+show_pinyin = S.get("gm_show", PREFS["show"] == SHOW[0])
 
 
 # ----------------------------------------------------------------------
@@ -97,13 +125,22 @@ def start(game):
     met = {w["chinese"] for w in db.introduced_words(USER_ID)} if only_met else None
     pool, topped = gm.word_pool(PREFS["cats"] or list(gi.CATEGORIES), met, only_met)
     S.gm_game, S.gm_topped, S.gm_t0 = game, topped, time.time()
+    S.gm_sid, S.gm_show = uuid.uuid4().hex, PREFS["show"] == SHOW[0]
     S.gm_vocab = db.vocab_ids_for([i["chinese"] for i in pool])
     if game == "memory":
-        S.gm_cards, S.gm_up, S.gm_matched, S.gm_moves = gm.memory_board(pool), [], set(), 0
+        S.gm_cards, S.gm_matched, S.gm_moves = gm.memory_board(pool), set(), 0
     else:
         S.gm_rounds, S.gm_i, S.gm_score, S.gm_streak, S.gm_best_streak = \
             gm.quiz_rounds(pool), 0, 0, 0, 0
         S.gm_missed = []
+    persist()
+
+
+def end_button():
+    st.write("")
+    if st.button("✖ End game", key="gm_end"):
+        reset()
+        st.rerun()
 
 
 # ----------------------------------------------------------------------
@@ -136,6 +173,7 @@ if "gm_game" not in S:
     st.stop()
 
 game = S.gm_game
+store.notice()
 if S.get("gm_topped"):
     st.caption("Not enough words you've met in these topics yet — a few new ones are mixed in.")
 
@@ -145,6 +183,7 @@ def finish(score):
         S.gm_saved = db.save_game_score(USER_ID, game, score)
         db.log_study_session(USER_ID, "games", time.time() - S.get("gm_t0", time.time()),
                              items=len(S.get("gm_rounds") or S.get("gm_cards") or []))
+        store.drop(USER_ID, "games")          # finished: nothing to pick up later
     return S.gm_saved
 
 
@@ -152,7 +191,7 @@ def finish(score):
 # memory match
 # ----------------------------------------------------------------------
 if game == "memory":
-    cards, up, matched = S.gm_cards, S.gm_up, S.gm_matched
+    cards, matched = S.gm_cards, S.gm_matched
     if len(matched) == len(cards):
         score = gm.memory_score(len(cards) // 2, S.gm_moves)
         new_best = finish(score)
@@ -168,45 +207,24 @@ if game == "memory":
             reset()
             st.rerun()
         st.stop()
-    st.caption(f"Turns: {S.gm_moves} · pairs found: {len(matched) // 2} of {len(cards) // 2}")
-    cells = []
-    for n, c in enumerate(cards):
-        face_up = n in up or n in matched
-        if not face_up:
-            inner = (f"<div style='height:100%;display:flex;align-items:center;justify-content:center;"
-                     f"font-size:1.6rem;font-weight:700;color:#ffffff'>{n + 1}</div>")
-            style = "background:#5c6bc0"
-        elif c["face"] == "image":
-            inner = img_tag(c["item"]["image"], 80)
-            style = "background:#ffffff"
-        else:
-            inner = word_html(c["item"], "1.5rem")
-            style = "background:#ffffff"
-        if n in matched:
-            style += ";opacity:0.35"
-        cells.append(f"<div style='{style};border:1px solid #c5cae9;border-radius:12px;height:104px;"
-                     f"display:flex;flex-direction:column;align-items:center;justify-content:center;"
-                     f"text-align:center'>{inner}</div>")
-    html(f"<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:8px'>{''.join(cells)}</div>")
-    choices = [str(n + 1) for n in range(len(cards)) if n not in matched and n not in up]
-    pick = st.pills("Turn over a card", choices, selection_mode="single",
-                    key=f"gm_mem_{S.gm_moves}_{len(up)}_{len(matched)}")
-    if pick:
-        n = int(pick) - 1
-        if len(up) == 2:                       # the last pair didn't match: turn them back
-            up.clear()
-        up.append(n)
-        if len(up) == 2:
-            S.gm_moves += 1
-            a, b = cards[up[0]], cards[up[1]]
-            if gm.is_match(a, b):
-                matched.update(up)
-                record(a["item"], True, game)
-                st.toast(f"✅ {a['item']['chinese']} — {a['item']['english']}")
-                up.clear()
-        st.rerun()
-    if len(up) == 2:
-        st.caption("Not a pair — turn over another card to continue.")
+    board = [{"pair": c["item"]["chinese"], "face": c["face"],
+              "img": data_uri(c["item"]["image"]) if c["face"] == "image" else "",
+              "zh": c["item"]["chinese"], "py": c["item"]["pinyin"], "en": c["item"]["english"]}
+             for c in cards]
+    value = mc.memory_board(sid=S.gm_sid, cards=board, show_pinyin=show_pinyin,
+                            state={"matched": sorted(matched), "moves": S.gm_moves},
+                            key=f"gm_board_{S.gm_sid}", default=None)
+    if value and value.get("sid") == S.gm_sid:
+        now = gm.accept_matches(cards, value.get("matched"), matched)
+        moves = max(S.gm_moves, int(value.get("moves") or 0))
+        if now != matched or moves != S.gm_moves:
+            for item in {cards[n]["item"]["chinese"]: cards[n]["item"] for n in now - matched}.values():
+                record(item, True, game)
+            S.gm_matched, S.gm_moves = now, moves
+            persist()
+            if len(now) == len(cards):
+                st.rerun()                    # on to the score
+    end_button()
     st.stop()
 
 
@@ -267,6 +285,7 @@ if ans is None and chosen is not None:
         S.gm_missed.append(target)
     record(target, correct, game)
     S.gm_ans = {"correct": correct}
+    persist()
     st.rerun()
 
 if ans is not None:
@@ -282,4 +301,6 @@ if ans is not None:
     if st.button("Next ▶️", type="primary", width="stretch"):
         S.gm_i += 1
         S.pop("gm_ans", None)
+        persist()
         st.rerun()
+end_button()

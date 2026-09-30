@@ -1,4 +1,4 @@
-# src/pages/0_Today.py
+# src/views/0_Today.py
 """
 🏠 Today - the day's plan, built from everything that's due, with one Start
 button. The only choices here are about the day, not the method: a full or

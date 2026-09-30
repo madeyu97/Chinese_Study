@@ -1,4 +1,4 @@
-# src/pages/5_Together.py
+# src/views/5_Together.py
 """
 Together - side-by-side progress and nudges.
 

@@ -23,7 +23,25 @@ import streamlit as st
 
 st.set_page_config(page_title="Bahasa Study", page_icon="🌺", layout="centered")
 
-from auth import current_user, login_page  # noqa: E402  (page config must come first)
+try:
+    from auth import current_user, login_page  # noqa: E402  (page config must come first)
+except Exception as e:  # noqa: BLE001
+    # The database is reached on first import. If it can't be, say why in
+    # plain words instead of a traceback; the next reload tries again.
+    import psycopg2
+    if not isinstance(e, (psycopg2.OperationalError, ValueError)):
+        raise
+    reason = str(e).strip().splitlines()[0]
+    st.error("**Can't reach the database.**")
+    st.caption(f"Supabase said: {reason}")
+    st.markdown(
+        "- **Tenant or user not found**: the Supabase project is paused (free projects pause "
+        "after a week unused) or the address is out of date. Restore the project in the "
+        "Supabase dashboard, or copy the **Session pooler** string from Supabase → Connect "
+        "into this app's `DATABASE_URL` secret.\n"
+        "- **Password authentication failed**: the password in `DATABASE_URL` is wrong.\n"
+        "- **DATABASE_URL is missing**: add it under the app's Settings → Secrets.")
+    st.stop()
 import today_plan as tp  # noqa: E402
 
 if current_user() is None:

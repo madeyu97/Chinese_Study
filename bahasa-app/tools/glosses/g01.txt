@@ -1,0 +1,500 @@
+saya|I / me (polite)|||pron||
+yang|which / who / that (relative)|||part||
+aku|I / me (informal)|||pron||
+dia|he / she / him / her|||pron||
+awak|you (familiar)|||pron||
+di|at / in / on (a place)|||prep||
+kau|you (informal; = engkau)|||pron|c|
+ini|this / these|||det||
+tak|not / no (= tidak)|||adv|c|
+dan|and|||conj||
+akan|will / shall|||aux||
+apa|what|||q||
+tidak|not / no|||adv||
+itu|that / those / the|||det||
+kita|we / us (including you)|||pron||
+kamu|you|||pron||
+untuk|for / to (in order to)|||prep||
+ada|there is / have / be present|||v||
+boleh|can / may / be able to|||aux||
+dengan|with / and / by (means of)|||prep||
+mereka|they / them|||pron||
+anda|you (formal, in writing)|||pron|f|
+ke|to (a place) / (question particle, colloquial)|||prep||
+tahu|know|||v||
+kami|we / us (not including you)|||pron||
+ya|yes|||interj||
+sini|here|||adv||
+semua|all / everyone|||det||
+dalam|in / inside / deep|||prep||
+dari|from|||prep||
+pergi|go|||v||
+orang|person / people / (counter for people)|||n||
+tapi|but (= tetapi)|||conj|c|
+adalah|is / are (formal, before a noun or clause)|ada|+lah|v|f|
+pada|at / on (a time) / to (a person)|||prep||
+nak|want / going to (= hendak)|||aux|c|
+ia|it / he / she (formal)|||pron|f|
+bukan|not (with nouns) / isn't it?|||adv||
+jadi|so / become / happen|||v||
+lagi|more / again / still / else|||adv||
+sekarang|now|||adv||
+jangan|don't|||adv||
+mana|where / which|||q||
+dah|already (= sudah)|||adv|c|
+buat|do / make|||v||
+seperti|like / as|||prep||
+sudah|already / have (done)|||adv||
+baik|good / fine / kind|||adj||
+jika|if|||conj||
+perlu|need / must|||aux||
+satu|one|||num||
+hanya|only|||adv||
+telah|already / have (done) (formal)|||adv|f|
+lebih|more / -er|||adv||
+ayah|father / dad|||n||
+datang|come|||v||
+mungkin|maybe / perhaps|||adv||
+siapa|who|||q||
+oh|oh|||interj||
+saja|only / just (= sahaja)|||adv||
+kenapa|why|||q||
+sangat|very|||adv||
+mahu|want / will|||aux||
+bagaimana|how|||q||
+hari|day|||n||
+lakukan|do (it) / carry out|laku|-kan|v||
+masa|time / when|||n||
+seorang|a / one (person) / alone|orang|se-|num||
+dapat|get / can / manage to|||v||
+terima|receive / accept|||v||
+rasa|feel / taste / think|||v||
+juga|also / too|||adv||
+okey|okay|||interj|c|
+kasih|love / affection (terima kasih = thank you)|||n||
+sana|there|||adv||
+mari|come / let's|||v||
+kalau|if|||conj||
+tuan|sir / master / owner|||n||
+kepada|to (a person)|pada|ke-|prep||
+pernah|ever / have (done) before|||adv||
+ni|this (= ini)|||det|c|
+tu|that (= itu)|||det|c|
+atau|or|||conj||
+sesuatu|something|suatu|se-|pron||
+diri|self|||n||
+mati|die / dead|||v||
+betul|right / correct / true|||adj||
+masih|still|||adv||
+begitu|like that / so|||adv||
+adakah|is it? / does? (opens a yes-no question)|ada|+kah|q||
+anak|child / son / daughter|||n||
+lihat|see / look|||v||
+tentang|about|||prep||
+lain|other / different / else|||adj||
+cakap|say / speak / talk|||v||
+tiada|there is no / none|||v||
+tolong|help / please|||v||
+kerana|because|||conj||
+tempat|place|||n||
+baiklah|all right / okay then|baik|+lah|interj||
+keluar|go out / leave|luar|ke-|v||
+banyak|many / much / a lot|||adj||
+menjadi|become|jadi|meN-|v||
+pun|also / even (particle)|||part||
+dengar|hear / listen|||v||
+hidup|live / life / alive|||v||
+beritahu|tell / inform|||v||
+melihat|see / look at|lihat|meN-|v||
+bagus|good / great|||adj||
+macam|like / kind of / how (macam mana)|||prep||
+harus|must / should|||aux||
+selamat|safe / (greeting) good …|||adj||
+maaf|sorry / pardon|||interj||
+hei|hey|||interj||
+kembali|return / come back / again|||v||
+cepat|fast / quick / hurry|||adj||
+ingin|wish / want (formal)|||aux|f|
+lelaki|man / male|||n||
+baru|new / just (now)|||adj||
+rumah|house / home|||n||
+tunggu|wait|||v||
+malam|night / evening|||n||
+melakukan|do / carry out|laku|meN-…-kan|v||
+masuk|enter / go in|||v||
+sedang|(be) -ing / in the middle of|||adv||
+kan|right? / isn't it? (tag)|||part|c|
+nampak|see / seem|||v||
+cuma|only / just|||adv||
+sama|same / together / with|||adj||
+kawan|friend|||n||
+cuba|try|||v||
+kata|say / word|||v||
+tahun|year|||n||
+berada|be (in a place)|ada|ber-|v||
+nama|name|||n||
+suka|like|||v||
+tetapi|but|||conj||
+berlaku|happen / occur|laku|ber-|v||
+masalah|problem|||n||
+atas|on / above / up|||prep||
+fikir|think|||v||
+ibu|mother|||n||
+tuhan|God / lord|||n||
+pasti|sure / certain|||adj||
+membuat|make / do|buat|meN-|v||
+sendiri|oneself / own / alone|||pron||
+takkan|won't / surely not|||adv|c|
+mempunyai|have / own|punya|meN-…-i|v||
+jumpa|meet / find|||v||
+bersama|together (with)|sama|ber-|adv||
+salah|wrong / mistake / fault|||adj||
+daripada|from / than|||prep||
+dua|two|||num||
+lama|long (time) / old|||adj||
+ayuh|come on / let's|||interj||
+faham|understand|||v||
+mengapa|why (formal)|||q|f|
+beberapa|several / some|||det||
+ambil|take|||v||
+besar|big|||adj||
+bahawa|that (conjunction)|||conj|f|
+memang|indeed / of course|||adv||
+kena|must / have to / get (hit) / (adversity passive)|||v||
+sayang|dear / love / what a pity|||n||
+bila|when|||q||
+mak|mum|||n|c|
+bawa|bring / carry|||v||
+sebab|because / reason|||conj||
+sebelum|before|belum|se-|conj||
+cara|way / method|||n||
+sekali|very / once / together|kali|se-|adv||
+bercakap|speak / talk|cakap|ber-|v||
+kali|time(s) (occasion)|||n||
+tinggal|stay / live / remain|||v||
+membunuh|kill|bunuh|meN-|v||
+ingat|remember / think|||v||
+perkara|thing / matter|||n||
+berhenti|stop|henti|ber-|v||
+dunia|world|||n||
+bagi|give (colloquial) / for|||v||
+makan|eat|||v||
+oleh|by (in passives)|||prep||
+percaya|believe / trust|||v||
+kereta|car|||n||
+maksud|meaning / intention / mean|||n||
+bunuh|kill|||v||
+jalan|road / street / walk|||n||
+tengok|look / watch / see|||v|c|
+mencari|look for / search|cari|meN-|v||
+sebagai|as|bagai|se-|prep||
+tentu|certain / of course|||adj||
+luar|outside|||prep||
+setiap|every / each|tiap|se-|det||
+sampai|arrive / until / reach|||v||
+seseorang|someone|orang|se-|pron||
+katakan|say (it) / tell|kata|-kan|v||
+perlukan|need|perlu|-kan|v||
+tangan|hand / arm|||n||
+terjadi|happen|jadi|ter-|v||
+kerja|work / job|||n||
+kemudian|then / later|||adv||
+pertama|first|||num||
+minta|ask (for) / request|||v||
+dulu|first / before / formerly (= dahulu)|||adv||
+belum|not yet|||adv||
+hebat|great / amazing|||adj||
+cukup|enough / quite|||adj||
+cari|look for|||v||
+sedikit|a little / a few|||adj||
+polis|police|||n||
+mengambil|take / pick up|ambil|meN-|v||
+mesti|must / surely|||aux||
+benar|true / right / really|||adj||
+terlalu|too (much)|lalu|ter-|adv||
+ketika|when / moment|||conj||
+ianya|it (subject; common in writing)|ia|+nya|pron||
+ok|OK|||interj|c|
+lalu|then / pass / past|||adv||
+sebenarnya|actually / in fact|benar|se-…-nya|adv||
+keluarga|family|||n||
+bawah|under / below / down|||prep||
+kecil|small / little|||adj||
+bisa|can (Indonesian) / venom (Malay)|||aux||I
+tanpa|without|||prep||
+hati|heart / liver / feelings|||n||
+ikut|follow / go along / according to|||v||
+manusia|human / person|||n||
+nanti|later / wait / will|||adv||
+patut|should / ought to|||aux||
+membawa|bring / carry|bawa|meN-|v||
+berapa|how much / how many|||q||
+sebuah|a / one (counter for things)|buah|se-|num||
+benda|thing|||n||
+balik|go back / return / home|||v||
+mata|eye|||n||
+berikan|give (it)|beri|-kan|v||
+mendapat|get / receive|dapat|meN-|v||
+bodoh|stupid / fool|||adj||
+selalu|always / often|||adv||
+terus|straight / directly / continue|||adv||
+maafkan|forgive / excuse|maaf|-kan|v||
+hal|matter / thing / affair|||n||
+gila|crazy|||adj||
+budak|child / kid|||n||
+biar|let (it be)|||v||
+perempuan|woman / female / girl|||n||
+guna|use / (no) point|||v||
+biarkan|let / leave (it)|biar|-kan|v||
+bekerja|work|kerja|ber-|v||
+telefon|telephone / call|||n||
+saat|second / moment|||n||
+duduk|sit / live (at)|||v||
+takut|afraid / scared|||adj||
+wanita|woman / lady|||n||
+selepas|after|lepas|se-|conj||
+pintu|door|||n||
+waktu|time / when|||n||
+bergerak|move|gerak|ber-|v||
+tidur|sleep|||v||
+mendapatkan|get / obtain|dapat|meN-…-kan|v||
+senjata|weapon|||n||
+tiga|three|||num||
+berjaya|succeed|jaya|ber-|v||
+paling|most|||adv||
+membantu|help|bantu|meN-|v||
+apabila|when (formal)|||conj|f|
+dapatkan|get (it)|dapat|-kan|v||
+punya|own / have / (possessive, colloquial)|||v||
+gadis|girl / young woman|||n||
+air|water|||n||
+pulang|go home / return|||v||
+beri|give|||v||
+semula|again / back (to how it was)|mula|se-|adv||
+selama|for (a duration) / as long as|lama|se-|prep||
+bilik|room|||n||
+beliau|he / she (respectful)|||pron|f|
+mengatakan|say / state|kata|meN-…-kan|v||
+bandar|town / city|||n||
+pasukan|team / unit / force|||n||
+belakang|back / behind|||n||
+jam|hour / clock / watch|||n||
+berdua|the two of (us / them)|dua|ber-|adv||
+gembira|happy|||adj||
+hilang|lost / missing / disappear|||v||
+cinta|love|||n||
+sesiapa|anyone / whoever|siapa|se-|pron||
+biasa|usual / normal / used to|||adj||
+mendengar|hear / listen to|dengar|meN-|v||
+terakhir|last / final|akhir|ter-|adj||
+tadi|earlier / just now|||adv||
+depan|front / in front (of)|||n||
+ialah|is (formal, in definitions)|ia|+lah|v|f|
+sehingga|until / so that|hingga|se-|conj||
+sahaja|only / just|||adv||
+abang|older brother / (address for a young man)|||n||
+penting|important|||adj||
+cantik|beautiful / pretty|||adj||
+kepala|head|||n||
+pagi|morning|||n||
+teruk|terrible / severe / badly|||adj||
+kalian|you (plural)|||pron||
+lari|run / run away|||v||
+memberitahu|tell / inform|beritahu|meN-|v||
+terbaik|best|baik|ter-|adj||
+hentikan|stop (it)|henti|-kan|v||
+diam|quiet / silent / shut up|||adj||
+kapal|ship|||n||
+kaki|foot / leg|||n||
+minit|minute|||n||
+bertemu|meet|temu|ber-|v||
+memberi|give|beri|meN-|v||
+hai|hi|||interj||
+wang|money|||n||
+lepaskan|let go / release|lepas|-kan|v||
+tinggalkan|leave (behind)|tinggal|-kan|v||
+duit|money|||n||
+jauh|far|||adj||
+kenal|know (a person) / recognise|||v||
+sepatutnya|should / supposed to|patut|se-…-nya|adv||
+semasa|during / while|masa|se-|conj||
+minum|drink|||v||
+secara|in a … way / -ly|cara|se-|prep||
+keadaan|situation / condition|ada|ke-…-an|n||
+kehilangan|lose / loss|hilang|ke-…-an|v||
+buruk|bad / ugly|||adj||
+mula|start / begin|||v||
+bangun|wake up / get up / build|||v||
+kuat|strong / loud|||adj||
+yakin|sure / confident|||adj||
+puan|Mrs / madam|||n||
+seluruh|whole / entire|||det||
+hampir|almost / near|||adv||
+mudah|easy|||adj||
+tembak|shoot|||v||
+tetap|still / remain / fixed|||adj||
+sekolah|school|||n||
+bulan|month / moon|||n||
+bantuan|help / assistance|bantu|-an|n||
+segala|all / every|||det||
+cik|Miss / Ms|||n||
+si|(informal title before a name)|||part||
+walaupun|although / even though|walau|+pun|conj||
+isteri|wife|||n||
+meninggalkan|leave / abandon|tinggal|meN-…-kan|v||
+mengenai|about / concerning|kena|meN-…-i|prep||
+kehidupan|life|hidup|ke-…-an|n||
+menarik|interesting / pull|tarik|meN-|adj||
+sakit|sick / painful / hurt|||adj||
+berkata|say|kata|ber-|v||
+antara|between / among|||prep||
+ayo|come on (Indonesian)|||interj||I
+buka|open|||v||
+bersedia|ready / prepared|sedia|ber-|adj||
+berjalan|walk / go / run (of things)|jalan|ber-|v||
+menunggu|wait (for)|tunggu|meN-|v||
+encik|Mr / sir|||n||
+tentera|army / soldier|||n||
+darah|blood|||n||
+menggunakan|use|guna|meN-…-kan|v||
+selesai|finished / done|||adj||
+sejak|since|||prep||
+berfikir|think|fikir|ber-|v||
+tepat|exact / exactly / on time|||adj||
+kelihatan|seem / look / be seen|lihat|ke-…-an|v||
+selamatkan|save / rescue|selamat|-kan|v||
+melalui|through / via / go through|lalu|meN-…-i|prep||
+terbang|fly|||v||
+tanya|ask|||v||
+memiliki|own / have|milik|meN-…-i|v||
+mampu|able / can afford|||aux||
+sila|please (formal)|||interj||
+tua|old|||adj||
+bantu|help|||v||
+sial|damn / bad luck (rude)|||interj||
+agak|rather / quite / guess|||adv||
+pula|instead / also / then (contrast)|||part||
+esok|tomorrow|||adv||
+makanan|food|makan|-an|n||
+ramai|many (people) / crowded|||adj||
+ku|I / my (short for aku)|||pron||
+harap|hope|||v||
+teruskan|continue / carry on|terus|-kan|v||
+naik|go up / ride / rise|||v||
+bermain|play|main|ber-|v||
+negara|country|||n||
+panggil|call|||v||
+peluang|chance / opportunity|||n||
+lepas|after / free / let go|||prep||
+sedia|ready|||adj||
+dekat|near / at (colloquial)|||adj||
+raja|king|||n||
+memberikan|give|beri|meN-…-kan|v||
+teman|companion / friend|||n||
+bahagian|part / section / department|bahagi|-an|n||
+jatuh|fall|||v||
+api|fire|||n||
+amerika|America|||n||
+cerita|story / tell|||n||
+tunjukkan|show|tunjuk|-kan|v||
+kuasa|power|||n||
+rancangan|plan / programme|rancang|-an|n||
+kapten|captain|||n||
+nampaknya|it seems / apparently|nampak|+nya|adv||
+sentiasa|always|||adv||
+turun|go down / get off / fall|||v||
+milik|belonging to / property|||n||
+begini|like this|||adv||
+bapa|father|||n||
+pukul|hit / (o'clock)|||v||
+fikirkan|think about|fikir|-kan|v||
+memerlukan|need / require|perlu|meN-…-kan|v||
+supaya|so that|||conj||
+menang|win|||v||
+ahli|member / expert|||n||
+arah|direction|||n||
+mau|want (Indonesian)|||aux||I
+belajar|learn / study|ajar|ber-|v||
+anjing|dog|||n||
+berakhir|end / finish|akhir|ber-|v||
+tengah|middle / in the middle of (-ing)|||n||
+tiba|arrive|||v||
+minggu|week|||n||
+khabar|news (apa khabar = how are you)|||n||
+adik|younger brother or sister|||n||
+pilihan|choice / option|pilih|-an|n||
+menyelamatkan|save / rescue|selamat|meN-…-kan|v||
+rasanya|I think / it feels (like)|rasa|+nya|adv||
+suatu|a / one (formal)|||det|f|
+janji|promise|||n||
+saudara|relative / brother / (you, formal)|||n||
+kematian|death|mati|ke-…-an|n||
+berjumpa|meet|jumpa|ber-|v||
+berubah|change|ubah|ber-|v||
+pasal|about / because (colloquial)|||prep|c|
+doktor|doctor|||n||
+perjalanan|journey / trip|jalan|per-…-an|n||
+tinggi|tall / high|||adj||
+lima|five|||num||
+tanah|land / ground / soil|||n||
+hantar|send / deliver / drop off|||v||
+setelah|after (formal)|telah|se-|conj|f|
+buku|book|||n||
+peduli|care (about)|||v||
+ah|ah|||interj||
+marah|angry|||adj||
+akhirnya|finally / in the end|akhir|+nya|adv||
+bertahan|hold on / survive / last|tahan|ber-|v||
+segera|immediately / soon|||adv||
+jelas|clear|||adj||
+sebenar|real / actual|benar|se-|adj||
+risau|worried|||adj||
+sukar|difficult|||adj||
+idea|idea|||n||
+kurang|less / lacking|||adv||
+tenang|calm|||adj||
+suruh|tell (someone to do) / order|||v||
+berita|news|||n||
+penjara|prison|||n||
+demi|for the sake of|||prep||
+pelik|strange / weird|||adj||
+nombor|number|||n||
+berani|brave / dare|||adj||
+perang|war|||n||
+meminta|ask for / request|minta|meN-|v||
+jaga|look after / guard / be careful|||v||
+serius|serious|||adj||
+kes|case|||n||
+permainan|game|main|per-…-an|n||
+sepanjang|along / throughout|panjang|se-|prep||
+gunakan|use (it)|guna|-kan|v||
+sungguh|truly / really|||adv||
+pesawat|aircraft / plane|||n||
+tugas|duty / task|||n||
+tangkap|catch / arrest|||v||
+gambar|picture / photo|||n||
+lupa|forget|||v||
+bertenang|calm down|tenang|ber-|v||
+rahsia|secret|||n||
+kedua|second / both|dua|ke-|num||
+kunci|key / lock|||n||
+situ|there|||adv||
+penuh|full|||adj||
+la|(particle; = lah)|||part|c|
+ketua|leader / head / chief|tua|ke-|n||
+menerima|receive / accept|terima|meN-|v||
+berdiri|stand|diri|ber-|v||
+sebelah|next to / side|belah|se-|prep||
+batu|stone / rock|||n||
+sebentar|a moment|||adv||
+pastikan|make sure|pasti|-kan|v||
+bermakna|mean / meaningful|makna|ber-|v||
+semakin|increasingly / more and more|makin|se-|adv||
+soalan|question|soal|-an|n||
+maka|so / then (formal)|||conj|f|
+sekejap|a moment / for a while|kejap|se-|adv||
+suara|voice / sound|||n||
+lah|(emphasis particle)|||part||
+nah|here (take it) / well|||interj||
+jahat|evil / bad / naughty|||adj||
+memanggil|call|panggil|meN-|v||

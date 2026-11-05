@@ -3,3 +3,10 @@
 data/user_progress.db
 data/current_audio.mp3
 data/audio/
+
+# Bahasa Study (bahasa-app/)
+.env
+.streamlit/secrets.toml
+bahasa-app/data/current_audio.mp3
+bahasa-app/data/audio/
+bahasa-app/tools/sources/

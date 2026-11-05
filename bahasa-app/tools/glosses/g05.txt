@@ -1,0 +1,500 @@
+cat|paint|||n||
+letupkan|blow up|letup|-kan|v||
+ucap|say / utter|||v||
+ataupun|or|atau|+pun|conj||
+belok|turn (left / right)|||v||
+harimau|tiger|||n||
+hangat|warm / hot (news)|||adj||
+landasan|runway / track / basis|landas|-an|n||
+laporkan|report (it)|lapor|-kan|v||
+mainkan|play (a role, music)|main|-kan|v||
+mengangkat|lift / raise / adopt|angkat|meN-|v||
+dikesan|be detected|kesan|di-|v||
+kajian|study / research|kaji|-an|n||
+kesihatan|health|sihat|ke-…-an|n||
+krim|cream|||n||
+punca|cause / source|||n||
+puntianak|female vampire ghost (variant of pontianak)|||n||
+rangkaian|network / chain|rangkai|-an|n||
+umum|public / general|||adj||
+gergasi|giant|||n||
+pindahkan|move / transfer (something)|pindah|-kan|v||
+bagaikan|as if / like|bagai|-kan|prep||
+dibuang|be thrown away|buang|di-|v||
+enak|tasty (Indonesian-leaning; = sedap)|||adj||I
+keliru|confused|||adj||
+menyiasat|investigate|siasat|meN-|v||
+muat|fit / load|||v||
+terselamat|survive / be saved|selamat|ter-|v||
+barisan|line / row / queue|baris|-an|n||
+berbaloi|worth it|baloi|ber-|adj||
+berkembang|develop / grow / expand|kembang|ber-|v||
+catatan|note / record|catat|-an|n||
+enggan|refuse / unwilling|||v||
+pekan|small town|||n||
+undur|retreat / reverse|||v||
+universiti|university|||n||
+kepunyaan|belonging (to) / possession|punya|ke-…-an|n||
+ulangi|repeat|ulang|-i|v||
+akhbar|newspaper|||n||
+basah|wet|||adj||
+bulu|fur / feather / body hair|||n||
+kubur|grave|||n||
+pertukaran|exchange / change|tukar|per-…-an|n||
+hodoh|ugly|||adj||
+penawar|antidote / cure|tawar|peN-|n||
+penderitaan|suffering|derita|peN-…-an|n||
+teknik|technique|||n||
+terhebat|greatest|hebat|ter-|adj||
+darjah|degree / standard (school year)|||n||
+diculik|be kidnapped|culik|di-|v||
+dokumen|document|||n||
+jet|jet|||n||
+keju|cheese|||n||
+keperluan|need / requirement|perlu|ke-…-an|n||
+mengembalikan|return / give back|kembali|meN-…-kan|v||
+pastinya|surely / certainly|pasti|+nya|adv||
+ringan|light (not heavy)|||adj||
+dianggap|be considered|anggap|di-|v||
+generasi|generation|||n||
+halus|fine / smooth / subtle|||adj||
+jadual|schedule / timetable|||n||
+kebahagiaan|happiness|bahagia|ke-…-an|n||
+senator|senator|||n||
+tertinggi|highest|tinggi|ter-|adj||
+larikan|run off with / take away|lari|-kan|v||
+luas|wide / broad|||adj||
+memasukkan|put in / insert / include|masuk|meN-…-kan|v||
+pelindung|protector / guard|lindung|peN-|n||
+tasik|lake|||n||
+daya|power / capacity|||n||
+dipindahkan|be moved / transferred|pindah|di-…-kan|v||
+menyediakan|prepare / provide|sedia|meN-…-kan|v||
+bersemangat|enthusiastic / spirited|semangat|ber-|adj||
+terletak|located|letak|ter-|v||
+afrika|Africa|||n||
+izin|permission|||n||
+pingat|medal|||n||
+sebegitu|that much / to that extent|begitu|se-|adv||
+bateri|battery|||n||
+bukit|hill|||n||
+dicuri|be stolen|curi|di-|v||
+ikat|tie / bind|||v||
+meneruskan|continue|terus|meN-…-kan|v||
+menyatakan|state / express|nyata|meN-…-kan|v||
+merindukan|miss / long for|rindu|meN-…-kan|v||
+tembok|wall|||n||
+temu|meet (temu janji = appointment)|||v||
+batang|stick / trunk / (counter for long things)|||n||
+legenda|legend|||n||
+tong|barrel / bin|||n||
+sen|cent|||n||
+tertinggal|left behind|tinggal|ter-|v||
+kebelakangan|recently (kebelakangan ini)|belakang|ke-…-an|adv||
+membentuk|form / shape|bentuk|meN-|v||
+berpisah|separate / part|pisah|ber-|v||
+betulkan|fix / correct|betul|-kan|v||
+gelombang|wave|||n||
+melatih|train / coach|latih|meN-|v||
+menyamar|disguise oneself|samar|meN-|v||
+eropah|Europe|||n||
+medan|field / square / arena|||n||
+asas|basis / foundation|||n||
+mendengarkan|listen to|dengar|meN-…-kan|v||
+parah|serious / critical (injury)|||adj||
+rela|willing|||adj||
+sah|valid / legal / confirmed|||adj||
+syarat|condition / requirement|||n||
+tertidur|fall asleep|tidur|ter-|v||
+tertulis|written|tulis|ter-|adj||
+cipta|create|||v||
+sederhana|moderate / simple|||adj||
+sewa|rent|||v||
+aktiviti|activity|||n||
+berhubungan|related / in contact|hubung|ber-…-an|v||
+berniat|intend|niat|ber-|v||
+bercuti|go on holiday|cuti|ber-|v||
+golongan|group / class (of people)|golong|-an|n||
+kamar|room (Indonesian; = bilik)|||n||I
+makna|meaning|||n||
+membahayakan|endanger / dangerous|bahaya|meN-…-kan|v||
+selebihnya|the rest|lebih|se-…-nya|n||
+ketahui|know / find out|tahu|ke-…-i|v||
+lorong|alley / lane|||n||
+tradisi|tradition|||n||
+upacara|ceremony|||n||
+mengalir|flow|alir|meN-|v||
+muntah|vomit|||v||
+remaja|teenager|||n||
+foto|photo|||n||
+hidangan|dish / meal served|hidang|-an|n||
+langgar|hit / crash / violate|||v||
+menentukan|determine / decide|tentu|meN-…-kan|v||
+aksi|action|||n||
+ayat|sentence / verse|||n||
+berbakat|talented|bakat|ber-|adj||
+mengelak|avoid / dodge|elak|meN-|v||
+merampas|seize / snatch|rampas|meN-|v||
+minat|interest|||n||
+ketinggalan|left behind / miss out|tinggal|ke-…-an|v||
+tertangkap|get caught|tangkap|ter-|v||
+usah|(tak usah = no need)|||aux||
+berkenaan|regarding / concerning|kena|ber-…-an|prep||
+bicarakan|discuss (Indonesian-leaning; = bincangkan)|bicara|-kan|v||I
+puncak|peak / summit|||n||
+semak|check / review|||v||
+terangkan|explain|terang|-kan|v||
+tertutup|closed|tutup|ter-|adj||
+berdekatan|nearby|dekat|ber-…-an|adj||
+dikeluarkan|be issued / removed|keluar|di-…-kan|v||
+mulanya|at first|mula|+nya|adv||
+pelaku|perpetrator / actor|laku|pe-|n||
+tapak|site / sole / footprint|||n||
+tumbuh|grow|||v||
+siasatan|investigation|siasat|-an|n||
+tercedera|injured|cedera|ter-|adj||
+wahai|O (addressing someone, literary)|||interj|f|
+beza|difference|||n||
+dijual|be sold|jual|di-|v||
+ketepi|aside / to the side|tepi|ke-|adv||
+tugasan|assignment / task|tugas|-an|n||
+berikut|the following|ikut|ber-|det||
+sebegini|this much / like this|begini|se-|adv||
+bermasalah|have problems / problematic|masalah|ber-|adj||
+berterusan|continuous / ongoing|terus|ber-…-an|adj||
+niat|intention|||n||
+pengorbanan|sacrifice|korban|peN-…-an|n||
+dana|fund|||n||
+kimia|chemistry / chemical|||n||
+mengadakan|hold / organise (an event)|ada|meN-…-kan|v||
+persekutuan|federation / federal|sekutu|per-…-an|n||
+tawarkan|offer|tawar|-kan|v||
+terbaru|latest|baru|ter-|adj||
+perahu|boat|||n||
+rantai|chain|||n||
+harusnya|should (Indonesian-leaning; = sepatutnya)|harus|+nya|adv||I
+ilmu|knowledge|||n||
+kekacauan|chaos / disorder|kacau|ke-…-an|n||
+kesedihan|sadness|sedih|ke-…-an|n||
+peringatan|reminder / warning|ingat|per-…-an|n||
+pita|tape / ribbon|||n||
+pulak|instead / also (= pula)|||part|c|
+pulangkan|return / give back|pulang|-kan|v||
+abu|ash|||n||
+kegagalan|failure|gagal|ke-…-an|n||
+murid|pupil|||n||
+diselamatkan|be saved / rescued|selamat|di-…-kan|v||
+gelanggang|court / arena / ring|||n||
+kadar|rate|||n||
+keseronokan|fun / enjoyment|seronok|ke-…-an|n||
+kredit|credit|||n||
+poket|pocket|||n||
+simbol|symbol|||n||
+terjaga|wake up (suddenly) / kept|jaga|ter-|v||
+atuk|grandpa|||n|c|
+beraksi|in action / perform|aksi|ber-|v||
+kelihatannya|it seems (also nampaknya)|lihat|ke-…-an +nya|adv||
+menit|minute (Indonesian; = minit)|||n||I
+penyelidikan|research|selidik|peN-…-an|n||
+wain|wine|||n||
+berwarna|coloured|warna|ber-|adj||
+sejenis|a kind of|jenis|se-|det||
+telepon|telephone (Indonesian spelling; = telefon)|||n||I
+bertolak|depart / set off|tolak|ber-|v||
+garisan|line|garis|-an|n||
+markas|headquarters / base|||n||
+merbahaya|dangerous|bahaya|mer-|adj||
+mutan|mutant|||n||
+puas|satisfied|||adj||
+rokok|cigarette|||n||
+sememangnya|indeed / naturally|memang|se-…-nya|adv||
+meningkatkan|increase / improve|tingkat|meN-…-kan|v||
+watak|character (in a story)|||n||
+magik|magic|||n||
+sarkas|circus|||n||
+bersara|retire|sara|ber-|v||
+dibina|be built|bina|di-|v||
+penari|dancer|tari|peN-|n||
+memperkenalkan|introduce|kenal|memper-…-kan|v||
+tertekan|stressed / depressed / pressed|tekan|ter-|adj||
+ditinggalkan|be left / abandoned|tinggal|di-…-kan|v||
+jaminan|guarantee / bail|jamin|-an|n||
+kain|cloth / fabric|||n||
+kelaparan|hunger / starving|lapar|ke-…-an|n||
+berpandu|guided|pandu|ber-|adj||
+berpegang|hold on (to)|pegang|ber-|v||
+dimakan|be eaten|makan|di-|v||
+pemuda|youth / young man|muda|peN-|n||
+kecederaan|injury|cedera|ke-…-an|n||
+organisasi|organisation|||n||
+percubaan|attempt / trial|cuba|per-…-an|n||
+sepak|kick|||v||
+bung|brother / pal (old-fashioned address)|||n||
+daftar|register / list|||v||
+rencana|plan (Indonesian; = rancangan) / article|||n||I
+abad|century|||n||
+berkelakuan|behave|laku|ber-ke-…-an|v||
+berlindung|take shelter|lindung|ber-|v||
+budi|kindness / character (budi bahasa = manners)|||n||
+mengirim|send (Indonesian; = menghantar)|kirim|meN-|v||I
+sarang|nest|||n||
+kelebihan|advantage / excess|lebih|ke-…-an|n||
+tendang|kick|||v||
+ganja|marijuana|||n||
+jamin|guarantee|||v||
+pelakon|actor|lakon|peN-|n||
+penyihir|sorcerer (Indonesian; = ahli sihir)|sihir|peN-|n||I
+perkenalkan|introduce|kenal|per-…-kan|v||
+temujanji|appointment|||n||
+alihkan|move / shift (something)|alih|-kan|v||
+cukai|tax|||n||
+dimusnahkan|be destroyed|musnah|di-…-kan|v||
+motor|motorcycle / motor|||n||
+penutup|cover / lid / closing|tutup|peN-|n||
+rasuah|bribery / corruption|||n||
+selanjutnya|furthermore / next (Indonesian-leaning; = seterusnya)|lanjut|se-…-nya|adv||I
+jenaka|joke|||n||
+kemahiran|skill|mahir|ke-…-an|n||
+paus|whale|||n||
+basikal|bicycle|||n||
+dijumpai|be found|jumpa|di-…-i|v||
+disimpan|be kept / stored|simpan|di-|v||
+pelarian|refugee / fugitive|lari|peN-…-an|n||
+seragam|uniform|ragam|se-|n||
+tangki|tank|||n||
+belanja|spend / treat (someone)|||v||
+diselesaikan|be solved / settled|selesai|di-…-kan|v||
+mewah|luxurious|||adj||
+naikkan|raise|naik|-kan|v||
+subjek|subject|||n||
+awasi|watch over / monitor|awas|-i|v||
+beban|burden / load|||n||
+beredar|move along / circulate / leave|edar|ber-|v||
+lesen|licence|||n||
+mengisi|fill|isi|meN-|v||
+roda|wheel|||n||
+saraf|nerve|||n||
+seberang|across / opposite side|||prep||
+berlebihan|excessive|lebih|ber-…-an|adj||
+calon|candidate|||n||
+siaran|broadcast|siar|-an|n||
+memindahkan|move / transfer|pindah|meN-…-kan|v||
+menceritakan|tell (about)|cerita|meN-…-kan|v||
+negatif|negative|||adj||
+terikat|tied / bound|ikat|ter-|adj||
+agama|religion|||n||
+almari|cupboard / wardrobe|||n||
+dilarang|be forbidden / prohibited|larang|di-|v||
+mengorbankan|sacrifice|korban|meN-…-kan|v||
+setiausaha|secretary|||n||
+terkunci|locked|kunci|ter-|adj||
+tersesat|lost|sesat|ter-|adj||
+cabaran|challenge|cabar|-an|n||
+gementar|nervous / trembling|||adj||
+kilat|lightning / shiny|||n||
+melebihi|exceed|lebih|meN-…-i|v||
+saintis|scientist|||n||
+selalunya|usually|selalu|+nya|adv||
+anugerah|award / gift|||n||
+mengeluh|sigh / complain|keluh|meN-|v||
+menghapuskan|eliminate / wipe out|hapus|meN-…-kan|v||
+pergaduhan|fight / quarrel|gaduh|per-…-an|n||
+permukaan|surface|muka|per-…-an|n||
+melayan|serve / attend to / entertain|layan|meN-|v||
+pelabuhan|port / harbour|labuh|pe-…-an|n||
+dipilih|be chosen|pilih|di-|v||
+mengembara|travel / wander|kembara|meN-|v||
+pengerusi|chairman|||n||
+bahu|shoulder|||n||
+kedatangan|arrival|datang|ke-…-an|n||
+mengingati|remember / commemorate|ingat|meN-…-i|v||
+mirip|resemble|||v||
+wayar|wire|||n||
+fizikal|physical|||adj||
+hasilnya|as a result|hasil|+nya|adv||
+korban|victim / sacrifice (Indonesian-leaning; = mangsa)|||n||I
+maklumkan|inform|maklum|-kan|v||
+nyalakan|light / turn on|nyala|-kan|v||
+samseng|gangster / thug|||n||
+sumpahan|curse|sumpah|-an|n||
+bersyukur|be grateful|syukur|ber-|v||
+dikunci|be locked|kunci|di-|v||
+keyakinan|confidence / belief|yakin|ke-…-an|n||
+sebesar|as big as|besar|se-|adj||
+abadi|eternal|||adj||
+menendang|kick|tendang|meN-|v||
+menghukum|punish|hukum|meN-|v||
+menuntut|demand / claim / study|tuntut|meN-|v||
+merawat|treat / care for|rawat|meN-|v||
+pesuruhjaya|commissioner|||n||
+cerah|bright / sunny / fair|||adj||
+dikawal|be controlled / guarded|kawal|di-|v||
+dompet|wallet / purse|||n||
+junior|junior|||n||
+mewakili|represent|wakil|meN-…-i|v||
+pencarian|search|cari|peN-…-an|n||
+tamu|guest (Indonesian-leaning; = tetamu)|||n||I
+kumpulkan|gather / collect|kumpul|-kan|v||
+lebah|bee|||n||
+memerintah|rule / command|perintah|meN-|v||
+berjaga|keep watch / stay awake|jaga|ber-|v||
+lutut|knee|||n||
+maharaja|emperor|||n||
+mengandung|pregnant / contain|kandung|meN-|v||
+menghilangkan|remove / make disappear|hilang|meN-…-kan|v||
+meriam|cannon|||n||
+penjelasan|explanation|jelas|peN-…-an|n||
+sesungguhnya|truly / indeed|sungguh|se-…-nya|adv||
+suhu|temperature|||n||
+bendera|flag|||n||
+kabel|cable|||n||
+menghidupkan|turn on / revive|hidup|meN-…-kan|v||
+ader|there is (colloquial spelling of ada)|||v|c|
+bertengkar|quarrel / argue|tengkar|ber-|v||
+berulang|repeat / recurring|ulang|ber-|v||
+jururawat|nurse|||n||
+terserah|up to (you) (Indonesian-leaning; = terpulang)|serah|ter-|v||I
+tumpang|lodge / get a lift / excuse me (tumpang lalu)|||v||
+bagitahu|tell (colloquial; = beritahu)|||v|c|
+dilindungi|be protected|lindung|di-…-i|v||
+mengarahkan|direct / order|arah|meN-…-kan|v||
+ngeri|horrified / creepy|||adj||
+omong|talk (Indonesian; = cakap)|||v||I
+pengebumian|funeral / burial|kebumi|peN-…-an|n||
+bincangkan|discuss|bincang|-kan|v||
+pengesan|detector / tracker|kesan|peN-|n||
+ribuan|thousands|ribu|-an|num||
+sarung|sheath / cover / sarong|||n||
+alkohol|alcohol|||n||
+berlangsung|take place / go on|langsung|ber-|v||
+kala|time / when (literary) / scorpion|||n||
+senior|senior|||adj||
+mengetuk|knock|ketuk|meN-|v||
+salinan|copy|salin|-an|n||
+status|status|||n||
+kabur|blurry (Malay) / run away (Indonesian; = lari)|||adj||I
+keempat|fourth|empat|ke-|num||
+keseorangan|alone / lonely|seorang|ke-…-an|adj||
+rumput|grass|||n||
+singkat|short / brief|||adj||
+tajam|sharp|||adj||
+bencikan|hate|benci|-kan|v||
+berteriak|shout (Indonesian; = menjerit)|teriak|ber-|v||I
+mengesahkan|confirm / verify|sah|meN-…-kan|v||
+menggali|dig|gali|meN-|v||
+tuduhan|accusation / charge|tuduh|-an|n||
+kenakan|put on / impose / trick (someone)|kena|-kan|v||
+kepentingan|importance / interest|penting|ke-…-an|n||
+kosongkan|empty / clear|kosong|-kan|v||
+peristiwa|event / incident|||n||
+seratus|one hundred|ratus|se-|num||
+tewas|defeated / killed|||v||
+yahudi|Jew / Jewish|||n||
+kerjasama|cooperation|||n||
+pemerintah|government / ruler (Indonesian-leaning; = kerajaan)|perintah|peN-|n||I
+penggera|alarm|||n||
+penulis|writer|tulis|peN-|n||
+realiti|reality|||n||
+renang|swim|||v||
+tumpukan|focus on / heap|tumpu|-kan|v||
+april|April|||n||
+dalaman|internal / inner|dalam|-an|adj||
+dokter|doctor (Indonesian; = doktor)|||n||I
+kirim|send (Indonesian-leaning; = hantar)|||v||I
+lawatan|visit|lawat|-an|n||
+loceng|bell|||n||
+saiz|size|||n||
+jurulatih|coach / trainer|||n||
+kubu|fort|||n||
+masakan|cooking / dish|masak|-an|n||
+memainkan|play (a role, music)|main|meN-…-kan|v||
+tiap|every / each|||det||
+dapati|find (out)|dapat|-i|v||
+denda|fine (penalty)|||n||
+kehadiran|presence / attendance|hadir|ke-…-an|n||
+kewangan|finance / financial|wang|ke-…-an|n||
+lazat|delicious|||adj||
+ramalan|prediction / forecast|ramal|-an|n||
+gelas|glass (for drinking)|||n||
+ketinggian|height|tinggi|ke-…-an|n||
+memerhatikan|watch / observe|perhati|meN-…-kan|v||
+mengatur|arrange / organise|atur|meN-|v||
+merasai|feel / experience|rasa|meN-…-i|v||
+otot|muscle|||n||
+permisi|excuse me (Indonesian; = tumpang lalu, maaf)|||interj||I
+dibebaskan|be freed / released|bebas|di-…-kan|v||
+disahkan|be confirmed|sah|di-…-kan|v||
+goreng|fry / fried|||v||
+kentang|potato|||n||
+kotoran|dirt / filth|kotor|-an|n||
+pacar|boyfriend / girlfriend (Indonesian; = teman lelaki / wanita)|||n||I
+pangkat|rank|||n||
+permaisuri|queen (consort)|||n||
+seribu|one thousand|ribu|se-|num||
+tumbukan|punch|tumbuk|-an|n||
+membaiki|repair / fix|baik|meN-…-i|v||
+menilai|assess / judge|nilai|meN-|v||
+menunggang|ride (a horse, bike)|tunggang|meN-|v||
+penjual|seller|jual|peN-|n||
+penyanyi|singer|nyanyi|peN-|n||
+sekurangnya|at least|kurang|se-…-nya|adv||
+tampan|handsome (Indonesian-leaning; = kacak)|||adj||I
+teliti|careful / thorough|||adj||
+ipar|in-law (abang ipar = brother-in-law)|||n||
+memaafkan|forgive|maaf|meN-…-kan|v||
+moyang|great-grandparent / ancestor|||n||
+pengedar|dealer / distributor|edar|peN-|n||
+uji|test|||v||
+berkeliaran|roam / wander around|keliar|ber-…-an|v||
+keterangan|explanation / testimony|terang|ke-…-an|n||
+lanun|pirate|||n||
+lega|relieved|||adj||
+menawan|capture / charming|tawan|meN-|v||
+pendaratan|landing|darat|peN-…-an|n||
+positif|positive|||adj||
+terutamanya|especially|utama|ter-…-nya|adv||
+mengurus|manage / arrange|urus|meN-|v||
+menyangka|think / suppose (wrongly)|sangka|meN-|v||
+bayangan|shadow / image|bayang|-an|n||
+huruf|letter (of alphabet)|||n||
+kegembiraan|happiness / joy|gembira|ke-…-an|n||
+kemajuan|progress|maju|ke-…-an|n||
+logam|metal|||n||
+penampilan|appearance|tampil|peN-…-an|n||
+rampas|seize / snatch|||v||
+agensi|agency|||n||
+agung|supreme / grand|||adj||
+baki|balance / remainder|||n||
+berunding|negotiate|runding|ber-|v||
+ditakdirkan|destined|takdir|di-…-kan|v||
+jumaat|Friday|||n||
+kembar|twin|||n||
+menggigit|bite|gigit|meN-|v||
+pelatih|trainee / trainer|latih|peN-|n||
+penyelesaian|solution / settlement|selesai|peN-…-an|n||
+syabas|well done!|||interj||
+gusti|wrestling / wrestle|||n||
+karut|nonsense|||adj||
+mengekori|follow / tail|ekor|meN-…-i|v||
+per|per (per jam = per hour)|||prep||
+tanggung|bear / be responsible for|||v||
+tanyakan|ask (about)|tanya|-kan|v||
+tunggal|single / sole|||adj||
+cucu|grandchild|||n||
+melampau|excessive / over the top|lampau|meN-|adj||
+roket|rocket|||n||
+sesama|fellow / among (ourselves)|sama|se-|det||
+strategi|strategy|||n||
+artinya|meaning (Indonesian; = ertinya, maksudnya)|arti|+nya|adv||I
+cabut|pull out / flee (colloquial)|||v||
+darat|land (not sea)|||n||
+disediakan|be prepared / provided|sedia|di-…-kan|v||
+inci|inch|||n||
+itali|Italy / Italian|||n||
+menyambut|welcome / celebrate / catch|sambut|meN-|v||
+menyelinap|sneak / slip in|selinap|meN-|v||
+senyuman|smile|senyum|-an|n||
+terbit|rise / be published|||v||
+terburuk|worst|buruk|ter-|adj||
+tulisan|writing / handwriting|tulis|-an|n||
+ampun|forgive / mercy|||n||

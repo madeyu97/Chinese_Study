@@ -1,0 +1,174 @@
+# src/views/5_Together.py
+"""
+Together - side-by-side progress and nudges.
+
+Both apps read the same database, so each of you can see what the other has
+been doing without any messaging service in between.
+
+A deliberate design choice: this compares EFFORT, not lifetime totals.
+One of you has months of head start, so a raw leaderboard would be
+permanently discouraging for one and meaningless for the other. What's
+shown instead is this week's plan days, minutes, streaks and accuracy -
+things either person can win on any given day - and how the minutes split
+between studying items, using the language, and play.
+"""
+
+import streamlit as st
+
+import db_manager as db
+from auth import require_login, sidebar_user_badge
+
+st.set_page_config(page_title="Together", page_icon="🏆", layout="centered")
+
+USER = require_login()
+USER_ID = USER["id"]
+
+with st.sidebar:
+    sidebar_user_badge()
+
+st.title("🏆 Together")
+
+others = db.other_users(USER_ID)
+if not others:
+    st.info("No one else is set up on this database yet.")
+    st.stop()
+other = others[0]
+OTHER_ID = other["id"]
+
+# ----------------------------------------------------------------------
+# NUDGES WAITING FOR YOU
+# ----------------------------------------------------------------------
+pending = db.unseen_nudges(USER_ID)
+if pending:
+    for n in pending:
+        st.success(f"💬 **{n['display_name']}**: {n['message']}")
+    if st.button("Got it", width="stretch"):
+        db.mark_nudges_seen(USER_ID)
+        st.rerun()
+    st.markdown("---")
+
+# ----------------------------------------------------------------------
+# THIS WEEK, SIDE BY SIDE
+# ----------------------------------------------------------------------
+me = db.activity_totals(USER_ID)
+them = db.activity_totals(OTHER_ID)
+my_time = db.study_minutes(USER_ID, 7)
+their_time = db.study_minutes(OTHER_ID, 7)
+my_streak = db.activity_streak(USER_ID)
+their_streak = db.activity_streak(OTHER_ID)
+
+st.subheader("This week")
+c1, c2 = st.columns(2)
+for col, name, tot, tm, streak in (
+        (c1, USER["display_name"], me, my_time, my_streak),
+        (c2, other["display_name"], them, their_time, their_streak)):
+    with col:
+        st.markdown(f"### {name}")
+        st.metric("Days the plan was done", f"{tm['plan_days']} of 7")
+        st.metric("Minutes studied", tm["total"])
+        st.metric("Day streak", f"{streak} 🔥" if streak else "0")
+        st.caption(f"{tot['week_total']} cards · {tot['today']} today"
+                   + (f" · {tot['accuracy']}% right" if tot["accuracy"] is not None else ""))
+
+lead = my_time["plan_days"] - their_time["plan_days"]
+days = "day" if abs(lead) == 1 else "days"
+if lead > 0:
+    st.info(f"You've done the plan on **{lead}** more {days} than "
+            f"{other['display_name']} this week.")
+elif lead < 0:
+    st.warning(f"{other['display_name']} has done the plan on **{abs(lead)}** more "
+               f"{days} this week.")
+else:
+    st.info("Level on plan days this week.")
+
+# ----------------------------------------------------------------------
+# WHERE THE TIME WENT
+# ----------------------------------------------------------------------
+st.markdown("---")
+st.subheader("Where the minutes went, last 7 days")
+st.dataframe([{"": label,
+               USER["display_name"]: my_time["by_strand"].get(key, 0),
+               other["display_name"]: their_time["by_strand"].get(key, 0)}
+              for key, label in db.STRANDS.items()], hide_index=True, width="stretch")
+st.caption("Studying items builds knowledge; using the language — listening, reading and "
+           "speaking whole sentences — is what turns it into fluency. Over a month, aim for "
+           "the second row to catch up with the first.")
+
+# ----------------------------------------------------------------------
+# BY SKILL
+# ----------------------------------------------------------------------
+st.markdown("---")
+st.subheader("Cards by skill, last 7 days")
+rows = []
+for key, label in db.ACTIVITY_KINDS.items():
+    rows.append({
+        "Skill": label,
+        USER["display_name"]: me["by_kind"].get(key, 0),
+        other["display_name"]: them["by_kind"].get(key, 0),
+    })
+st.dataframe(rows, hide_index=True, width="stretch")
+
+# ----------------------------------------------------------------------
+# WORDS IN USE
+# ----------------------------------------------------------------------
+st.markdown("---")
+st.subheader("📚 Words")
+c1, c2 = st.columns(2)
+for col, name, uid in ((c1, USER["display_name"], USER_ID),
+                       (c2, other["display_name"], OTHER_ID)):
+    with col:
+        net = db.network_stats(uid)
+        st.markdown(f"**{name}**")
+        st.metric("Recognising", net["recognition"])
+        st.metric("Producing", net["production"])
+st.caption("Recognising: words met and reviewed. Producing: words you can say or "
+           "type yourself, practised once recognition holds.")
+
+# ----------------------------------------------------------------------
+# ACTIVITY OVER TIME
+# ----------------------------------------------------------------------
+st.markdown("---")
+st.subheader("Last 14 days")
+my_series = db.daily_series(USER_ID, 14)
+their_series = db.daily_series(OTHER_ID, 14)
+chart = {
+    "day": [d.strftime("%d %b") for d, _ in my_series],
+    USER["display_name"]: [n for _, n in my_series],
+    other["display_name"]: [n for _, n in their_series],
+}
+st.line_chart(chart, x="day", width="stretch")
+
+# ----------------------------------------------------------------------
+# SEND A NUDGE
+# ----------------------------------------------------------------------
+st.markdown("---")
+st.subheader(f"💬 Send {other['display_name']} a nudge")
+PRESETS = [
+    "Jom! Your turn.",
+    f"I did {me['today']} cards today. Beat that.",
+    "Streak's looking shaky...",
+    "Word race? First to 100 words producing.",
+    "Well done - you're ahead of me this week!",
+]
+choice = st.selectbox("Quick message", PRESETS + ["Write my own..."])
+message = choice
+if choice == "Write my own...":
+    message = st.text_input("Your message", max_chars=280)
+if st.button("Send", type="primary", width="stretch",
+             disabled=not message or message == "Write my own..."):
+    db.send_nudge(USER_ID, OTHER_ID, message)
+    st.success(f"Sent to {other['display_name']}. It shows the next time "
+               f"they open the app.")
+
+# ----------------------------------------------------------------------
+# RECENT ACTIVITY FEED
+# ----------------------------------------------------------------------
+st.markdown("---")
+with st.expander("Recent activity"):
+    feed = db.recent_activity(limit=15)
+    if not feed:
+        st.caption("Nothing logged yet.")
+    for f in feed:
+        label = db.ACTIVITY_KINDS.get(f["kind"], f["kind"])
+        st.write(f"**{f['display_name']}** - {f['n']} {label.lower()} cards "
+                 f"on {f['day'].strftime('%d %b')}")

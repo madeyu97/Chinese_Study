@@ -65,7 +65,15 @@ function stMsg(type, data) {
   window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*");
 }
 function stReady()      { stMsg("streamlit:componentReady", { apiVersion: 1 }); }
-function stHeight()     { stMsg("streamlit:setFrameHeight", { height: document.body.scrollHeight + 6 }); }
+let lastHeight = -1;
+function stHeight() {
+  // the bottom of the content itself (never the frame's own height, which
+  // would make the frame grow each time it's measured), sent only on change
+  const h = Math.ceil(document.body.getBoundingClientRect().bottom + window.scrollY) + 6;
+  if (h === lastHeight) return;
+  lastHeight = h;
+  stMsg("streamlit:setFrameHeight", { height: h });
+}
 function stValue(value) { stMsg("streamlit:setComponentValue", { dataType: "json", value: value }); }
 
 const FLIP_BACK_MS = 900;
@@ -166,6 +174,9 @@ window.addEventListener("resize", () => {
   stHeight();
 });
 
+// keep the frame as tall as the board whenever its layout changes (images
+// arriving, the window narrowing), so the bottom row is never cut off
+if (window.ResizeObserver) new ResizeObserver(() => stHeight()).observe(document.body);
 stReady();
 stHeight();
 </script>

@@ -9,7 +9,8 @@ herbs). Words can be shown with pinyin or as characters only. Answers
 register on tap; scores, streaks and best scores keep it light. Time played
 goes into the ledger as play.
 
-Memory match is a board of cards you tap to turn over (src/memory_board).
+Every answer is a card you tap: the picture or word cards in the quiz games
+(src/choice_board), the face-down cards in memory match (src/memory_board).
 A game in progress is saved to the database after every move, so leaving
 the page - or the app - and coming back picks up where you left off.
 """
@@ -23,7 +24,7 @@ import streamlit as st
 import db_manager as db
 import game_items as gi
 import games as gm
-import memory_component as mc
+import game_components as gc
 import session_store as store
 from audio_engine import create_audio_file
 from auth import require_login, sidebar_user_badge
@@ -33,7 +34,6 @@ st.set_page_config(page_title="Play", page_icon="🎮", layout="centered")
 USER = require_login()
 USER_ID = USER["id"]
 S = st.session_state
-LETTERS = ["A", "B", "C", "D"]
 
 
 # what a game in progress is saved as (widget keys and audio are left out)
@@ -99,13 +99,11 @@ def word_html(item, size="2.2rem"):
     return f"<div style='font-size:{size};line-height:1.3'>{item['chinese']}</div>{py}"
 
 
-def picture_grid(items):
-    """Pictures in a 2x2 grid that stays a grid on a phone, lettered A-D."""
-    cells = "".join(
-        f"<div style='text-align:center;border:1px solid #e0e0e0;border-radius:12px;padding:6px'>"
-        f"<div style='font-weight:600;color:#546e7a'>{LETTERS[n]}</div>{img_tag(i['image'], 96)}</div>"
-        for n, i in enumerate(items))
-    html(f"<div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>{cells}</div>")
+def card(item, kind):
+    """One card for a board: the item's picture or its word."""
+    if kind == "image":
+        return {"kind": "image", "img": data_uri(item["image"])}
+    return {"kind": "word", "zh": item["chinese"], "py": item["pinyin"]}
 
 
 def record(item, correct, game):
@@ -211,7 +209,7 @@ if game == "memory":
               "img": data_uri(c["item"]["image"]) if c["face"] == "image" else "",
               "zh": c["item"]["chinese"], "py": c["item"]["pinyin"], "en": c["item"]["english"]}
              for c in cards]
-    value = mc.memory_board(sid=S.gm_sid, cards=board, show_pinyin=show_pinyin,
+    value = gc.memory_board(sid=S.gm_sid, cards=board, show_pinyin=show_pinyin,
                             state={"matched": sorted(matched), "moves": S.gm_moves},
                             key=f"gm_board_{S.gm_sid}", default=None)
     if value and value.get("sid") == S.gm_sid:
@@ -259,24 +257,19 @@ st.progress(i / len(rounds), text=f"Round {i + 1} of {len(rounds)} · {S.gm_scor
             + (f" · 🔥 {S.gm_streak}" if S.gm_streak >= 2 else ""))
 ans = S.get("gm_ans")
 
-if game == "picture":
-    html(f"<div style='text-align:center'>{img_tag(target['image'], 170)}</div>")
-    labels = [gm.label(o, show_pinyin) for o in options]
-    pick = st.pills("Which word?", labels, selection_mode="single", key=f"gm_pick_{i}",
-                    disabled=ans is not None)
-    chosen = options[labels.index(pick)] if pick else None
-else:
-    if game == "word":
-        html(f"<div style='text-align:center'>{word_html(target, '2.6rem')}</div>")
-    else:
-        st.caption("🔊 Listen, then pick the picture.")
-        play(target["chinese"], autoplay=ans is None)
-    picture_grid(options)
-    pick = st.segmented_control("Which picture?", LETTERS[:len(options)], key=f"gm_pick_{i}",
-                                disabled=ans is not None)
-    chosen = options[LETTERS.index(pick)] if pick else None
-
-if ans is None and chosen is not None:
+if game == "listen":
+    st.caption("🔊 Listen, then tap the picture.")
+    play(target["chinese"], autoplay=ans is None)
+prompt = (card(target, "image") if game == "picture" else
+          card(target, "word") if game == "word" else None)
+answer = options.index(target)
+value = gc.choice_board(sid=S.gm_sid, round=i, prompt=prompt,
+                        options=[card(o, "word" if game == "picture" else "image") for o in options],
+                        answer=answer, answered=(ans or {}).get("chosen"), show_pinyin=show_pinyin,
+                        key=f"gm_choice_{S.gm_sid}", default=None)
+if (ans is None and value and value.get("sid") == S.gm_sid and value.get("round") == i
+        and isinstance(value.get("chosen"), int) and 0 <= value["chosen"] < len(options)):
+    chosen = options[value["chosen"]]
     correct = chosen["chinese"] == target["chinese"]
     S.gm_streak = S.gm_streak + 1 if correct else 0
     S.gm_best_streak = max(S.gm_best_streak, S.gm_streak)
@@ -284,7 +277,7 @@ if ans is None and chosen is not None:
     if not correct:
         S.gm_missed.append(target)
     record(target, correct, game)
-    S.gm_ans = {"correct": correct}
+    S.gm_ans = {"correct": correct, "chosen": value["chosen"]}
     persist()
     st.rerun()
 

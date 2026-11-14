@@ -1066,11 +1066,13 @@ def db_tests():
     def t_games_resume():
         from streamlit.testing.v1 import AppTest
         import audio_engine
-        import memory_component as mcomp
+        import game_components as gcomp
         uid = db.list_users()[0]["id"]
         db.saved_session_del(uid, "games")
-        real_audio, real_board = audio_engine.create_audio_file, mcomp.memory_board
+        real_audio, real_board, real_choice = (audio_engine.create_audio_file, gcomp.memory_board,
+                                               gcomp.choice_board)
         audio_engine.create_audio_file = lambda text, voice=None: None
+        gcomp.choice_board = lambda **k: {"sid": k["sid"], "round": k["round"], "chosen": k["answer"]}
         def session():
             at = AppTest.from_file("views/8_Games.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
@@ -1080,11 +1082,10 @@ def db_tests():
             at = session(); at.run()
             next(b for b in at.button if b.key == "pick_word").click().run()
             for _ in range(2):
-                rnd = at.session_state["gm_rounds"][at.session_state["gm_i"]]
-                g = [x for x in at.get("button_group") if (x.key or "").startswith("gm_pick_")][0]
-                g.set_value(["A", "B", "C", "D"][rnd["options"].index(rnd["target"])]).run()
+                at.run()                                    # tap the right card
                 next(b for b in at.button if b.label == "Next ▶️").click().run()
             rounds, score = at.session_state["gm_rounds"], at.session_state["gm_score"]
+            gcomp.choice_board = lambda **k: None             # nothing tapped yet on return
             back = session(); back.run()
             assert not back.exception, back.exception
             assert back.session_state["gm_i"] == 2 and back.session_state["gm_score"] == score
@@ -1104,19 +1105,20 @@ def db_tests():
                 pairs.setdefault(c["item"]["chinese"], []).append(n)
             p1, p2 = list(pairs.values())[:2]
             wrong = [list(pairs.values())[2][0], list(pairs.values())[3][0]]
-            mcomp.memory_board = lambda **k: {"sid": sid, "matched": sorted(p1 + p2 + wrong), "moves": 4}
+            gcomp.memory_board = lambda **k: {"sid": sid, "matched": sorted(p1 + p2 + wrong), "moves": 4}
             at.run()
             assert at.session_state["gm_matched"] == set(p1 + p2), "only real pairs count"
             assert at.session_state["gm_moves"] == 4
             seen = {}
-            mcomp.memory_board = lambda **k: seen.update(k) or None
+            gcomp.memory_board = lambda **k: seen.update(k) or None
             back = session(); back.run()
             assert not back.exception, back.exception
             assert seen["sid"] == sid and seen["state"] == {"matched": sorted(p1 + p2), "moves": 4}
             assert len(seen["cards"]) == 12 and all(c["img"].startswith("data:image/")
                                                     for c in seen["cards"] if c["face"] == "image")
         finally:
-            audio_engine.create_audio_file, mcomp.memory_board = real_audio, real_board
+            audio_engine.create_audio_file, gcomp.memory_board, gcomp.choice_board = \
+                real_audio, real_board, real_choice
             db.saved_session_del(uid, "games")
 
     @test("connection pool: more simultaneous users than connections wait their turn, nothing is reset")
@@ -1150,20 +1152,30 @@ def db_tests():
             matched |= set(left[0])
         return {"sid": sid, "matched": sorted(matched), "moves": state["moves"] + (1 if left else 0)}
 
+    def fake_choice(log):
+        """Stands in for the tappable answer cards: the first round's tap is
+        wrong, every other one right. Every call is logged for checking."""
+        def board(**k):
+            log.append(k)
+            chosen = (k["answer"] + 1) % len(k["options"]) if k["round"] == 0 else k["answer"]
+            return {"sid": k["sid"], "round": k["round"], "chosen": chosen}
+        return board
+
     @test("Games page: all four games play through, in both display modes; results stay out of diagnosis")
     def t_games_page():
         from streamlit.testing.v1 import AppTest
         import audio_engine
-        import memory_component as mcomp
+        import game_components as gcomp
         uid = db.list_users()[0]["id"]
         conn = db.get_connection(); cur = conn.cursor()
         cur.execute("DELETE FROM game_scores WHERE user_id = %s", (uid,))
         cur.execute("DELETE FROM word_attempts WHERE user_id = %s", (uid,))
         conn.commit(); conn.close()
         db.saved_session_del(uid, "games")
-        real_audio, real_board = audio_engine.create_audio_file, mcomp.memory_board
+        real_audio, real_board, real_choice = (audio_engine.create_audio_file, gcomp.memory_board,
+                                               gcomp.choice_board)
         audio_engine.create_audio_file = lambda text, voice=None: None
-        mcomp.memory_board = fake_board
+        gcomp.memory_board = fake_board
         try:
             for game, show in (("picture", "Characters + pinyin"), ("word", "Characters only"),
                                ("listen", "Characters only"), ("memory", "Characters + pinyin")):
@@ -1177,6 +1189,8 @@ def db_tests():
                     assert "Twemoji" in md and sum(l.startswith("- **") for l in md.splitlines()) == n_wm
                 assert not at.sidebar.radio, "game settings live on the page now"
                 at.radio(key="games_show").set_value(show).run()
+                calls = []
+                gcomp.choice_board = fake_choice(calls)
                 next(b for b in at.button if b.key == f"pick_{game}").click().run()
                 for _ in range(120):
                     assert not at.exception, (game, at.exception)
@@ -1186,21 +1200,30 @@ def db_tests():
                         assert not at.get("button_group"), "cards are tapped on the board, not picked from a list"
                         at.run()                    # the board reports one more pair
                         continue
+                    assert not at.get("button_group"), "answers are tapped on cards, not picked from a list"
                     if at.session_state.get("gm_ans") is None:
-                        rnd = at.session_state["gm_rounds"][at.session_state["gm_i"]]
-                        idx = rnd["options"].index(rnd["target"])
-                        g = [x for x in at.get("button_group") if (x.key or "").startswith("gm_pick_")][0]
-                        if game == "picture":
-                            g.set_value(gms.label(rnd["target"], show == "Characters + pinyin")).run()
-                        else:
-                            g.set_value(["A", "B", "C", "D"][idx]).run()
+                        at.run()                    # a card is tapped on the board
                         continue
                     next(b for b in at.button if b.label == "Next ▶️").click().run()
                 assert any("Play again" in b.label for b in at.button), game
                 if game == "memory":
                     assert at.session_state["gm_moves"] == 6, "perfect play: one turn per pair"
+                    continue
+                # what the answer cards were given
+                want = {"picture": ("image", "word"), "word": ("word", "image"), "listen": (None, "image")}[game]
+                first = calls[0]
+                assert ((first["prompt"] or {}).get("kind"), first["options"][0]["kind"]) == want, game
+                assert len(first["options"]) == 4 and first["show_pinyin"] == (show == "Characters + pinyin")
+                assert all(o["img"].startswith("data:image/") for o in first["options"] if o["kind"] == "image")
+                rounds = at.session_state["gm_rounds"]
+                assert len(at.session_state["gm_missed"]) == 1, "the wrong tap counted as a miss"
+                assert at.session_state["gm_score"] > 0
+                # once answered, the round is redrawn showing the tapped card
+                answered = [c for c in calls if c["round"] == 0 and c["answered"] is not None]
+                assert answered and answered[0]["answered"] != answered[0]["answer"]
         finally:
-            audio_engine.create_audio_file, mcomp.memory_board = real_audio, real_board
+            audio_engine.create_audio_file, gcomp.memory_board, gcomp.choice_board = \
+                real_audio, real_board, real_choice
         assert db.saved_session_get(uid, "games", same_day=False) is None, "a finished game leaves nothing to resume"
         scores = db.game_scores(uid)
         assert scores["picture"]["best"] > 0 and scores["memory"]["best"] == 100

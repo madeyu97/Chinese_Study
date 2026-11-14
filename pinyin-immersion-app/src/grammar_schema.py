@@ -18,3 +18,4 @@ class Structure:
     core: bool = False
     kind: str = "structure"          # "structure" or "contrast" (a pair drill)
     also_in: tuple = ()
+    requires: tuple = ()             # (regex, what's wrong if it doesn't match) pairs

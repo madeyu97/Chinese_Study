@@ -117,7 +117,7 @@ def start(structure_id):
 def load_set(structure):
     picked = None if S.get("gr_fresh") else \
         db.grammar_pick_set(USER_ID, structure.id, len(known))
-    if picked:
+    if picked and gd.stored_set_ok(picked["payload"], structure):
         db.grammar_mark_served(picked["id"])
         return picked["payload"]
     contrasts = [gc.get(c) for c in structure.contrast if gc.get(c)]

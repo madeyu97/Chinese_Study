@@ -13,6 +13,9 @@ it, and carries what the drill writer needs to teach it well:
   markers  - strings of which at least one must appear in every sentence that
              is meant to use the structure (a cheap mechanical check; the
              reviewer model checks the rest)
+  requires - (regex, problem) pairs every such sentence must also match, for
+             structures whose marker alone proves nothing: 连 is also in 连续
+             and 连忙, and 无论很忙 has 无论 but isn't the structure
   level    - 1 first weeks ... 5 advanced; new structures arrive in this order
   core     - in the Core Grammar Automation Set: reviewed more often
 

@@ -2059,6 +2059,43 @@ def t_gr_validate():
     assert "啤酒" in text and "answer index" in text
 
 
+@test("grammar: 无论/不管 need an open question and 都; 连 needs 都/也 (连续/连忙 don't count)")
+def t_gr_requires():
+    right = {
+        "wulun_dou": ["无论多忙，他都来。", "我无论什么都吃。", "无论你去不去，我都去。",
+                      "无论下雨还是晴天，我们都去。", "无论你喜欢不喜欢，都要吃。", "不论谁来，我都欢迎。"],
+        "buguan_dou": ["不管多贵，我都买。", "不管怎么样，我们还是要去。", "不管你说什么，我都不去。"],
+        "lian_dou": ["连小孩都知道。", "他连饭都没吃。", "他连榴莲也吃。"],
+        "lian_dou_meiyou": ["我连一块钱都没有。", "他连一句话都没说。", "他连水都不喝。"],
+        "qword_dou": ["什么都吃。", "谁都认识他。", "哪里都可以。", "什么菜都好吃。", "我怎么都睡不着。"],
+    }
+    wrong = {
+        "wulun_dou": ["无论很忙，他都来。", "无论下雨，我都去。", "无论多忙，他来。",
+                      "无论你去，我都不知道为什么。"],
+        "buguan_dou": ["不管很贵，我都买。"],
+        "lian_dou": ["他连续工作三天。", "他连忙跑过去。", "连他知道。", "他一连三天都没来。"],
+        "lian_dou_meiyou": ["连他都知道。", "他连续三天都没来。"],
+        "qword_dou": ["我们都去。", "我吃什么都。"],
+    }
+    for sid, sents in right.items():
+        for hz in sents:
+            assert gdr.structure_problem(hz, gcur.get(sid)) is None, (sid, hz)
+    for sid, sents in wrong.items():
+        for hz in sents:
+            assert gdr.structure_problem(hz, gcur.get(sid)), (sid, hz)
+    # the problem reaches the drill writer, and a stored set written before is not reused
+    s = gcur.get("lian_dou")
+    payload = {"identify": [{"hanzi": "他连饭都没吃。"}, {"hanzi": "他连忙跑过去。"}]}
+    assert not gdr.stored_set_ok(payload, s)
+    assert gdr.stored_set_ok({"identify": [{"hanzi": "他连饭都没吃。"}]}, s)
+    # taught early: core, level 2, right after 因为/如果/虽然
+    order = [x.id for x in gcur.learning_order()]
+    for sid in ("wulun_dou", "lian_dou"):
+        st_ = gcur.get(sid)
+        assert st_.level == 2 and st_.core and order.index(sid) < 120, (sid, order.index(sid))
+    assert order.index("wulun_dou") > order.index("ruguo_jiu")
+
+
 @test("grammar generation: rejected drafts are rewritten with the problems fed back")
 def t_gr_generate():
     s = gcur.get("bu_neg")
@@ -2969,7 +3006,7 @@ if __name__ == "__main__":
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
     print("Grammar drills:")
-    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_generate()
+    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_requires(); t_gr_generate()
     t_gr_generate_fails_closed(); t_gr_audit_fixes(); t_gr_grade_schedule()
     print("Vocabulary engine:")
     t_ve_schedule(); t_ve_production_gate(); t_ve_modes(); t_ve_allowance(); t_ve_session()

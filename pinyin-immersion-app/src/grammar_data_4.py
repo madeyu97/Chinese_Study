@@ -26,6 +26,22 @@ _JIUCAI = ("就 and 才 carry the speaker's expectation: 就 = earlier / sooner 
 _REL = ("Everything describing a noun comes BEFORE it, joined with 的 (English "
         "puts clauses after). ")
 
+# 无论 / 不论 / 不管 must be followed by something open - a question word, an
+# A-not-A choice or options with 还是 - inside their own clause, and the
+# second half needs 都 / 也 (or 还是 / 总 / 照样 for "still").
+_OPEN = (r"(什么|谁|哪|怎|(?<![很太好许差])多|几|还是|或者|"
+         r"(?P<a>\S)[不没](?P=a)|(?P<b>\S\S)[不没](?P=b))")
+
+
+def _no_matter(word_rx, word):
+    return ((word_rx + r"[^，,。！？!?都也]*?" + _OPEN,
+             f"puts a plain statement after {word} - it needs a question word (什么 / 谁 / "
+             f"哪里 / 怎么 / 多), an A-not-A choice (去不去) or options with 还是"),
+            (word_rx + r"[^。！？!?]*?(都|也|还是|总|照样)",
+             "has no 都 / 也 in the second half"))
+# 连 + the extreme case + 都 / 也 - not the 连 of 连续 / 连忙 / 一连 / 连接 ...
+_LIAN = r"(?<!一)连(?!续|忙|接|锁|夜|同|载|累)[^，,。！？!?]{1,10}?(都|也)"
+
 STRUCTURES = [
     # ------------------------------------------------------------------
     # 15. Conjunctions — cause
@@ -113,14 +129,24 @@ STRUCTURES = [
        markers=("就算",), level=3, also_in=(33,)),
     _S("wulun_dou", 15, "无论 / 不论……都…… — no matter", "无论多忙，他都来。",
        "Say something holds whatever the circumstances.",
-       notes=_CONJ + "Needs a question word or options after 无论: 无论什么时候 / 无论"
-             "你去不去 / 无论下雨还是晴天. 不论 is the same.",
-       markers=("无论", "不论"), level=3, core=True, also_in=(33, 34)),
+       notes=_CONJ + "Every case, not one: what follows 无论 must be OPEN - a question "
+             "word (无论谁 / 无论什么时候 / 无论多忙 / 无论怎么样), an A-not-A choice "
+             "(无论你去不去) or options with 还是 (无论下雨还是晴天). A plain statement "
+             "is wrong: never 无论很忙 or 无论下雨 - that idea is 即使 / 虽然. The second "
+             "half needs 都 (or 也) after its subject: 无论多忙，他都来. 无论什么 can "
+             "sit before the verb in one clause: 他无论什么都吃. 不论 = 无论; in "
+             "everyday Malaysian speech people say 不管.",
+       markers=("无论", "不论"), level=2, core=True, also_in=(33, 34),
+       requires=_no_matter("(无论|不论)", "无论")),
     _S("buguan_dou", 15, "不管……都…… — no matter (spoken)", "不管你说什么，我都不去。",
        "Say 'no matter' the everyday way.",
-       notes=_CONJ + "Same as 无论, more spoken; also needs a question word or "
-             "options.",
-       markers=("不管",), level=3, also_in=(33,)),
+       notes=_CONJ + "The everyday spoken 无论, and what you'll hear most in Malaysia. "
+             "Same rule: an open question word, A-not-A or 还是 after it (不管多贵 / "
+             "不管你去不去 / 不管谁来), never a plain statement; 都 / 也 in the second "
+             "half, or 还是 for 'still' (不管多累，他还是去). 不管怎样 / 不管怎么样 on "
+             "its own = 'whatever happens / anyway'.",
+       markers=("不管",), level=3, also_in=(33,),
+       requires=_no_matter("不管", "不管")),
 
     # 15. Conjunctions — sequence / addition / choice / contrast / inference
     _S("yi_jiu", 15, "一……就…… — as soon as / whenever", "我一到家就睡觉。",
@@ -254,8 +280,15 @@ STRUCTURES = [
     # ------------------------------------------------------------------
     _S("lian_dou", 17, "连……都 / 也…… — even", "连他都知道。/ 他连饭都没吃。",
        "Stress an extreme case: even this.",
-       notes="连 + the surprising item + 都/也 + verb.",
-       markers=("连",), level=3, core=True),
+       notes="连 + the most surprising item (the extreme case) + 都 / 也 + verb. The item "
+             "can be the subject (连小孩都知道 - even kids know) or the object, moved "
+             "before the verb (他连饭都没吃 - he didn't even eat; never 他都没吃连饭). "
+             "都 or 也 is required - 连 on its own is wrong. Most common with a negative "
+             "(not even); the positive is for surprise (他连榴莲都吃). Not the 连 of "
+             "连续 / 连忙 / 一连 - those are other words.",
+       markers=("连",), level=2, core=True,
+       requires=((_LIAN, "doesn't use 连 + the extreme case + 都 / 也 (连续 / 连忙 are "
+                         "other words)"),)),
     _S("shenzhi", 17, "甚至 — even (going further)", "他很忙，甚至没时间吃饭。",
        "Add a more extreme point.",
        notes="Often with 都/也 after the point.",
@@ -275,13 +308,23 @@ STRUCTURES = [
        markers=("还",), level=4),
     _S("lian_dou_meiyou", 17, "连……都没(有)…… — not even", "我连一块钱都没有。",
        "Say not even the smallest thing happened or exists.",
-       notes="连一句话都没说 / 连饭都没吃.",
-       markers=("连",), level=3),
+       notes="连 + the smallest amount or most basic thing + 都 / 也 + 没 / 不. For the "
+             "minimum use 一 + measure word: 我连一块钱都没有 (not even one ringgit), 他连"
+             "一句话都没说 (not a single word). 没(有) for what did not happen or isn't "
+             "there; 不 for habits and refusals (他连水都不喝). Speech often drops 连 "
+             "(一块钱都没有), but drills keep it.",
+       markers=("连",), level=3,
+       requires=((_LIAN + r"[^，,。！？!?]{0,2}?(没|不)",
+                  "isn't 'not even': 连 + the item + 都 / 也 + 没 / 不"),)),
     _S("qword_dou", 17, "Question word + 都 — every-, any-", "什么都吃 / 谁都认识他 / 哪里都可以 / 怎么都行",
        "Say everything, everyone, everywhere, any way.",
-       notes="Positive meanings (negatives are earlier structures). Malaysian 哪里都, "
-             "never 哪儿.",
-       markers=("都", "也"), level=3),
+       notes="Question word (+ noun) + 都 / 也 = every / any: 什么都吃, 谁都认识他, 哪里都"
+             "可以, 什么菜都好吃. The question word goes BEFORE 都 and the verb (never "
+             "我吃什么都). Positive meanings here (negatives are earlier structures). "
+             "Malaysian 哪里都, never 哪儿.",
+       markers=("都", "也"), level=3,
+       requires=((r"(什么|谁|哪|怎么|几|多少)[^，,。！？!?]{0,6}?(都|也)(?=[^，,。！？!?\s])",
+                  "needs a question word right before 都 / 也 (什么都 / 谁都 / 哪里都)"),)),
     _S("dou_meanings", 17, "都 — all / even / already", "我们都去 · 连他都知道 · 都十点了!",
        "Hear which meaning of 都 is meant.",
        notes="All (refers back to plural before it); even (with 连); already (都 + "

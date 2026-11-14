@@ -241,6 +241,31 @@ def _check_mcq(item, where, problems):
         problems.append(f"{where}: {problem}")
 
 
+def structure_problem(hanzi, structure):
+    """Why a sentence meant to use the structure doesn't, or None: it must
+    contain one of the markers and match every `requires` pattern (连 alone
+    is also in 连续 and 连忙; 无论很忙 has 无论 but isn't the structure)."""
+    if structure.markers and not any(m in hanzi for m in structure.markers):
+        return "doesn't use the target structure"
+    for pattern, wrong in structure.requires:
+        if not re.search(pattern, hanzi):
+            return wrong
+    return None
+
+
+def stored_set_ok(payload, structure):
+    """Whether a drill set saved earlier still passes today's structure check
+    (one written before a structure's rules were tightened may not)."""
+    keys = {"identify": ("hanzi",), "produce": ("answer_hanzi",),
+            "rapid": ("answer_hanzi",), "conversation": ("sample_hanzi",)}
+    try:
+        return all(structure_problem(str(it.get(k) or ""), structure) is None
+                   for stage, ks in keys.items() for it in payload.get(stage) or []
+                   for k in ks)
+    except (AttributeError, TypeError):
+        return False
+
+
 def validate(payload, structure, known_words, recent=()):
     """Returns (cleaned payload, list of problems). Empty list = passes."""
     problems = []
@@ -284,9 +309,10 @@ def validate(payload, structure, known_words, recent=()):
                     problems.append(f"{where}: uses Beijing 儿 in '{hz}'")
                 if re.search(r"[A-Za-z0-9]", hz):
                     problems.append(f"{where}: digits or Latin letters in '{hz}'")
-                if needs_marker and structure.markers and \
-                        not any(m in hz for m in structure.markers):
-                    problems.append(f"{where}: '{hz}' doesn't use the target structure")
+                if needs_marker:
+                    wrong = structure_problem(hz, structure)
+                    if wrong:
+                        problems.append(f"{where}: '{hz}' {wrong}")
                 it[py_key] = _fix_pinyin(hz, it.get(py_key, ""))
                 missing = unknown_words(hz, allowed)
                 if missing:

@@ -3,8 +3,11 @@ import edge_tts
 import hashlib
 import logging
 import os
-import random
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import clock
 from config import DATA_DIR
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -24,7 +27,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 # ==========================================================================
 AUDIO_DIR = DATA_DIR / "audio"
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-MAX_AUDIO_FILES = 120  # keep the most recent N files
+MAX_AUDIO_FILES = 400  # keep the most recent N files
 
 
 def _prune_old_audio():
@@ -57,6 +60,59 @@ VOICE_CAST = [
 # Voices that error get benched for the rest of the process, so a broken
 # voice costs one failed call ever, not one per card.
 _DEAD_VOICES = set()
+
+# ==========================================================================
+# SPEED: making a clip takes a second or two, and it used to happen while
+# the learner waited, for every card - with the voice picked at random each
+# time, so a clip made earlier was rarely the one asked for again.
+#
+# Now the voice for a text is fixed for the day (still varied from text to
+# text and day to day), so every later request finds the first clip; and
+# pages call warm() with the texts coming up, which makes them in the
+# background before they are needed.
+# ==========================================================================
+_PATH_LOCKS, _PATH_LOCKS_GUARD = {}, threading.Lock()
+_WARMER = None
+_WARMING = set()
+
+
+def _voice_for(tts_text):
+    alive = [v for v in VOICE_CAST if v not in _DEAD_VOICES] or VOICE_CAST
+    n = int(hashlib.md5(f"{tts_text}|{clock.today().isoformat()}".encode("utf-8")).hexdigest(), 16)
+    return alive[n % len(alive)]
+
+
+def _lock_for(path):
+    with _PATH_LOCKS_GUARD:
+        if len(_PATH_LOCKS) > 2000:
+            _PATH_LOCKS.clear()
+        return _PATH_LOCKS.setdefault(str(path), threading.Lock())
+
+
+def warm(texts):
+    """Make these clips in the background, ahead of when they're played.
+    Never raises and never waits. (Does nothing under NO_BACKGROUND, which
+    the tests set.)"""
+    global _WARMER
+    if os.environ.get("NO_BACKGROUND"):
+        return
+    try:
+        with _PATH_LOCKS_GUARD:
+            if _WARMER is None:
+                _WARMER = ThreadPoolExecutor(max_workers=2, thread_name_prefix="tts")
+            todo = [t for t in dict.fromkeys(texts or []) if t and t.strip() and t not in _WARMING]
+            _WARMING.update(todo)
+
+        def one(text):
+            try:
+                create_audio_file(text)
+            finally:
+                _WARMING.discard(text)
+        for t in todo:
+            _WARMER.submit(one, t)
+    except Exception as e:
+        logging.warning(f"Audio warm-up skipped (non-fatal): {e}")
+
 
 async def _generate_audio_async(text: str, voice: str, output_path: str):
     communicate = edge_tts.Communicate(text, voice)
@@ -93,12 +149,9 @@ def create_audio_file(chinese_text: str, voice: str = None):
     tts_text = re.sub(r'了(?!解)', '料', clean_text)
     tts_text = tts_text.replace("咩", " meh ")
 
-    # 3. Select Voice (skipping any that have already failed this session)
-    if voice:
-        selected_voice = voice
-    else:
-        alive = [v for v in VOICE_CAST if v not in _DEAD_VOICES]
-        selected_voice = random.choice(alive if alive else VOICE_CAST)
+    # 3. Select Voice (skipping any that have already failed this session):
+    #    the same one all day for the same text, so clips are reused
+    selected_voice = voice or _voice_for(tts_text)
 
     # 4. Unique output path per (text, voice) so history never goes stale
     digest = hashlib.md5(f"{tts_text}|{selected_voice}".encode("utf-8")).hexdigest()[:16]
@@ -108,6 +161,15 @@ def create_audio_file(chinese_text: str, voice: str = None):
         logging.info(f"Audio cache hit for: '{tts_text}'")
         return str(output_path)
 
+    # one maker per clip: a request for a clip already being made in the
+    # background waits for that one instead of making it twice
+    with _lock_for(output_path):
+        if _saved_ok(output_path):
+            return str(output_path)
+        return _make_clip(tts_text, selected_voice, output_path)
+
+
+def _make_clip(tts_text, selected_voice, output_path):
     logging.info(f"Attempting audio for: '{tts_text}' using {selected_voice}")
 
     # 5. Generate Audio

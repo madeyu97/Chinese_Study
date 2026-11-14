@@ -390,19 +390,25 @@ _PLACEHOLDER = re.compile(r"^\s*(<[^>]*>|d\d|distractor\s*\d*|option\s*\d*|\.{2,
                           re.I)
 
 
-def usable_distractors(distractors, english_correct, n=3):
+def usable_distractors(distractors, english_correct, n=3, any_length=False):
     """The wrong options worth showing: real sentences, not a template's
     placeholder ('<d1>', '…') a model copied back, not blank, not the answer
-    again and not each other. At most n."""
+    again and not each other - and about as long as the answer (within half
+    its word count, at least two words either way), so the answer can't be
+    picked out by length; any_length=True lifts that for a last resort.
+    At most n."""
     def key(t):
         return re.sub(r"[^a-z0-9']+", " ", str(t).lower()).strip()
     seen, out = {key(english_correct)}, []
+    size = len(str(english_correct).split())
     for d in distractors or []:
         if not isinstance(d, (str, int, float)):
             continue
         d = str(d).strip()
         k = key(d)
         if not k or _PLACEHOLDER.match(d) or k in seen or len(k) < 2:
+            continue
+        if not any_length and abs(len(d.split()) - size) > max(2, round(0.5 * size)):
             continue
         seen.add(k)
         out.append(d)

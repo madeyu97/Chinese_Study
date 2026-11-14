@@ -13,11 +13,14 @@ historical failure modes have been reintroduced.
 
 import json
 import os
+import re
+import time
 import sys
 import traceback
 from unittest.mock import MagicMock
 
 os.environ.setdefault("GROQ_API_KEY", "dummy-for-tests")
+os.environ.setdefault("NO_BACKGROUND", "1")   # background writes run at once, so tests can read them back
 
 PASSED, FAILED = [], []
 
@@ -908,7 +911,8 @@ def db_tests():
                 mc = [r for r in at.radio if (r.key or "").startswith("wd_mc_")]
                 if mc and mc[0].value is None:
                     right = next(o["text"] for o in at.session_state["wd_setup"]["options"] if o["kind"] == "correct")
-                    pick = next(o for o in mc[0].options if o != right) if wrong_once else right
+                    pick = next(o["text"] for o in at.session_state["wd_setup"]["options"]
+                                if o["kind"] != "correct") if wrong_once else right
                     wrong_once = False
                     mc[0].set_value(pick).run()
                     next(b for b in at.button if b.label == "Check").click().run(); continue
@@ -957,7 +961,9 @@ def db_tests():
             assert at.session_state["wd_items"][0]["word"]["chinese"] == "买"
             mc = [r for r in at.radio if (r.key or "").startswith("wd_mc_")][0]
             right = next(o["text"] for o in at.session_state["wd_setup"]["options"] if o["kind"] == "correct")
-            mc.set_value(next(o for o in mc.options if o != right)).run()
+            # the raw text, not the label on screen (labels are escaped for Markdown)
+            mc.set_value(next(o["text"] for o in at.session_state["wd_setup"]["options"]
+                              if o["kind"] != "correct")).run()
             next(b for b in at.button if b.label == "Check").click().run()
             assert "keeps slipping" in " ".join(w.value for w in at.warning)
             assert at.session_state["wd_diag"]["cause"] == "tone"
@@ -1332,7 +1338,7 @@ def db_tests():
         uid = db.list_users()[1]["id"]
         db.set_session_mode(uid, "latest_mix")
         assert db.get_session_mode(uid) == "random_balanced"
-        db.init_db()
+        db.init_db(force=True)
         conn = db.get_connection(); cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM users WHERE session_mode = 'latest_mix'")
         assert cur.fetchone()[0] == 0
@@ -1621,6 +1627,269 @@ def db_tests():
         conn.close()
         assert len(stored["english_distractors"]) == 3, stored["english_distractors"]
 
+    @test("database: a read is one round trip; writes stay atomic; one-shot writes need no commit")
+    def t_db_round_trips():
+        import psycopg2.extensions as ext
+        assert db._is_read("SELECT 1") and db._is_read("  WITH x AS (SELECT 1) SELECT * FROM x")
+        assert db._is_read("SELECT updated_at, last_update FROM t")
+        for sql in ("INSERT INTO t VALUES (1)", "UPDATE t SET a = 1", "SELECT 1 FOR UPDATE",
+                    "WITH d AS (DELETE FROM t RETURNING 1) SELECT * FROM d", "CREATE TABLE t (a int)"):
+            assert not db._is_read(sql), sql
+        uid = db.list_users()[1]["id"]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM users")
+        assert cur.fetchone()[0] >= 2
+        assert conn.info.transaction_status == ext.TRANSACTION_STATUS_IDLE, "a read opens no transaction"
+        cur.execute("DELETE FROM saved_sessions WHERE user_id = %s AND name = 'rt'", (uid,))
+        assert conn.info.transaction_status != ext.TRANSACTION_STATUS_IDLE, "a write opens one"
+        cur.execute("""INSERT INTO saved_sessions (user_id, name, day, state, elapsed, updated_at)
+                       VALUES (%s, 'rt', %s, '{}'::jsonb, 0, NOW())""", (uid, clock.today()))
+        conn.close()                                   # closed without commit: rolled back
+        assert db.saved_session_get(uid, "rt") is None
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("""INSERT INTO saved_sessions (user_id, name, day, state, elapsed, updated_at)
+                       VALUES (%s, 'rt', %s, '{"a": 1}'::jsonb, 0, NOW())""", (uid, clock.today()))
+        conn.commit(); conn.close()
+        assert db.saved_session_get(uid, "rt")["state"] == {"a": 1}
+        conn = db.get_connection(); cur = conn.cursor()
+        try:                                           # an error mid-transaction undoes all of it
+            cur.execute("UPDATE saved_sessions SET state = '{\"a\": 2}'::jsonb WHERE user_id = %s AND name = 'rt'", (uid,))
+            cur.execute("SELECT * FROM no_such_table")
+            raise AssertionError("should have failed")
+        except Exception as e:
+            assert "no_such_table" in str(e), e
+            conn.rollback()
+        conn.close()
+        assert db.saved_session_get(uid, "rt")["state"] == {"a": 1}
+        conn = db.get_connection(one_shot=True); cur = conn.cursor()
+        cur.execute("DELETE FROM saved_sessions WHERE user_id = %s AND name = 'rt'", (uid,))
+        assert conn.info.transaction_status == ext.TRANSACTION_STATUS_IDLE
+        conn.close()                                   # saved without commit()
+        assert db.saved_session_get(uid, "rt") is None
+        # both rows of a recognition track go in one trip, and both arrive
+        vid = db.vocab_ids_for(["买"])["买"]
+        db.save_word_track(uid, vid, "recognition", {"interval": 3, "reps": 2, "next_review_date": "2099-01-01"})
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT interval FROM word_skill WHERE user_id = %s AND vocab_id = %s AND skill = 'recognition'", (uid, vid))
+        a = cur.fetchone()
+        cur.execute("SELECT interval FROM vocab_progress WHERE user_id = %s AND vocab_id = %s", (uid, vid))
+        b = cur.fetchone(); conn.close()
+        assert a[0] == 3 and b[0] == 3
+
+    @test("ahead: the next new words' content is written before the Words page asks for it")
+    def t_ahead_words():
+        import ahead
+        import audio_engine
+        import vocab_engine as ve
+        from config import VOCAB_LESSON_SHARE
+        uid = _fresh_learner()
+        wrote, warmed = [], []
+        real = (db.word_content_for, audio_engine.warm)
+
+        def content(user_id, word, allow_generate=True, known=None):
+            wrote.append(word["chinese"])
+            return _fake_content(user_id, word)
+        db.word_content_for = content
+        audio_engine.warm = lambda texts: warmed.extend(texts)
+        try:
+            ahead._READY.clear()
+            ahead.write_new_words(uid, 3)
+            lessons, frequency = db.new_word_candidates(uid)
+            nxt = [w["chinese"] for w in ve.pick_new_words(lessons, frequency, 3, VOCAB_LESSON_SHARE)]
+            assert wrote == nxt, (wrote, nxt)            # exactly the words a session would introduce
+            assert set(nxt) <= set(warmed)               # and their clips
+            ahead.write_new_words(uid, 3)
+            assert wrote == nxt, "not written twice in a day"
+        finally:
+            db.word_content_for, audio_engine.warm = real
+            ahead._READY.clear()
+
+    @test("database: a pooled connection that died while idle is replaced, not handed out")
+    def t_db_stale_connection():
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT pg_backend_pid()")
+        pid = cur.fetchone()[0]
+        raw = conn._conn
+        conn.close()
+        killer = db.get_connection(); k = killer.cursor()      # may be the same one or another
+        k.execute("SELECT pg_backend_pid()")
+        if k.fetchone()[0] == pid:                             # need a second connection to kill the first
+            other = db.get_connection(); k2 = other.cursor()
+            killer.close()
+            killer, k = other, k2
+        k.execute("SELECT pg_terminate_backend(%s)", (pid,))
+        killer.close()
+        db._LAST_USED[id(raw)] = time.time() - 3600            # ...and it has sat idle for an hour
+        for c in list(db._get_pool()._pool):                   # every idle connection gets checked
+            db._LAST_USED[id(c)] = time.time() - 3600
+        held = [db.get_connection() for _ in range(4)]         # every idle one is handed out, the dead one too
+        try:
+            for c in held:
+                assert c._conn is not raw, "the dead connection was replaced"
+                cur = c.cursor()
+                cur.execute("SELECT 1")
+                assert cur.fetchone()[0] == 1
+        finally:
+            for c in held:
+                c.close()
+
+    @test("word content: two requests for the same new word at once write it once")
+    def t_content_written_once():
+        import threading
+        uid = _fresh_learner()
+        lessons, frequency = db.new_word_candidates(uid)
+        word = next(w for w in (lessons + frequency) if re.fullmatch("[\u4e00-\u9fff]{1,4}", w["chinese"]))
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM word_content WHERE user_id = %s AND vocab_id = %s", (uid, word["id"]))
+        conn.commit(); conn.close()
+        calls, real = [], wcon.generate
+
+        def slow(w, known, structures, recent=()):
+            calls.append(w["chinese"])
+            time.sleep(0.4)
+            return _fake_content(uid, w)[0]
+        wcon.generate = slow
+        try:
+            out = []
+            threads = [threading.Thread(target=lambda: out.append(db.word_content_for(uid, word)))
+                       for _ in range(3)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            assert calls == [word["chinese"]], calls
+            assert len({cid for _payload, cid in out}) == 1 and out[0][1], out
+        finally:
+            wcon.generate = real
+
+    @test("start-up: the schema is set up once per version of the code, then skipped")
+    def t_init_once():
+        built, real = [], db._build_schema
+        db._build_schema = lambda: built.append(1) or real()
+        try:
+            db.init_db(force=True)
+            assert built == [1]
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("SELECT value FROM app_meta WHERE key = 'schema'")
+            assert cur.fetchone()[0] == db._schema_stamp()
+            conn.close()
+            db.init_db()
+            assert built == [1], "the same version doesn't set it up again"
+            conn = db.get_connection(one_shot=True); cur = conn.cursor()
+            cur.execute("UPDATE app_meta SET value = 'an older version' WHERE key = 'schema'")
+            conn.close()
+            db.init_db()
+            assert built == [1, 1], "a new version of the code does"
+            db.init_db()
+            assert built == [1, 1]
+        finally:
+            db._build_schema = real
+
+    @test("database: reads sent together come back in order; background writes land in order and can be waited for")
+    def t_db_parallel_background():
+        import time as _t
+        uid = db.list_users()[1]["id"]
+        assert db.in_parallel(lambda: 1, lambda: len(db.list_users()) >= 2, lambda: "c") == [1, True, "c"]
+        try:
+            db.in_parallel(lambda: 1, lambda: 1 / 0)
+            raise AssertionError("an error in one read must surface")
+        except ZeroDivisionError:
+            pass
+        state, (streak, users) = tplan.gather_state(uid, also=[lambda: db.activity_streak(uid),
+                                                               lambda: len(db.list_users())])
+        assert isinstance(state.get("words"), dict) and users >= 2
+        assert tplan.gather_state(uid).keys() == state.keys()
+        state, (bad,) = tplan.gather_state(uid, also=[lambda: 1 / 0])
+        assert bad is None and "words" in state, "a failed extra read doesn't take the page down"
+        # the real background path: writes queue up, in order, without blocking
+        real_exists, old_env = db._runtime_exists, os.environ.pop("NO_BACKGROUND", None)
+        db._runtime_exists = lambda: True
+        try:
+            def slow_put(*a):
+                _t.sleep(0.2)
+                db.saved_session_put(*a)
+            t0 = _t.time()
+            db.background(slow_put, uid, "bg", '{"n": 1}', 0)
+            db.background(db.saved_session_put, uid, "bg", '{"n": 2}', 0)
+            assert _t.time() - t0 < 0.15, "the caller doesn't wait"
+            db.flush_background()
+            assert db.saved_session_get(uid, "bg")["state"] == {"n": 2}, "the later write wins"
+            db.background(db.saved_session_del, uid, "bg")
+            db.background(lambda: 1 / 0)                 # a failing job is logged, not raised
+            db.flush_background()
+            assert db.saved_session_get(uid, "bg") is None
+        finally:
+            db._runtime_exists = real_exists
+            if old_env is not None:
+                os.environ["NO_BACKGROUND"] = old_env
+
+    @test("meaning options: a sentence-long entry draws look-alikes from the database, the learner's own first")
+    def t_long_entry_options():
+        uid = _fresh_learner()
+        sents = [("我明天有空可以跟你去巴刹", "I'm free tomorrow and can go to the market with you."),
+                 ("他说他下个星期才回来", "He said he won't be back until next week."),
+                 ("麻烦你帮我跟老板讲一声", "Could you please let the boss know for me?"),
+                 ("我们有空再见面吧", "Let's meet again when we're both free.")]
+        conn = db.get_connection(); cur = conn.cursor()
+        for zh, en in sents:
+            cur.execute("""INSERT INTO vocab (chinese, pinyin, english, date_added, from_lessons)
+                           VALUES (%s, 'x', %s, '2026-01-01', TRUE) ON CONFLICT DO NOTHING""", (zh, en))
+        conn.commit(); conn.close()
+        try:
+            mine = db.vocab_ids_for([sents[0][0]])[sents[0][0]]
+            db.save_word_track(uid, mine, "recognition", {"interval": 2, "reps": 1,
+                                                          "next_review_date": "2099-01-01"})
+            target = {"chinese": "她叫我告诉你有空联系她", "pinyin": "x",
+                      "english": "She told me to tell you to contact her when you're free."}
+            pool = db.word_pool(uid)
+            band = wcon.lookalike_band(target, pool)
+            assert band, "a pool of words has nothing the size of a sentence"
+            rows = db.words_with_meanings_like(uid, band["chars"], band["zh"], target["chinese"])
+            assert rows and rows[0]["chinese"] == sents[0][0], "the learner's own entry comes first"
+            assert {z for z, _ in sents} <= {r["chinese"] for r in rows}
+            assert all(band["zh"][0] <= len(r["chinese"]) <= band["zh"][1] for r in rows)
+            opts = wcon.meaning_options(target, pool + rows)
+            assert all(len(o["chinese"]) >= 6 for o in opts), [o["text"] for o in opts]
+        finally:
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("DELETE FROM vocab WHERE chinese = ANY(%s)", ([z for z, _ in sents],))
+            conn.commit(); conn.close()
+
+    @test("Listen & speak: the next cards are prepared in the background while this one is answered")
+    def t_sentences_prefetch():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        uid = _fresh_learner()
+        asked = []
+
+        def bank_get(word):
+            asked.append(word["chinese"] if isinstance(word, dict) else word)
+            return _fake_exercise(word)
+        real = (db.bank_get, audio_engine.create_audio_file)
+        db.bank_get = bank_get
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        old_env = os.environ.pop("NO_BACKGROUND", None)
+        try:
+            at = AppTest.from_file("views/9_Sentences.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.run()
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            assert not at.exception, at.exception
+            cards = at.session_state["sn_cards"]
+            futures = at.session_state["sn_futures"]
+            assert sorted(futures) == [1, 2], sorted(futures)          # this card taken, two more in flight
+            for n in (1, 2):
+                ex, _audio = futures[n].result(timeout=30)
+                assert cards[n]["word"]["chinese"] in ex["chinese"]
+            assert asked[:3] == [c["word"]["chinese"] for c in cards[:3]]
+            assert at.session_state["sn_ex"]["chinese"] == f"我说{cards[0]['word']['chinese']}。"
+            db.flush_background()
+        finally:
+            db.flush_background()
+            db.bank_get, audio_engine.create_audio_file = real
+            if old_env is not None:
+                os.environ["NO_BACKGROUND"] = old_env
+
     def _rows(uid):
         conn = db.get_connection(); cur = conn.cursor()
         cur.execute("SELECT vocab_id, next_review_date FROM word_skill WHERE user_id = %s "
@@ -1908,6 +2177,14 @@ def db_tests():
     t_reading_plan()
     t_sentences_page()
     t_sentences_options()
+    t_sentences_prefetch()
+    t_long_entry_options()
+    t_db_round_trips()
+    t_content_written_once()
+    t_db_stale_connection()
+    t_init_once()
+    t_ahead_words()
+    t_db_parallel_background()
     t_plan_pages()
     t_plan_adopts()
     t_words_resume()
@@ -2430,6 +2707,153 @@ def t_gr_mcq():
                 {**ok, "options": ["is going to", "has already"]},
                 {**ok, "answer": 4}, {**ok, "answer": True}, {**ok, "options": None}):
         assert gdr.mcq_problem(bad), bad
+
+
+@test("meaning options: wrong answers are the size of the right one - a sentence is set against sentences")
+def t_wc_option_shape():
+    import random as _r
+    words = [{"chinese": c, "pinyin": p, "english": e} for c, p, e in [
+        ("你", "nǐ", "you"), ("吃", "chī", "to eat"), ("明天", "míng tiān", "tomorrow"),
+        ("有空", "yǒu kòng", "to be free"), ("联系", "lián xì", "to contact"), ("书", "shū", "book"),
+        ("量词", "liàng cí", "measure word for long thin things like roads, fish and loaves")]]
+    sentences = [{"chinese": c, "pinyin": "", "english": e} for c, e in [
+        ("我明天有空可以跟你去巴刹", "I'm free tomorrow and can go to the market with you."),
+        ("他说他下个星期才回来", "He said he won't be back until next week."),
+        ("麻烦你帮我跟老板讲一声", "could you please let the boss know for me"),
+        ("我们有空再见面吧", "Let's meet again when we're both free.")]]
+    target = {"chinese": "她叫我告诉你有空联系她", "pinyin": "tā jiào wǒ gào su nǐ yǒu kòng lián xì tā",
+              "english": "She told me to tell you to contact her when you're free."}
+    # a pool of words alone has nothing its size: the page is told what to fetch
+    band = wcon.lookalike_band(target, words)
+    assert band and band["zh"][0] <= 8 <= band["zh"][1] and band["chars"][0] < 40 < band["chars"][1], band
+    assert wcon.lookalike_band(target, words + sentences) is None
+    assert wcon.lookalike_band(words[1], words) is None, "an ordinary word needs nothing extra"
+    for seed in range(20):
+        opts = wcon.meaning_options(target, words + sentences, rng=_r.Random(seed))
+        wrong = [o for o in opts if o["kind"] != "correct"]
+        assert len(opts) == 4
+        assert all(len(o["chinese"]) >= 6 for o in wrong), [o["chinese"] for o in wrong]   # sentences, not 你
+        assert not any(o["text"].endswith(".") for o in opts), "no full stop on one option only"
+        assert all(o["text"][0].isupper() for o in opts), [o["text"] for o in opts]
+        right = next(o["text"] for o in opts if o["kind"] == "correct")
+        assert all(abs(len(o["text"].split()) - len(right.split())) <= 5 for o in wrong)   # 40% of 12
+    # and a word still gets words: never a sentence as a wrong answer for 吃
+    for seed in range(20):
+        opts = wcon.meaning_options(words[1], words + sentences, rng=_r.Random(seed))
+        assert all(len(o["text"].split()) <= 3 for o in opts), [o["text"] for o in opts]
+    # the right answer is not the longest more often than chance would have it
+    pool = [{"chinese": f"词{i}", "pinyin": "", "english": e} for i, e in enumerate(
+        ["to go", "to come back", "big", "very small", "a little bit", "yesterday", "next week", "to eat",
+         "to look at", "friend", "old friend", "to be busy", "why", "how much", "to like", "shop",
+         "wet market", "to walk slowly", "cheap", "quite expensive"])]
+    rng, longest = _r.Random(7), 0
+    for w in pool * 10:
+        opts = wcon.meaning_options(w, pool, rng=rng)
+        right = next(o["text"] for o in opts if o["kind"] == "correct")
+        longest += all(len(o["text"]) < len(right) for o in opts if o["kind"] != "correct")
+    assert longest <= 0.35 * len(pool) * 10, longest
+    # listening: a distractor far from the answer's length is dropped (and so replaced)
+    assert ap.usable_distractors(["Yes.", "The wet market is very cold today",
+                                  "He told me that he had already eaten at the wet market near his house"],
+                                 "The wet market is very hot today") == ["The wet market is very cold today"]
+    assert gdr.mcq_problem({"options": ["no", "it has already happened and is finished", "yes", "maybe"],
+                            "answer": 1})
+    assert gdr.mcq_problem({"options": ["already done", "it is finished", "not yet", "never did"],
+                            "answer": 1}) is None
+
+
+@test("audio: one voice per text per day, so a clip is made once and reused; warm-up runs ahead")
+def t_audio_reuse():
+    import threading
+    import time as _t
+    import audio_engine as ae
+    made, real = [], ae._generate_audio_async
+
+    async def fake(text, voice, path):
+        made.append((text, voice))
+        _t.sleep(0.2)
+        with open(path, "wb") as f:
+            f.write(b"x" * 2048)
+    ae._generate_audio_async = fake
+    old_env = os.environ.pop("NO_BACKGROUND", None)
+    try:
+        text = f"测试句子{int(_t.time() * 1e6)}"
+        assert ae._voice_for(text) == ae._voice_for(text)
+        assert len({ae._voice_for(f"句子{i}") for i in range(40)}) > 1, "voices still vary between texts"
+        first = ae.create_audio_file(text)
+        assert first and ae.create_audio_file(text) == first and len(made) == 1, made
+        # warmed in the background; asking for it meanwhile waits for that clip, not a second one
+        other = f"另一个句子{int(_t.time() * 1e6)}"
+        ae.warm([other, other, ""])
+        got = ae.create_audio_file(other)
+        assert got and len([m for m in made if m[0] == other]) == 1, made
+        os.environ["NO_BACKGROUND"] = "1"
+        ae.warm([f"不做{int(_t.time() * 1e6)}"])
+        _t.sleep(0.1)
+        assert len(made) == 2, "nothing is made in the background during tests"
+        for path in (first, got):
+            os.remove(path)
+    finally:
+        ae._generate_audio_async = real
+        if old_env is not None:
+            os.environ["NO_BACKGROUND"] = old_env
+        else:
+            os.environ.pop("NO_BACKGROUND", None)
+
+
+@test("ahead: a grammar set is written once however often it is asked for, and can be waited on")
+def t_ahead():
+    import time as _t
+    import ahead
+    calls, real = [], ahead.write_grammar_set
+
+    def slow(user_id, sid):
+        calls.append(sid)
+        _t.sleep(0.3)
+        return True
+    ahead.write_grammar_set = slow
+    old_env = os.environ.pop("NO_BACKGROUND", None)
+    try:
+        ahead._READY.clear()
+        ahead.grammar(991, ["a_struct"])
+        ahead.grammar(991, ["a_struct"])                 # the same job, not a second one
+        assert ahead.running(("grammar", 991, "a_struct"))
+        assert ahead.wait_grammar(991, "a_struct") is True
+        assert calls == ["a_struct"], calls
+        assert ahead.wait_grammar(991, "a_struct") is False, "nothing in flight any more"
+        ahead.grammar(991, ["a_struct"])                 # ready today: not written again
+        _t.sleep(0.05)
+        assert calls == ["a_struct"] and not ahead.running(("grammar", 991, "a_struct"))
+        day = [{"done": True, "steps": [{"key": "grammar", "done": False, "params": {"ids": ["x"]}}]},
+               {"done": False, "steps": [{"key": "words", "done": False, "params": {}},
+                                         {"key": "grammar", "done": False,
+                                          "params": {"ids": ["b_struct", "c_struct", "d_struct"]}}]}]
+        ahead.for_day(991, day)
+        ahead.wait_grammar(991, "c_struct"); ahead.wait_grammar(991, "b_struct")
+        assert calls == ["a_struct", "b_struct", "c_struct"], calls    # two ahead, finished sessions left alone
+        # the next new words' content too, when the day has a Words step with new words
+        wrote, real_words = [], ahead.write_new_words
+        ahead.write_new_words = lambda user_id, count: wrote.append(count)
+        try:
+            ahead.for_day(991, [{"done": False, "steps": [
+                {"key": "words", "done": False, "params": {"new": 9, "reviews": 20}},
+                {"key": "words", "done": False, "params": {"recap": True}}]}])
+            job = ahead.running(("words", 991))
+            if job:
+                job.result(timeout=10)
+            assert wrote == [6], wrote                   # capped, and a recap step asks for none
+        finally:
+            ahead.write_new_words = real_words
+        os.environ["NO_BACKGROUND"] = "1"
+        ahead.grammar(991, ["e_struct"])
+        assert calls[-1] == "c_struct", "nothing is written in the background during tests"
+    finally:
+        ahead.write_grammar_set = real
+        ahead._READY.clear()
+        if old_env is not None:
+            os.environ["NO_BACKGROUND"] = old_env
+        else:
+            os.environ.pop("NO_BACKGROUND", None)
 
 
 @test("word content: target present, known words only, 儿 and false structure tags rejected")
@@ -3011,7 +3435,7 @@ if __name__ == "__main__":
     print("Vocabulary engine:")
     t_ve_schedule(); t_ve_production_gate(); t_ve_modes(); t_ve_allowance(); t_ve_session()
     print("Word content:")
-    t_wc_check(); t_wc_options(); t_wc_meanings(); t_wc_options_full(); t_wc_validate(); t_wc_generate()
+    t_wc_check(); t_wc_options(); t_wc_meanings(); t_wc_options_full(); t_wc_option_shape(); t_audio_reuse(); t_ahead(); t_wc_validate(); t_wc_generate()
     print("Word diagnosis:")
     t_integration(); t_wd_trouble(); t_wd_diagnose(); t_wd_remedies(); t_wd_written()
     print("Sound & Pairing:")

@@ -218,74 +218,104 @@ def last_finished(day):
 # ======================================================================
 # Reading the queues (database)
 # ======================================================================
-def gather_state(user_id):
+def gather_state(user_id, also=()):
     """Counts from every queue, for build_day. A queue that can't be read is
-    left out of today's sessions rather than breaking the page."""
+    left out of today's sessions rather than breaking the page. The reads
+    don't depend on each other, so they go out at the same time: the page
+    waits for the slowest, not for all of them one after another.
+
+    `also` is more zero-argument reads to send in the same batch (the Today
+    page's streak and nudges); with it the result is (state, their results),
+    None standing for one that failed."""
     import db_manager as db
     import vocab_engine as ve
     today = clock.today()
-    state = {"done": set(), "finished": {}, "skipped": set()}
-    try:
-        prog = db.day_progress(user_id)
-        state.update(done=prog["done"], finished=prog["finished"], skipped=prog["skipped"])
-    except Exception as e:
-        logging.warning(f"[PLAN] progress unavailable: {e}")
+    failed = object()
 
-    try:
+    def safely(name, fn):
+        def run():
+            try:
+                return fn()
+            except Exception as e:
+                logging.warning(f"[PLAN] {name} unavailable: {e}")
+                return failed
+        return run
+
+    def due_():
         db.sync_word_skills(user_id)
-        due = db.count_due(user_id)
-        room = ve.new_word_allowance(due, db.introduced_today(user_id), VOCAB_NEW_PER_SESSION,
-                                     VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT)
-        lessons, frequency = db.new_word_candidates(user_id, limit=max(room, 1))
-        state["words"] = {"due": due, "new_room": room,
-                          "new_available": len(lessons) + len(frequency)}
-    except Exception as e:
-        logging.warning(f"[PLAN] words unavailable: {e}")
+        return db.count_due(user_id)
 
-    try:
-        state["recap"] = {"count": db.recap_count(user_id)}
-    except Exception as e:
-        logging.warning(f"[PLAN] recap unavailable: {e}")
-
-    words = []
-    try:
-        import sound_drill as sd
-        words = db.introduced_words(user_id)
-        groups = sd.tone_groups(words)
-        prog = db.drill_progress_get(user_id, "tone")
-        keys = [g["key"] for g in groups]
-        state["tones"] = {
-            "due": sum(1 for k in keys if k in prog
-                       and (prog[k].get("next_review_date") or "") <= today.isoformat()),
-            "fresh": sum(1 for k in keys if k not in prog),
-            "new_room": max(0, SOUND_NEW_PER_DAY - db.drill_new_today(user_id, "tone"))}
-    except Exception as e:
-        logging.warning(f"[PLAN] tones unavailable: {e}")
-    state["sentences"] = {"words": len(words)}
-
-    try:
-        import grammar_curriculum as gc
-        import grammar_drills as gd
-        progress = db.grammar_progress(user_id)
-        queue = gd.todays_queue(gc.learning_order(), progress, today,
-                                db.grammar_new_today(user_id), GRAMMAR_NEW_PER_DAY)
-        state["grammar"] = {
-            "known": len(db.grammar_known_vocab(user_id)),
-            "due": [(s.id, s.name) for s in queue if s.id in progress],
-            "fresh": [(s.id, s.name) for s in queue if s.id not in progress]}
-    except Exception as e:
-        logging.warning(f"[PLAN] grammar unavailable: {e}")
-
-    try:
+    def handwriting_():
         started = db.handwriting_started(user_id)
         h = {"started": started, "due": 0, "new_room": 0, "new_available": 0}
         if started:
             h["due"], h["new_available"] = db.handwriting_due_and_new(user_id)
             h["new_room"] = db.handwriting_new_allowance(user_id, h["due"])
-            state["reading"] = {"characters": len(db.known_characters(user_id))}
-        state["handwriting"] = h
-    except Exception as e:
-        logging.warning(f"[PLAN] handwriting unavailable: {e}")
+        return h
+
+    (prog, due, introduced, recap, words, tone_prog, tone_new, g_progress, g_new, g_known,
+     hand, characters, *extra) = db.in_parallel(
+        safely("progress", lambda: db.day_progress(user_id)),
+        safely("words", due_),
+        safely("words", lambda: db.introduced_today(user_id)),
+        safely("recap", lambda: db.recap_count(user_id)),
+        safely("tones", lambda: db.introduced_words(user_id)),
+        safely("tones", lambda: db.drill_progress_get(user_id, "tone")),
+        safely("tones", lambda: db.drill_new_today(user_id, "tone")),
+        safely("grammar", lambda: db.grammar_progress(user_id)),
+        safely("grammar", lambda: db.grammar_new_today(user_id)),
+        safely("grammar", lambda: db.grammar_known_vocab(user_id)),
+        safely("handwriting", handwriting_),
+        safely("reading", lambda: db.known_characters(user_id)),
+        *[safely("extra", fn) for fn in also])
+
+    def ok(*values):
+        return all(v is not failed for v in values)
+
+    state = {"done": set(), "finished": {}, "skipped": set()}
+    if ok(prog):
+        state.update(done=prog["done"], finished=prog["finished"], skipped=prog["skipped"])
+    if ok(due, introduced):
+        try:
+            room = ve.new_word_allowance(due, introduced, VOCAB_NEW_PER_SESSION,
+                                         VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT)
+            lessons, frequency = db.new_word_candidates(user_id, limit=max(room, 1))
+            state["words"] = {"due": due, "new_room": room,
+                              "new_available": len(lessons) + len(frequency)}
+        except Exception as e:
+            logging.warning(f"[PLAN] words unavailable: {e}")
+    if ok(recap):
+        state["recap"] = {"count": recap}
+    if ok(words, tone_prog, tone_new):
+        try:
+            import sound_drill as sd
+            keys = [g["key"] for g in sd.tone_groups(words)]
+            state["tones"] = {
+                "due": sum(1 for k in keys if k in tone_prog
+                           and (tone_prog[k].get("next_review_date") or "") <= today.isoformat()),
+                "fresh": sum(1 for k in keys if k not in tone_prog),
+                "new_room": max(0, SOUND_NEW_PER_DAY - tone_new)}
+        except Exception as e:
+            logging.warning(f"[PLAN] tones unavailable: {e}")
+    state["sentences"] = {"words": len(words) if ok(words) else 0}
+    if ok(g_progress, g_new, g_known):
+        try:
+            import grammar_curriculum as gc
+            import grammar_drills as gd
+            queue = gd.todays_queue(gc.learning_order(), g_progress, today, g_new,
+                                    GRAMMAR_NEW_PER_DAY)
+            state["grammar"] = {
+                "known": len(g_known),
+                "due": [(s.id, s.name) for s in queue if s.id in g_progress],
+                "fresh": [(s.id, s.name) for s in queue if s.id not in g_progress]}
+        except Exception as e:
+            logging.warning(f"[PLAN] grammar unavailable: {e}")
+    if ok(hand):
+        state["handwriting"] = hand
+        if hand["started"] and ok(characters):
+            state["reading"] = {"characters": len(characters)}
+    if also:
+        return state, [None if x is failed else x for x in extra]
     return state
 
 
@@ -310,7 +340,8 @@ def _save_plan():
     uid = _uid()
     if uid and _S().get("tp"):
         try:
-            db.saved_session_put(uid, "plan", json.dumps(_S()["tp"], ensure_ascii=False))
+            db.background(db.saved_session_put, uid, "plan",
+                          json.dumps(_S()["tp"], ensure_ascii=False))     # no waiting
         except Exception as e:
             logging.warning(f"[PLAN] not saved: {e}")
 
@@ -336,6 +367,7 @@ def plan():
         uid = _uid()
         if uid:
             import db_manager as db
+            db.flush_background()
             row = db.saved_session_get(uid, "plan", same_day=True)
             if row and isinstance(row["state"], dict):
                 S["tp"] = row["state"]

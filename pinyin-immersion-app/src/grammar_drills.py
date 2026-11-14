@@ -180,7 +180,9 @@ PRINCIPLES
   your friend…", "Say you've never…"), not word-for-word English to translate.
 - Every sentence that is meant to use the target structure must use it.
 - In multiple choice, exactly one option is correct. Options are meanings or
-  functions in English. Set "read": true only when the item can't be told apart
+  functions in English, all written the same way and about the same length:
+  the right one must never stand out by being longer or more detailed, and
+  its position in the list must vary from item to item. Set "read": true only when the item can't be told apart
   by ear (e.g. 的/得/地, which sound identical) - the text is then shown first.
 {("PREVIOUS ATTEMPT WAS REJECTED. Fix every one of these problems:\n" + feedback) if feedback else ""}
 
@@ -232,6 +234,12 @@ def mcq_problem(item):
     ans = item.get("answer")
     if not isinstance(ans, int) or isinstance(ans, bool) or not (0 <= ans < len(opts)):
         return "answer index out of range"
+    sizes = [len(t.split()) for t in texts]
+    rest = [n for i, n in enumerate(sizes) if i != ans]
+    if sizes[ans] >= 4 and sizes[ans] >= 2 * max(rest):
+        return "the right option is much longer than the others - make them all about the same length"
+    if min(rest) >= 4 and min(rest) >= 2 * sizes[ans]:
+        return "the right option is much shorter than the others - make them all about the same length"
     return None
 
 

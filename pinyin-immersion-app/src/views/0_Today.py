@@ -8,6 +8,7 @@ it opens, and can still be started early or skipped.
 
 import streamlit as st
 
+import ahead
 import clock
 import db_manager as db
 import today_plan as tp
@@ -24,40 +25,38 @@ with st.sidebar:
 
 st.title("今天 Today")
 
-# A nudge from the other person shows the moment you open the app.
-try:
-    pending = db.unseen_nudges(USER_ID)
-    if pending:
-        for n in pending:
-            st.info(f"💬 **{n['display_name']}**: {n['message']}")
-        if st.button("Got it 👍", key="ack_nudges"):
-            db.mark_nudges_seen(USER_ID)
-            st.rerun()
-except Exception:
-    pass
-
-try:
-    streak = db.activity_streak(USER_ID)
-    week = db.study_minutes(USER_ID, 7)
-    bits = []
-    if streak:
-        bits.append(f"🔥 {streak}-day streak")
-    if week["sessions"]:
-        bits.append(f"{week['sessions']} of 21 sessions this week")
-    if week["total"]:
-        bits.append(f"{week['total']} min")
-    if bits:
-        st.caption(" · ".join(bits))
-except Exception:
-    pass
-
+# Everything the page shows is read at the same time (the database is far
+# from the app, so each read in a row would be its own wait).
 with st.spinner("Working out today's sessions…"):
-    state = tp.gather_state(USER_ID)
+    state, (pending, streak, week) = tp.gather_state(USER_ID, also=[
+        lambda: db.unseen_nudges(USER_ID),
+        lambda: db.activity_streak(USER_ID),
+        lambda: db.study_minutes(USER_ID, 7)])
+
+# A nudge from the other person shows the moment you open the app.
+if pending:
+    for n in pending:
+        st.info(f"💬 **{n['display_name']}**: {n['message']}")
+    if st.button("Got it 👍", key="ack_nudges"):
+        db.mark_nudges_seen(USER_ID)
+        st.rerun()
+
+bits = []
+if streak:
+    bits.append(f"🔥 {streak}-day streak")
+if week and week["sessions"]:
+    bits.append(f"{week['sessions']} of 21 sessions this week")
+if week and week["total"]:
+    bits.append(f"{week['total']} min")
+if bits:
+    st.caption(" · ".join(bits))
+
 # steps finished or skipped earlier in this visit count as done too
 cur = tp.plan()
 if cur:
     state["done"] = set(state["done"]) | {f"{cur['slot']}:{k}" for k in cur["done"] + cur["skipped"]}
 day = tp.build_day(state)
+ahead.for_day(USER_ID, day)        # write later steps' grammar drills now, in the background
 nxt = tp.next_session(day)
 now = clock.now()
 

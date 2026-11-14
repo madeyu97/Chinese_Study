@@ -19,6 +19,7 @@ from datetime import date
 
 import streamlit as st
 
+import ahead
 import clock
 import db_manager as db
 import grammar_curriculum as gc
@@ -26,7 +27,7 @@ import grammar_drills as gd
 import session_store as store
 import today_plan as tp
 import word_content as wc
-from audio_engine import create_audio_file
+from audio_engine import create_audio_file, warm
 from auth import require_login, sidebar_user_badge
 from speech_engine import transcribe_audio
 from ai_prompter import _force_simplified
@@ -40,11 +41,11 @@ USER = require_login()
 USER_ID = USER["id"]
 S = st.session_state
 
-known = db.grammar_known_vocab(USER_ID)
-progress = db.grammar_progress(USER_ID)
+known, progress, _new_today = db.in_parallel(          # one wait, not three
+    lambda: db.grammar_known_vocab(USER_ID), lambda: db.grammar_progress(USER_ID),
+    lambda: db.grammar_new_today(USER_ID))
 order = gc.learning_order()
-queue = gd.todays_queue(order, progress, clock.today(),
-                        db.grammar_new_today(USER_ID), GRAMMAR_NEW_PER_DAY)
+queue = gd.todays_queue(order, progress, clock.today(), _new_today, GRAMMAR_NEW_PER_DAY)
 
 
 SAVED = ("gr_sid", "gr_set", "gr_stages", "gr_stage", "gr_item", "gr_results", "gr_ans",
@@ -115,10 +116,15 @@ def start(structure_id):
 
 
 def load_set(structure):
+    if ahead.running(("grammar", USER_ID, structure.id)):
+        # already being written in the background: wait for that copy
+        with st.spinner("Finishing the drills for this structure…"):
+            ahead.wait_grammar(USER_ID, structure.id)
     picked = None if S.get("gr_fresh") else \
         db.grammar_pick_set(USER_ID, structure.id, len(known))
     if picked and gd.stored_set_ok(picked["payload"], structure):
-        db.grammar_mark_served(picked["id"])
+        db.background(db.grammar_mark_served, picked["id"])
+        warm(gd.sentences_in(picked["payload"]))
         return picked["payload"]
     contrasts = [gc.get(c) for c in structure.contrast if gc.get(c)]
     with st.spinner("Writing drills from your vocabulary and checking them…"):
@@ -129,6 +135,8 @@ def load_set(structure):
         # sets the reviewer couldn't check are shown once, never stored
         set_id = db.grammar_save_set(USER_ID, structure.id, len(known), payload)
         db.grammar_mark_served(set_id)
+    if payload:
+        warm(gd.sentences_in(payload))
     return payload
 
 
@@ -201,6 +209,9 @@ if "gr_sid" not in S:
 structure = gc.get(S.gr_sid)
 if "gr_set" not in S:
     payload = load_set(structure)
+    # while this one is drilled, the next one's drills are written
+    gp_ids = (S.get("gr_plan") or {}).get("ids") or [s_.id for s_ in queue]
+    ahead.grammar(USER_ID, [i for i in gp_ids if i != structure.id][:1])
     if not payload:
         st.error("Couldn't build a drill for this structure that passed the checks. "
                  "Try again, or pick another structure.")
@@ -253,10 +264,7 @@ if S.gr_stage >= len(S.gr_stages):
                                           prev.get("ease_factor") or 2.5,
                                           grade, core=structure.core)
         db.grammar_save_progress(USER_ID, structure.id, nxt, interval, ease, score)
-        try:
-            db.log_activity(USER_ID, "grammar", structure.id, grade)
-        except Exception:
-            pass
+        db.background(db.log_activity, USER_ID, "grammar", structure.id, grade)
         S.gr_saved = (score, nxt)
         if S.get("gr_plan"):
             S.gr_plan["done"] = S.gr_plan.get("done", 0) + 1

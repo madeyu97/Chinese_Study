@@ -234,6 +234,64 @@ def _toned(pinyin):
     return tuple((b, t or 5) for b, t in _syllables(pinyin))
 
 
+OPTION_LIMIT = 110      # a sentence-long meaning is shown whole, not cut to a word's width
+
+
+def _zh_len(chinese):
+    return len(_CJK.findall(chinese or "")) or len((chinese or "").split())
+
+
+def _length_gap(right, other, right_zh="", other_zh=""):
+    """How unlike in size two options are: up to 1 they look alike; beyond
+    that, size alone starts to give the answer away. Two sizes count: the
+    meanings' word counts (within about 40% of the right answer's, at least
+    one word either way) and - so a sentence is set against sentences, not
+    against a long dictionary definition of a single word - the length of
+    the Chinese (within about half, at least one character either way)."""
+    a, b = len(right.split()), len(other.split())
+    gap = abs(a - b) / max(1, round(0.4 * a))
+    if right_zh and other_zh:
+        za, zb = _zh_len(right_zh), _zh_len(other_zh)
+        gap = max(gap, abs(za - zb) / max(1, round(0.5 * za)))
+    return gap
+
+
+def _same_style(text, right):
+    """Written the way the right answer is, so style isn't a clue either: no
+    full stop on one option only, and a sentence-long answer's distractors
+    start with a capital like it does."""
+    text = re.sub(r"(?<!\.)\.$", "", text.strip())
+    if len(right.split()) >= 4 and right[:1].isupper() and text[:1].islower():
+        text = text[:1].upper() + text[1:]
+    return text
+
+
+def option_meaning(english):
+    return re.sub(r"(?<!\.)\.$", "", short_meaning(english, OPTION_LIMIT))
+
+
+def lookalike_band(word, pool, n=3):
+    """None if the pool already has n wrong options the size of this word
+    and its meaning; otherwise what to ask the database for:
+    {"chars": (fewest, most) characters in the meaning,
+     "zh": (fewest, most) characters in the Chinese}.
+    Long entries (a whole sentence learned as one item) are the ones a pool
+    of words comes up short for."""
+    right = option_meaning(word["english"])
+    fits = 0
+    for w in pool:
+        if w["chinese"] != word["chinese"] and \
+                _length_gap(right, option_meaning(w["english"]), word["chinese"], w["chinese"]) <= 1 \
+                and not same_meaning(w["english"], word["english"]):
+            fits += 1
+            if fits >= n:
+                return None
+    zh = _zh_len(word["chinese"])
+    spread = max(1, round(0.5 * zh))
+    return {"chars": (max(1, int(len(right) * 0.6)), int(len(right) * 1.6) + 2),
+            "zh": (max(1, zh - spread), zh + spread)}
+
+
 def meaning_options(word, pool, confusables=(), n=3, rng=None, audio=False):
     """Options for 'what does it mean?': the right meaning plus up to n wrong
     ones, each labelled for diagnosis:
@@ -244,10 +302,16 @@ def meaning_options(word, pool, confusables=(), n=3, rng=None, audio=False):
       other      filler from the learner's words
     With audio=True exact homophones are left out: no ear can separate them.
 
+    Wrong options are about as long as the right one, and written the same
+    way: a twelve-word answer among two-word options would be picked out
+    without understanding a thing. Look-alikes by length are taken first
+    (diagnostic kinds before filler); only if the pool runs out are less
+    alike ones used, closest in length first.
+
     pool: word dicts (chinese, pinyin, english) - ideally words the learner
     has met, so the options are plausible."""
     rng = rng or random.Random()
-    right = short_meaning(word["english"])
+    right = option_meaning(word["english"])
     seen = {_meaning_key(right)}
     target_toneless, target_toned = _toneless(word["pinyin"]), _toned(word["pinyin"])
     picks = {"meaning": [], "tone": [], "homophone": [], "look": [], "other": []}
@@ -270,20 +334,42 @@ def meaning_options(word, pool, confusables=(), n=3, rng=None, audio=False):
         same = {w["chinese"] for w in picks["homophone"]}
         picks = {k: [w for w in v if w["chinese"] not in same] for k, v in picks.items()}
         picks["homophone"] = []
-    options = []
+    for kind in ("meaning", "tone", "homophone", "look"):
+        rng.shuffle(picks[kind])
+
+    candidates = []                  # (kind, word, meaning, length gap), in order of preference
     for kind in ("meaning", "tone", "homophone", "look", "other"):
-        group = picks[kind]
-        if kind != "other":
-            rng.shuffle(group)
-        for w in group:
-            m = short_meaning(w["english"])
+        for w in picks[kind]:
+            m = option_meaning(w["english"])
+            if m and _meaning_key(m) and not same_meaning(w["english"], word["english"]):
+                candidates.append((kind, w, _same_style(m, right),
+                                   _length_gap(right, m, word["chinese"], w["chinese"])))
+    options = []
+
+    def take(fits):
+        for kind, w, m, gap in fits:
             key = _meaning_key(m)
-            if (m and key and key not in seen and len(options) < n
-                    and not same_meaning(w["english"], word["english"])):
+            if len(options) < n and key not in seen:
                 seen.add(key)
                 options.append({"text": m, "kind": kind, "chinese": w["chinese"]})
-        if len(options) >= n:
-            break
+
+    alike = [c for c in candidates if c[3] <= 1]                      # about the same size
+    take([c for c in alike if c[0] != "other"])                       # the telling ones first
+    # Filler is then chosen so the right answer's place by length is random:
+    # it is the longest of the four, or the shortest, no more often than
+    # chance, so "pick the long one" (or "never pick it") is no strategy.
+    filler = [c for c in alike if c[0] == "other"]
+    shorter_wanted = rng.randint(0, n) - sum(len(o["text"]) < len(right) for o in options)
+    shorter = [c for c in filler if len(c[2]) < len(right)]
+    longer = [c for c in filler if len(c[2]) >= len(right)]
+    room = n - len(options)
+    k = max(0, min(shorter_wanted, room, len(shorter)))
+    k = max(k, room - len(longer))                                   # one side short: use the other
+    take(shorter[:max(0, k)])
+    take(longer)
+    take(shorter)
+    if len(options) < n:
+        take(sorted(candidates, key=lambda c: c[3]))                  # then the closest there is
     options.append({"text": right, "kind": "correct", "chinese": word["chinese"]})
     rng.shuffle(options)
     return options

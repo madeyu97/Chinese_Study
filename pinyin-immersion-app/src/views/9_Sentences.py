@@ -16,6 +16,7 @@ go, so leaving the app picks up at the same card.
 """
 
 import difflib
+from concurrent.futures import ThreadPoolExecutor
 import os
 import random
 import re
@@ -169,6 +170,11 @@ if S.sn_i >= len(S.sn_cards):
 # ----------------------------------------------------------------------
 card = S.sn_cards[S.sn_i]
 word, mode = card["word"], card["mode"]
+# how many cards past this one are prepared in the background (none under
+# NO_BACKGROUND, which the tests set unless they are testing exactly this)
+AHEAD = 0 if os.environ.get("NO_BACKGROUND") else 2
+if "sentences_exec" not in S:
+    S.sentences_exec = ThreadPoolExecutor(max_workers=2)
 
 
 def with_options(ex, banked):
@@ -183,8 +189,10 @@ def with_options(ex, banked):
             fixed + ap.generate_distractors_for(ex["chinese"], ex["english_correct"]),
             ex["english_correct"])
     if len(fixed) < 3:
-        fixed = ap.usable_distractors(
-            fixed + db.bank_other_translations(ex["chinese"]), ex["english_correct"])
+        # borrowed sentences: the ones closest in length, so length isn't a clue
+        borrowed = sorted(db.bank_other_translations(ex["chinese"], n=8),
+                          key=lambda t: abs(len(t) - len(ex["english_correct"])))
+        fixed = ap.usable_distractors(fixed + borrowed, ex["english_correct"], any_length=True)
     if len(fixed) < 2:
         return None
     if banked and fixed != list(ex.get("english_distractors") or []):
@@ -195,7 +203,7 @@ def with_options(ex, banked):
     return {**ex, "english_distractors": fixed}
 
 
-def load_exercise():
+def load_exercise(word, mode):
     """A vetted sentence from the bank when there is one; otherwise write
     one (and bank it if it's a listening sentence)."""
     ex = db.bank_get(word["chinese"])
@@ -212,11 +220,33 @@ def load_exercise():
     return ex
 
 
+def prepare(word, mode):
+    """A card's sentence and its audio. Runs in the background for the cards
+    coming up, so they are ready when the learner gets to them."""
+    ex = load_exercise(word, mode)
+    return ex, (create_audio_file(ex["chinese"]) if ex else None)
+
+
+def prefetch():
+    """Have this card and the next AHEAD cards in preparation."""
+    futures = S.setdefault("sn_futures", {})
+    for n in range(S.sn_i, min(S.sn_i + 1 + AHEAD, len(S.sn_cards))):
+        if n not in futures and not (n == S.sn_i and S.get("sn_ex_i") == n):
+            c = S.sn_cards[n]
+            futures[n] = S.sentences_exec.submit(prepare, c["word"], c["mode"])
+    for n in [n for n in futures if n < S.sn_i]:
+        del futures[n]
+
+
+prefetch()
 if S.get("sn_ex_i") != S.sn_i:
     with st.spinner("Preparing a sentence…"):
-        ex = load_exercise()
+        try:
+            ex, audio = S.sn_futures.pop(S.sn_i).result(timeout=120)
+        except Exception:
+            ex, audio = None, None
     S.sn_ex, S.sn_ex_i, S.sn_ans = ex, S.sn_i, None
-    S.sn_audio = create_audio_file(ex["chinese"]) if ex else None
+    S.sn_audio = audio
     if ex:
         opts = list(ex.get("english_distractors", [])) + [ex["english_correct"]]
         random.shuffle(opts)
@@ -262,13 +292,11 @@ def record(result, detail, kind):
         new["introduced_on"] = old.get("introduced_on")
         db.save_word_track(USER_ID, vid, skill, new, card_mode)
         scheduled = True
-    try:
-        db.log_word_attempt(USER_ID, vid, skill, card_mode, result,
-                            {**detail, "kind": "sentence", "scheduled": scheduled,
-                             "sentence": ex["chinese"]})
-    except Exception:
-        pass
-    db.log_activity(USER_ID, kind, ex["chinese"], ve.GRADES.get(result))
+    # logged in the background: the answer shows without waiting for the database
+    db.background(db.log_word_attempt, USER_ID, vid, skill, card_mode, result,
+                  {**detail, "kind": "sentence", "scheduled": scheduled,
+                   "sentence": ex["chinese"]})
+    db.background(db.log_activity, USER_ID, kind, ex["chinese"], ve.GRADES.get(result))
     S.sn_results.append({"chinese": word["chinese"], "mode": mode, "result": result})
     S.sn_ans = {"result": result, "scheduled": scheduled, **detail}
 

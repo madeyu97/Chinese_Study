@@ -6,11 +6,13 @@ import json
 import hashlib
 import unicodedata
 import threading
+import time
 import pandas as pd
 from datetime import datetime, date
 import logging
 import psycopg2
 import psycopg2.extras
+import psycopg2.extensions
 from psycopg2 import pool
 import streamlit as st
 
@@ -36,6 +38,9 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 _POOL = None
 _POOL_LOCK = threading.Lock()
+PARALLEL_READS = 4          # reads sent at once by in_parallel; connections kept open
+IDLE_CHECK_SECONDS = 60     # a pooled connection unused this long is checked before use
+_LAST_USED = {}             # id(connection) -> when it was last returned to the pool
 
 
 def _database_url():
@@ -52,20 +57,101 @@ def _database_url():
     return db_url
 
 
+_IDLE = psycopg2.extensions.TRANSACTION_STATUS_IDLE
+# statements that only read: these run on their own, with no transaction
+_READS = re.compile(r"^[\s(]*(select|show|explain|values|with)\b", re.I)
+_CHANGES = re.compile(r"\b(insert|update|delete|merge|truncate|create|alter|drop|"
+                      r"for\s+update|for\s+share|nextval|setval)\b", re.I)
+
+
+def _is_read(sql):
+    if isinstance(sql, (bytes, bytearray)):
+        sql = bytes(sql).decode("utf-8", "replace")
+    if not isinstance(sql, str):
+        return False
+    return bool(_READS.match(sql)) and not _CHANGES.search(sql)
+
+
+class _LazyCursor:
+    """A cursor that opens a transaction only when something is written.
+
+    PERFORMANCE: the database is in another region from the app, so every
+    round trip costs a noticeable fraction of a second. psycopg2's default
+    sends BEGIN before the first statement and the pool sent ROLLBACK when
+    the connection came back: three round trips for a one-line SELECT, and
+    a page run makes 5-20 such calls. The connection is now in autocommit
+    mode; a read is one round trip, and the first statement that writes is
+    sent as "BEGIN; <statement>" in the same trip, so writes are exactly as
+    atomic as before (commit() commits, an error or close() rolls back)."""
+
+    def __init__(self, cur, raw, one_shot=False):
+        self._cur = cur
+        self._raw = raw
+        self._one_shot = one_shot
+
+    def _prefixed(self, sql):
+        if self._one_shot or self._raw.info.transaction_status != _IDLE or _is_read(sql):
+            return sql
+        if isinstance(sql, (bytes, bytearray)):
+            return b"BEGIN; " + bytes(sql)
+        if isinstance(sql, str):
+            return "BEGIN; " + sql
+        self._cur.execute("BEGIN")            # composed SQL objects: begin on its own
+        return sql
+
+    def execute(self, sql, params=None):
+        sql = self._prefixed(sql)
+        return self._cur.execute(sql, params) if params is not None else self._cur.execute(sql)
+
+    def executemany(self, sql, seq):
+        if self._raw.info.transaction_status == _IDLE:
+            self._cur.execute("BEGIN")
+        return self._cur.executemany(sql, seq)
+
+    def __iter__(self):
+        return iter(self._cur)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._cur.close()
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+
 class _PooledConnection:
     """Looks like a psycopg2 connection, but close() returns it to the pool.
 
     PERFORMANCE: every data function in this module opens a connection and
     closes it, and Streamlit re-runs the whole script on every interaction -
     so a single click used to mean 3-11 fresh TLS handshakes to Supabase.
-    Pooling keeps them open and reuses them, which removes most of the
-    per-click lag without touching any calling code.
+    Pooling keeps them open and reuses them; _LazyCursor then keeps each
+    call to as few round trips as it can.
     """
 
-    def __init__(self, pool, conn):
+    def __init__(self, pool, conn, one_shot=False):
         self._pool = pool
         self._conn = conn
         self._returned = False
+        self._one_shot = one_shot
+        if not conn.autocommit:
+            conn.autocommit = True
+
+    def cursor(self, *args, **kwargs):
+        return _LazyCursor(self._conn.cursor(*args, **kwargs), self._conn, self._one_shot)
+
+    def _end(self, how):
+        if self._conn.info.transaction_status != _IDLE:
+            with self._conn.cursor() as c:
+                c.execute(how)
+
+    def commit(self):
+        self._end("COMMIT")
+
+    def rollback(self):
+        self._end("ROLLBACK")
 
     def close(self):
         if self._returned:
@@ -74,8 +160,9 @@ class _PooledConnection:
         try:
             if not self._conn.closed:
                 # Drop any transaction the caller left open, so the next
-                # borrower starts clean.
-                self._conn.rollback()
+                # borrower starts clean. (Nothing is sent if none is open.)
+                self.rollback()
+                _LAST_USED[id(self._conn)] = time.time()
                 self._pool.putconn(self._conn)
             else:
                 self._pool.putconn(self._conn, close=True)
@@ -89,13 +176,41 @@ class _PooledConnection:
         return getattr(self._conn, name)
 
 
+def _warm_pool(p):
+    """Open the connections parallel reads will want, before they want them."""
+    held = []
+    try:
+        for _ in range(PARALLEL_READS):
+            held.append(p.getconn())
+    except Exception as e:
+        logging.warning(f"[DB] pool warm-up stopped early: {e}")
+    for c in held:
+        try:
+            p.putconn(c)
+        except Exception:
+            pass
+
+
 def _get_pool():
     global _POOL
     if _POOL is None:
         with _POOL_LOCK:
             if _POOL is None:
+                # minconn is how many connections stay open between calls.
+                # With 1, every read sent in parallel (in_parallel) had to
+                # open - and afterwards close - its own connection, which
+                # costs far more than the read it was for.
+                # Opened one at a time, though, each costs about a second
+                # of handshakes - so the pool starts with one connection and
+                # the rest are opened in the background while the app loads.
                 _POOL = pool.ThreadedConnectionPool(
-                    minconn=1, maxconn=10, dsn=_database_url())
+                    minconn=1, maxconn=10, dsn=_database_url(),
+                    # keep quiet connections alive, and notice dead ones
+                    connect_timeout=15, keepalives=1, keepalives_idle=30,
+                    keepalives_interval=10, keepalives_count=3)
+                _POOL.minconn = PARALLEL_READS          # how many putconn() keeps open
+                threading.Thread(target=_warm_pool, args=(_POOL,), daemon=True,
+                                 name="db-pool-warm").start()
     return _POOL
 
 
@@ -112,14 +227,19 @@ def reset_pool():
             _POOL = None
 
 
-def get_connection():
+def get_connection(one_shot=False):
     """Borrow a connection from the pool, reconnecting if it has gone stale.
+
+    one_shot=True is for a function that changes the database with a single
+    execute() (one statement, or several in one string): Postgres runs that
+    as one transaction by itself, so it is saved in one round trip instead
+    of two, and commit() has nothing left to send.
 
     A pool that is merely busy (every connection lent out - background
     content preparation plus two learners can do that) is waited on, never
     reset: resetting would close connections other threads are still using."""
     import time
-    busy_waits, resets = 0, 0
+    busy_waits, resets, stale = 0, 0, 0
     while True:
         try:
             p = _get_pool()
@@ -127,7 +247,25 @@ def get_connection():
             if raw.closed:
                 p.putconn(raw, close=True)
                 raise psycopg2.OperationalError("stale pooled connection")
-            return _PooledConnection(p, raw)
+            # A connection left idle (between the day's sessions, say) may
+            # have been dropped at the other end without this end knowing.
+            # One cheap check after a quiet spell beats an error on screen;
+            # a dead one is thrown away and the next is tried.
+            idle = time.time() - _LAST_USED.get(id(raw), time.time())
+            if idle > IDLE_CHECK_SECONDS:
+                try:
+                    with raw.cursor() as c:
+                        c.execute("SELECT 1")
+                    if not raw.autocommit:
+                        raw.rollback()
+                except Exception:
+                    _LAST_USED.pop(id(raw), None)
+                    p.putconn(raw, close=True)
+                    stale += 1
+                    if stale <= 12:
+                        continue
+                    raise
+            return _PooledConnection(p, raw, one_shot)
         except pool.PoolError:
             busy_waits += 1
             if busy_waits > 100:                     # ~10 s of genuine exhaustion
@@ -141,13 +279,128 @@ def get_connection():
             reset_pool()
 
 
+# ----------------------------------------------------------------------
+# Not waiting on the database
+# ----------------------------------------------------------------------
+_WRITER = None
+_WRITER_LOCK = threading.Lock()
+
+
+def _runtime_exists():
+    try:
+        from streamlit.runtime import exists
+        return exists()
+    except Exception:
+        return False
+
+
+def background(fn, *args, **kwargs):
+    """Do a write the screen doesn't depend on (a log line, the snapshot of
+    a session in progress) without making the learner wait for it. One
+    worker, so writes land in the order they were asked for. Outside the
+    running app (scripts), or with NO_BACKGROUND set (the tests, which read
+    back what was just written), it simply runs now."""
+    global _WRITER
+    if os.environ.get("NO_BACKGROUND") or not _runtime_exists():
+        return fn(*args, **kwargs)
+    with _WRITER_LOCK:
+        if _WRITER is None:
+            from concurrent.futures import ThreadPoolExecutor
+            _WRITER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="db-writer")
+
+    def run():
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            logging.warning(f"[DB] background {getattr(fn, '__name__', fn)} failed: {e}")
+    return _WRITER.submit(run)
+
+
+def flush_background(timeout=15):
+    """Wait until every background write asked for so far has landed -
+    before reading something they change."""
+    if _WRITER is None:
+        return
+    try:
+        _WRITER.submit(lambda: None).result(timeout=timeout)
+    except Exception as e:
+        logging.warning(f"[DB] background writes still pending: {e}")
+
+
+def in_parallel(*calls):
+    """Run independent reads at the same time and return their results in
+    order: five queries then cost one wait, not five. Each call is a
+    zero-argument function; an exception from one is raised here."""
+    if len(calls) <= 1:
+        return [c() for c in calls]
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+        ctx = get_script_run_ctx()
+    except Exception:
+        add_script_run_ctx = ctx = None
+
+    def run(fn):
+        if ctx is not None:
+            add_script_run_ctx(threading.current_thread(), ctx)
+        return fn()
+    with ThreadPoolExecutor(max_workers=min(len(calls), PARALLEL_READS)) as ex:
+        futures = [ex.submit(run, c) for c in calls]
+        return [f.result() for f in futures]
+
+
 # Two Streamlit deployments can share this database (one per person). If
 # both boot at once they would otherwise race on schema creation and the
 # one-time migration, so init_db runs under a Postgres advisory lock.
 _INIT_LOCK_KEY = 728451903
 
 
-def init_db():
+def _schema_stamp():
+    """A fingerprint of this file: it changes whenever the schema code might have."""
+    try:
+        with open(__file__, "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()
+    except Exception:
+        return None
+
+
+def init_db(force=False):
+    """Create or upgrade the schema.
+
+    PERFORMANCE: the schema is some seventy statements, each its own round
+    trip - about 15 seconds of start-up with the database in another region,
+    every time the app woke up, to change nothing. The database now records
+    which version of this file last set it up; when that is this version,
+    one read is all that happens. A new version of the file (any deploy that
+    touches it) runs the full set-up once."""
+    stamp = None if force else _schema_stamp()
+    if stamp:
+        conn = None
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM app_meta WHERE key = 'schema'")
+            row = cursor.fetchone()
+            if row and row[0] == stamp:
+                return
+        except Exception:
+            pass                       # first run: no app_meta table yet
+        finally:
+            if conn is not None:
+                conn.close()
+    _build_schema()
+    stamp = _schema_stamp()
+    if stamp:
+        conn = get_connection(one_shot=True)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO app_meta (key, value) VALUES ('schema', %s)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""", (stamp,))
+        conn.close()
+
+
+def _build_schema():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT pg_advisory_lock(%s)", (_INIT_LOCK_KEY,))
@@ -625,7 +878,7 @@ def list_users():
 
 
 def set_session_mode(user_id, mode):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET session_mode = %s WHERE id = %s",
                    (mode, user_id))
@@ -644,7 +897,7 @@ def get_handwriting_source(user_id):
 
 
 def set_handwriting_source(user_id, source):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET handwriting_source = %s WHERE id = %s",
                    (source, user_id))
@@ -663,7 +916,7 @@ def get_session_mode(user_id):
 
 
 def set_user_pin(user_id, pin):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET pin_hash = %s WHERE id = %s",
                    (_pin_hash(str(pin)), user_id))
@@ -1419,7 +1672,7 @@ def get_progress_stats(user_id):
 
 def delete_word_from_db(word_id):
     """Deletes SHARED vocabulary — affects everyone studying this deck."""
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM vocab WHERE id = %s", (word_id,))
     conn.commit()
@@ -1428,7 +1681,7 @@ def delete_word_from_db(word_id):
 
 def update_word_in_db(word_id, new_chinese, new_pinyin, new_english):
     """Edits SHARED vocabulary content."""
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute('UPDATE vocab SET chinese = %s, pinyin = %s, english = %s '
                    'WHERE id = %s',
@@ -1929,7 +2182,7 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
     new_grades = _push_recent(prev_grades, grade)
     new_mist = _push_recent(prev_mist, mistakes)
 
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO handwriting_progress
@@ -2044,7 +2297,7 @@ def bank_get(vocab_chinese):
 
 def bank_set_distractors(chinese_sentence, distractors):
     """Replace a banked sentence's wrong options (after topping them up)."""
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute(
         """UPDATE sentence_bank
@@ -2320,7 +2573,7 @@ def log_activity(user_id, kind, item=None, grade=None, mistakes=0):
     """Record one graded card. Never raises: a logging failure must not
     interrupt someone's study session."""
     try:
-        conn = get_connection()
+        conn = get_connection(one_shot=True)
         cursor = conn.cursor()
         cursor.execute("""INSERT INTO activity_log
                           (user_id, day, kind, item, grade, mistakes)
@@ -2403,7 +2656,7 @@ def log_study_session(user_id, activity, seconds, in_plan=False, items=0, slot=N
     slot: the day's session (morning / afternoon / evening) a plan step ran in."""
     try:
         seconds = max(0, min(int(seconds or 0), MAX_SESSION_SECONDS))
-        conn = get_connection()
+        conn = get_connection(one_shot=True)
         cursor = conn.cursor()
         cursor.execute("""INSERT INTO study_sessions
                           (user_id, day, activity, seconds, items, in_plan, slot, finished_at)
@@ -2513,7 +2766,7 @@ def recent_activity(limit=12):
 
 # ---------- nudges ----------
 def send_nudge(from_user, to_user, message):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""INSERT INTO nudges (from_user, to_user, message)
                       VALUES (%s, %s, %s)""",
@@ -2535,7 +2788,7 @@ def unseen_nudges(user_id):
 
 
 def mark_nudges_seen(user_id):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""UPDATE nudges SET seen_at = NOW()
                       WHERE to_user = %s AND seen_at IS NULL""", (user_id,))
@@ -2820,7 +3073,7 @@ def due_characters(user_id):
 
 
 def reading_bank_add(chinese, english, char_set, user_id):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""INSERT INTO reading_bank
                         (chinese, english, char_set, char_count, created_by)
@@ -2867,7 +3120,7 @@ def reading_bank_for(user_id, known, max_unknown=3, limit=20,
 
 
 def reading_mark_seen(user_id, sentence_id):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""INSERT INTO reading_progress
                         (user_id, sentence_id, seen_count, last_seen)
@@ -2955,7 +3208,7 @@ def grammar_progress(user_id):
 def grammar_save_progress(user_id, structure_id, next_review_date, interval,
                           ease, score):
     today = clock.today().isoformat()
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO grammar_progress (user_id, structure_id, next_review_date,
@@ -3041,7 +3294,7 @@ def grammar_save_set(user_id, structure_id, known_count, payload, keep=4):
 
 
 def grammar_mark_served(set_id):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""UPDATE grammar_drill_sets SET served_count = served_count + 1,
                       last_served = %s WHERE id = %s""",
@@ -3071,8 +3324,9 @@ def sync_word_skills(user_id):
     - words studied before this engine existed get a recognition track
       seeded from their existing progress (nothing is lost);
     - if the classic session has reviewed a word more recently, its
-      recognition track catches up."""
-    conn = get_connection()
+      recognition track catches up.
+    Both statements go in one string: one round trip, one transaction."""
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO word_skill (user_id, vocab_id, skill, interval, ease,
@@ -3083,9 +3337,7 @@ def sync_word_skills(user_id):
                %s
         FROM vocab_progress p
         WHERE p.user_id = %s AND p.review_count > 0
-        ON CONFLICT (user_id, vocab_id, skill) DO NOTHING
-    """, ("seeded", user_id))
-    cursor.execute("""
+        ON CONFLICT (user_id, vocab_id, skill) DO NOTHING;
         UPDATE word_skill s SET interval = COALESCE(p.interval, 0),
                ease = COALESCE(p.ease_factor, 2.5),
                next_review_date = p.next_review_date, reps = p.review_count
@@ -3093,7 +3345,7 @@ def sync_word_skills(user_id):
         WHERE s.user_id = %s AND s.skill = 'recognition'
           AND p.user_id = s.user_id AND p.vocab_id = s.vocab_id
           AND p.review_count > s.reps
-    """, (user_id,))
+    """, ("seeded", user_id, user_id))
     conn.commit()
     conn.close()
 
@@ -3204,12 +3456,11 @@ def introduced_today(user_id):
 
 def save_word_track(user_id, vocab_id, skill, track, mode=None):
     """Store a skill track. The recognition track is mirrored into
-    vocab_progress so everything else in the app keeps seeing progress."""
+    vocab_progress so everything else in the app keeps seeing progress.
+    Both rows go in one statement string: one round trip, one transaction."""
     track = dict(track)
     track["next_review_date"] = track.get("next_review_date") or clock.today().isoformat()
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
+    sql = """
         INSERT INTO word_skill (user_id, vocab_id, skill, interval, ease,
                next_review_date, reps, lapses, streak, last_mode, last_result,
                introduced_on)
@@ -3218,29 +3469,32 @@ def save_word_track(user_id, vocab_id, skill, track, mode=None):
             interval = EXCLUDED.interval, ease = EXCLUDED.ease,
             next_review_date = EXCLUDED.next_review_date, reps = EXCLUDED.reps,
             lapses = EXCLUDED.lapses, streak = EXCLUDED.streak,
-            last_mode = EXCLUDED.last_mode, last_result = EXCLUDED.last_result
-    """, (user_id, vocab_id, skill, track.get("interval", 0), track.get("ease", 2.5),
-          track.get("next_review_date"), track.get("reps", 0), track.get("lapses", 0),
-          track.get("streak", 0), mode or track.get("last_mode"), track.get("last_result"),
-          track.get("introduced_on") or clock.today().isoformat()))
+            last_mode = EXCLUDED.last_mode, last_result = EXCLUDED.last_result"""
+    params = [user_id, vocab_id, skill, track.get("interval", 0), track.get("ease", 2.5),
+              track.get("next_review_date"), track.get("reps", 0), track.get("lapses", 0),
+              track.get("streak", 0), mode or track.get("last_mode"), track.get("last_result"),
+              track.get("introduced_on") or clock.today().isoformat()]
     if skill == "recognition":
-        cursor.execute("""
+        sql += """;
             INSERT INTO vocab_progress (user_id, vocab_id, next_review_date, interval,
                    ease_factor, review_count)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id, vocab_id) DO UPDATE SET
                 next_review_date = EXCLUDED.next_review_date,
                 interval = EXCLUDED.interval, ease_factor = EXCLUDED.ease_factor,
-                review_count = EXCLUDED.review_count
-        """, (user_id, vocab_id, track.get("next_review_date"), track.get("interval", 0),
-              track.get("ease", 2.5), track.get("reps", 0)))
+                review_count = EXCLUDED.review_count"""
+        params += [user_id, vocab_id, track.get("next_review_date"), track.get("interval", 0),
+                   track.get("ease", 2.5), track.get("reps", 0)]
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute(sql, params)
     conn.commit()
     conn.close()
     clear_caches()
 
 
 def log_word_attempt(user_id, vocab_id, skill, mode, result, detail=None):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""INSERT INTO word_attempts (user_id, vocab_id, skill, mode,
                           result, detail) VALUES (%s, %s, %s, %s, %s, %s)""",
@@ -3285,23 +3539,29 @@ def plan_word_session(user_id, rng=None, review_cap=None, new_cap=None, unlocks=
     import vocab_engine as ve
     review_cap = VOCAB_SESSION_REVIEWS if review_cap is None else min(review_cap, VOCAB_SESSION_REVIEWS)
     sync_word_skills(user_id)
-    due = count_due(user_id)
-    rec = due_words(user_id, "recognition", review_cap)
-    prod = due_words(user_id, "production", review_cap)
-    room = ve.new_word_allowance(due, introduced_today(user_id), VOCAB_NEW_PER_SESSION,
+    # independent reads go out together (see in_parallel)
+    due, rec, prod, introduced, (lessons, frequency), error_rates, all_open = in_parallel(
+        lambda: count_due(user_id),
+        lambda: due_words(user_id, "recognition", review_cap),
+        lambda: due_words(user_id, "production", review_cap),
+        lambda: introduced_today(user_id),
+        lambda: new_word_candidates(user_id),
+        lambda: mode_error_rates(user_id),
+        lambda: open_diagnoses(user_id))
+    room = ve.new_word_allowance(due, introduced, VOCAB_NEW_PER_SESSION,
                                  VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT)
     if new_cap is not None:
         room = max(0, min(room, new_cap))
-    lessons, frequency = new_word_candidates(user_id)
     new = ve.pick_new_words(lessons, frequency, room, VOCAB_LESSON_SHARE)
     # production starts only when the load is light enough for new material
     unlock_cap = VOCAB_UNLOCKS_PER_SESSION if unlocks and due <= VOCAB_BACKLOG_SOFT else 0
     unlock = production_unlockable(user_id, unlock_cap)
     ids = {w["id"] for w in rec + prod + unlock}
     items = ve.build_session(rec, prod, unlock, new, review_cap, unlock_cap,
-                             mode_error_rates(user_id), word_tracks(user_id, ids), rng)
+                             error_rates, word_tracks(user_id, ids), rng)
     import word_diagnosis as wd
-    open_d = open_diagnoses(user_id, [it["word"]["id"] for it in items])
+    wanted = {it["word"]["id"] for it in items}
+    open_d = {vid: d for vid, d in all_open.items() if vid in wanted}
     for it in items:
         dg = open_d.get(it["word"]["id"])
         if dg and it["kind"] == "review":
@@ -3349,7 +3609,7 @@ def word_content_save(user_id, vocab_id, known_count, payload, keep=2):
 
 
 def word_content_used(content_id):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("UPDATE word_content SET uses = uses + 1 WHERE id = %s", (content_id,))
     conn.commit()
@@ -3376,6 +3636,37 @@ def word_pool(user_id, minimum=300):
     return pool
 
 
+def words_with_meanings_like(user_id, chars, zh, exclude_chinese, limit=40):
+    """Entries about the size of one the word pool has no match for - a
+    phrase or whole sentence learned as one entry: the (first) meaning is
+    chars=(fewest, most) characters long and the Chinese zh=(fewest, most).
+    The learner's own entries come first, then lesson entries, then the rest."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""
+        SELECT v.chinese, v.pinyin, v.english FROM vocab v
+        LEFT JOIN word_skill s ON s.vocab_id = v.id AND s.user_id = %s
+                               AND s.skill = 'recognition'
+        WHERE char_length(split_part(split_part(v.english, ' / ', 1), ';', 1)) BETWEEN %s AND %s
+          AND char_length(v.chinese) BETWEEN %s AND %s
+          AND v.chinese <> %s
+        ORDER BY (s.vocab_id IS NULL), (NOT COALESCE(v.from_lessons, FALSE)), RANDOM()
+        LIMIT %s""", (user_id, chars[0], chars[1], zh[0], zh[1], exclude_chinese, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+_CONTENT_LOCKS, _CONTENT_LOCKS_GUARD = {}, threading.Lock()
+
+
+def _content_lock(user_id, vocab_id):
+    with _CONTENT_LOCKS_GUARD:
+        if len(_CONTENT_LOCKS) > 5000:
+            _CONTENT_LOCKS.clear()
+        return _CONTENT_LOCKS.setdefault((user_id, vocab_id), threading.Lock())
+
+
 def word_content_for(user_id, word, allow_generate=True, known=None):
     """The content to learn `word` through, for this learner.
 
@@ -3399,13 +3690,20 @@ def word_content_for(user_id, word, allow_generate=True, known=None):
     if cached and not (stale and allow_generate):
         return cached["payload"], cached["id"]
     if allow_generate:
-        structures = wc.practising_structures(grammar_progress(user_id), clock.today())
-        recent = [w for w in recent_words(user_id) if w != word["chinese"]]
-        payload = wc.generate(word, known, structures, recent)
-        if payload:
-            if payload.get("reviewed", True):
-                return payload, word_content_save(user_id, word["id"], len(known), payload)
-            return payload, None
+        # One writer per word: the Today page's look-ahead and the Words
+        # page's own prefetch can both reach for the same new word; the
+        # second waits for the first and uses what it wrote.
+        with _content_lock(user_id, word["id"]):
+            fresh = word_content_get(user_id, word["id"])
+            if fresh and (not cached or fresh["id"] != cached["id"]):
+                return fresh["payload"], fresh["id"]
+            structures = wc.practising_structures(grammar_progress(user_id), clock.today())
+            recent = [w for w in recent_words(user_id) if w != word["chinese"]]
+            payload = wc.generate(word, known, structures, recent)
+            if payload:
+                if payload.get("reviewed", True):
+                    return payload, word_content_save(user_id, word["id"], len(known), payload)
+                return payload, None
     if cached:
         return cached["payload"], cached["id"]
     return wc.fallback_content(word, bank_get(word["chinese"])), None
@@ -3430,7 +3728,7 @@ def open_diagnoses(user_id, vocab_ids=None):
 
 
 def save_diagnosis(user_id, vocab_id, skill, diag):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""INSERT INTO word_diagnosis (user_id, vocab_id, skill, cause, evidence,
                           confused_with) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
@@ -3456,7 +3754,7 @@ def update_diagnosis(diag_id, remedy=None, note=None):
 
 
 def resolve_diagnosis(diag_id):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("UPDATE word_diagnosis SET resolved_at = NOW() WHERE id = %s", (diag_id,))
     conn.commit()
@@ -3559,7 +3857,7 @@ def drill_progress_get(user_id, drill):
 
 
 def drill_progress_save(user_id, drill, key, track):
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO drill_progress (user_id, drill, key, interval, ease, next_review_date,
@@ -3603,7 +3901,7 @@ def game_scores(user_id):
 def save_game_score(user_id, game, score):
     """Record a finished game; returns True if it was a new best."""
     before = game_scores(user_id).get(game, {}).get("best", 0)
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""INSERT INTO game_scores (user_id, game, best, plays, last_played)
                       VALUES (%s, %s, %s, 1, %s)
@@ -3618,7 +3916,7 @@ def save_game_score(user_id, game, score):
 
 def saved_session_put(user_id, name, state_json, elapsed=0):
     """Save a session in progress (state_json is a JSON string)."""
-    conn = get_connection()
+    conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("""INSERT INTO saved_sessions (user_id, name, day, state, elapsed, updated_at)
                       VALUES (%s, %s, %s, %s::jsonb, %s, NOW())
@@ -3652,7 +3950,7 @@ def saved_session_get(user_id, name, same_day=True, max_age_hours=24):
 
 def saved_session_del(user_id, name):
     try:
-        conn = get_connection()
+        conn = get_connection(one_shot=True)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM saved_sessions WHERE user_id = %s AND name = %s",
                        (user_id, name))

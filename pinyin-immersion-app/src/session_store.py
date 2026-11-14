@@ -8,7 +8,7 @@ Each page that runs a session saves its state here whenever it changes, and
 picks it up again when you come back: same card, same answer on screen, same
 score, same place in today's plan.
 
-    keep(user_id, "words", KEYS, clock="wd_t0")    save if anything changed
+    keep(user_id, "words", KEYS, clock="wd_t0")    save if anything changed (in the background)
     resume(user_id, "words", KEYS, clock="wd_t0")  restore -> True if found
     drop(user_id, "words")                         the session is over
     notice()                                       "Picked up where you left off."
@@ -74,7 +74,7 @@ def keep(user_id, name, keys, clock=None):
         if S.get(_marker(name)) == digest:
             return
         elapsed = time.time() - S[clock] if clock and S.get(clock) else 0
-        db.saved_session_put(user_id, name, blob, elapsed)
+        db.background(db.saved_session_put, user_id, name, blob, elapsed)   # no waiting
         S[_marker(name)] = digest
     except Exception as e:
         logging.warning(f"[STORE] {name} not saved: {e}")
@@ -84,10 +84,14 @@ def resume(user_id, name, keys, clock=None, same_day=True, max_age_hours=24):
     """Put a saved session back into this browser session. Returns True if
     there was one."""
     import db_manager as db
+    S = st.session_state
+    if S.get(_marker(name)) in ("none", "dropped"):
+        return False               # already looked in this visit: nothing to pick up
+    db.flush_background()          # a save or a drop still on its way counts
     row = db.saved_session_get(user_id, name, same_day=same_day, max_age_hours=max_age_hours)
     if not row:
+        S[_marker(name)] = "none"
         return False
-    S = st.session_state
     try:
         state = _dec(row["state"])
         for k in keys:
@@ -109,7 +113,7 @@ def drop(user_id, name):
     S = st.session_state
     if S.get(_marker(name)) == "dropped":
         return
-    db.saved_session_del(user_id, name)
+    db.background(db.saved_session_del, user_id, name)
     S[_marker(name)] = "dropped"
 
 

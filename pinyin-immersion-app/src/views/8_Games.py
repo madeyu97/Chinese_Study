@@ -26,7 +26,7 @@ import game_items as gi
 import games as gm
 import game_components as gc
 import session_store as store
-from audio_engine import create_audio_file
+from audio_engine import create_audio_file, warm
 from auth import require_login, sidebar_user_badge
 from game_images import credit_lines, data_uri, img_tag
 
@@ -108,13 +108,11 @@ def card(item, kind):
 
 def record(item, correct, game):
     vid = S.gm_vocab.get(item["chinese"])
+    # logged in the background: the game never waits for the database
     if vid:
-        db.log_word_attempt(USER_ID, vid, "recognition", f"game_{game}",
-                            "correct" if correct else "wrong", {"kind": "game"})
-    try:
-        db.log_activity(USER_ID, "games", item["chinese"], 2 if correct else 0)
-    except Exception:
-        pass
+        db.background(db.log_word_attempt, USER_ID, vid, "recognition", f"game_{game}",
+                      "correct" if correct else "wrong", {"kind": "game"})
+    db.background(db.log_activity, USER_ID, "games", item["chinese"], 2 if correct else 0)
 
 
 def start(game):
@@ -131,6 +129,7 @@ def start(game):
         S.gm_rounds, S.gm_i, S.gm_score, S.gm_streak, S.gm_best_streak = \
             gm.quiz_rounds(pool), 0, 0, 0, 0
         S.gm_missed = []
+        warm([r["target"]["chinese"] for r in S.gm_rounds])   # clips made ahead, in the background
     persist()
 
 

@@ -29,7 +29,7 @@ import sound_drill as sd
 import today_plan as tp
 import vocab_engine as ve
 import word_content as wc
-from audio_engine import create_audio_file
+from audio_engine import create_audio_file, warm
 from auth import require_login, sidebar_user_badge
 from config import SOUND_NEW_PER_DAY
 
@@ -80,6 +80,7 @@ def begin(drill_, mat_, new_cap, in_plan=False):
                              new_cap=new_cap)
     reset()
     S.sp_items, S.sp_i, S.sp_results, S.sp_drill = items, 0, [], drill_
+    warm([it.get("play") for it in items])       # clips made ahead, in the background
     S.sp_plan, S.sp_t0, S.sp_date = in_plan, time.time(), clock.today().isoformat()
     S.sound_last = drill_
 
@@ -219,12 +220,15 @@ if ans is None:
         picked = item["options"][labels.index(choice)]["value"]
         right = picked == item["answer"]
         w = item["word"]
-        db.log_word_attempt(USER_ID, w["id"], "production" if item["type"] == "tone_pick"
-                            else "recognition", item["type"], "correct" if right else "wrong",
-                            {"kind": "drill", "chose": picked, "answer": item["answer"],
-                             "key": item["key"]})
+        # logged in the background: the answer shows without waiting for the database
+        db.background(db.log_word_attempt, USER_ID, w["id"],
+                      "production" if item["type"] == "tone_pick" else "recognition",
+                      item["type"], "correct" if right else "wrong",
+                      {"kind": "drill", "chose": picked, "answer": item["answer"],
+                       "key": item["key"]})
         S.sp_results.append({"key": item["key"], "right": right, "type": item["type"]})
-        db.log_activity(USER_ID, LOG_KIND[S.sp_drill], w["chinese"], 2 if right else 0)
+        db.background(db.log_activity, USER_ID, LOG_KIND[S.sp_drill], w["chinese"],
+                      2 if right else 0)
         S.sp_ans = {"right": right, "picked": picked}
         st.rerun()
     st.stop()

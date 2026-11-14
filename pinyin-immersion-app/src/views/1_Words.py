@@ -41,7 +41,7 @@ import vocab_engine as ve
 import word_content as wc
 import word_diagnosis as wd
 from ai_prompter import _force_simplified
-from audio_engine import create_audio_file
+from audio_engine import create_audio_file, warm
 from auth import require_login, sidebar_user_badge
 from config import VOCAB_BACKLOG_SOFT, VOCAB_NEW_PER_DAY, VOCAB_NEW_PER_SESSION
 from speech_engine import transcribe_audio
@@ -74,7 +74,8 @@ if "words_exec" not in S:
 if "wd_items" not in S and store.resume(USER_ID, "words", SAVED, clock="wd_t0"):
     S.wd_content, S.wd_futures = {}, {}
     if S.wd_items:
-        S.wd_pool, S.wd_known = db.word_pool(USER_ID), db.grammar_known_vocab(USER_ID)
+        S.wd_pool, S.wd_known = db.in_parallel(lambda: db.word_pool(USER_ID),
+                                               lambda: db.grammar_known_vocab(USER_ID))
 if "wd_items" in S and S.wd_i < len(S.wd_items):
     store.keep(USER_ID, "words", SAVED, clock="wd_t0")
 
@@ -109,10 +110,12 @@ def begin(in_plan=False, review_cap=None, new_cap=None, unlocks=True, recap=None
     S.wd_date, S.wd_enriched, S.wd_remedies = str(clock.today()), 0, 0
     if plan["items"]:
         ids = {it["word"]["id"] for it in plan["items"]}
-        S.wd_mature = {vid for (vid, skill), t in db.word_tracks(USER_ID, ids).items()
+        tracks, S.wd_pool, S.wd_known = db.in_parallel(
+            lambda: db.word_tracks(USER_ID, ids),
+            lambda: db.word_pool(USER_ID),
+            lambda: db.grammar_known_vocab(USER_ID))
+        S.wd_mature = {vid for (vid, skill), t in tracks.items()
                        if skill == ve.RECOGNITION and (t.get("interval") or 0) >= MATURE_DAYS}
-        S.wd_pool = db.word_pool(USER_ID)
-        S.wd_known = db.grammar_known_vocab(USER_ID)
 
 
 if "wd_items" not in S and tp.active("words"):
@@ -122,25 +125,31 @@ if "wd_items" not in S and tp.active("words"):
     st.rerun()
 
 if "wd_items" not in S:
-    db.sync_word_skills(USER_ID)
-    due = db.count_due(USER_ID)
-    room = ve.new_word_allowance(due, db.introduced_today(USER_ID), VOCAB_NEW_PER_SESSION,
-                                 VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT)
-    st.markdown(f"**{due}** reviews due · up to **{room}** new words this session")
-    if due > VOCAB_BACKLOG_SOFT:
-        st.caption("Reviews have built up, so new words are held back until you catch up.")
-    st.caption("Words come with their chunks and sentences. Recognising and producing are "
-               "tracked separately; you start producing a word once you recognise it reliably.")
-    net = db.network_stats(USER_ID)
-    st.caption(f"Your network: recognising **{net['recognition']}** words · producing "
-               f"**{net['production']}** · **{net['grammar']}** grammar structures practised")
-    working = db.open_diagnoses(USER_ID)
-    if working:
-        st.markdown("**Words you're working on:** " + " · ".join(
-            f"{d['chinese']} ({wd.CAUSE_TITLES[d['cause']].lower()})" for d in working.values()))
+    figures = st.container()
+    # handled before the figures are read, so pressing Start doesn't wait for them
     if st.button("▶️ Start", type="primary", width="stretch"):
         begin()
         st.rerun()
+
+    def _due():
+        db.sync_word_skills(USER_ID)
+        return db.count_due(USER_ID)
+    due, introduced, net, working = db.in_parallel(
+        _due, lambda: db.introduced_today(USER_ID), lambda: db.network_stats(USER_ID),
+        lambda: db.open_diagnoses(USER_ID))
+    room = ve.new_word_allowance(due, introduced, VOCAB_NEW_PER_SESSION,
+                                 VOCAB_NEW_PER_DAY, VOCAB_BACKLOG_SOFT)
+    with figures:
+        st.markdown(f"**{due}** reviews due · up to **{room}** new words this session")
+        if due > VOCAB_BACKLOG_SOFT:
+            st.caption("Reviews have built up, so new words are held back until you catch up.")
+        st.caption("Words come with their chunks and sentences. Recognising and producing are "
+                   "tracked separately; you start producing a word once you recognise it reliably.")
+        st.caption(f"Your network: recognising **{net['recognition']}** words · producing "
+                   f"**{net['production']}** · **{net['grammar']}** grammar structures practised")
+        if working:
+            st.markdown("**Words you're working on:** " + " · ".join(
+                f"{d['chinese']} ({wd.CAUSE_TITLES[d['cause']].lower()})" for d in working.values()))
     st.stop()
 
 
@@ -152,7 +161,14 @@ def needs_writing(item):
 
 
 def _job(word, allow, known):
-    return db.word_content_for(USER_ID, word, allow_generate=allow, known=known)
+    """One word's content - and, while still in the background, the audio
+    its card will play, so neither is waited for when the card comes up."""
+    out = db.word_content_for(USER_ID, word, allow_generate=allow, known=known)
+    try:
+        warm([word["chinese"]] + [s_["hanzi"] for s_ in (out[0].get("sentences") or [])[:3]])
+    except Exception:
+        pass
+    return out
 
 
 def prefetch(start, ahead=4):
@@ -234,7 +250,9 @@ def network(word, payload):
         conf = [c["hanzi"] for c in payload.get("confusables") or []]
         if conf:
             st.caption("Don't confuse with: " + " · ".join(conf))
-        tr = db.word_tracks(USER_ID, [word["id"]])
+        if S.get("wd_net", (None,))[0] != S.wd_i:        # read once per card, not per rerun
+            S.wd_net = (S.wd_i, db.word_tracks(USER_ID, [word["id"]]))
+        tr = S.wd_net[1]
         rec, prod = tr.get((word["id"], ve.RECOGNITION)), tr.get((word["id"], ve.PRODUCTION))
         st.caption(f"Recognition: next {rec['next_review_date'] if rec else '—'} · Production: "
                    + (f"next {prod['next_review_date']}" if prod else
@@ -265,7 +283,15 @@ def setup(item, payload):
         confusables = list(payload.get("confusables") or [])
         if item.get("confused_with"):
             confusables.insert(0, {"hanzi": item["confused_with"]})
-        su["options"] = wc.meaning_options(word, S.wd_pool, confusables,
+        pool = S.wd_pool
+        band = wc.lookalike_band(word, pool)
+        if band:        # a long entry (a phrase, a sentence): fetch meanings as long as its own
+            try:
+                pool = pool + db.words_with_meanings_like(USER_ID, band["chars"], band["zh"],
+                                                          word["chinese"])
+            except Exception:
+                pass
+        su["options"] = wc.meaning_options(word, pool, confusables,
                                            audio=(mode == "audio_to_meaning"))
     S.wd_setup, S.wd_setup_i = su, S.wd_i
     return su
@@ -274,10 +300,14 @@ def setup(item, payload):
 def finish(item, mode, result, detail, cid):
     word, skill, vid = item["word"], item["skill"], item["word"]["id"]
     detail = {**detail, "kind": item["kind"]}
-    db.log_word_attempt(USER_ID, vid, skill, mode, result, detail)
+    # the attempt is logged and the word's state read in one wait; writes
+    # nothing on screen depends on go to the background
+    _logged, tracks, open_now = db.in_parallel(
+        lambda: db.log_word_attempt(USER_ID, vid, skill, mode, result, detail),
+        lambda: db.word_tracks(USER_ID, [vid]),
+        lambda: db.open_diagnoses(USER_ID, [vid]))
     if cid:
-        db.word_content_used(cid)
-    tracks = db.word_tracks(USER_ID, [vid])
+        db.background(db.word_content_used, cid)
     if item["kind"] == "new" and (vid, ve.RECOGNITION) not in tracks:
         # introduced today: a track at the start line; the first check is a
         # learning step and doesn't move it
@@ -289,7 +319,7 @@ def finish(item, mode, result, detail, cid):
         new = ve.update_track(old, result)
         new["introduced_on"] = old.get("introduced_on")
         db.save_word_track(USER_ID, vid, skill, new, mode)
-        open_d = db.open_diagnoses(USER_ID, [vid]).get(vid)
+        open_d = open_now.get(vid)
         if open_d and result == "correct" and open_d["skill"] == skill and new["streak"] >= 2:
             db.resolve_diagnosis(open_d["id"])          # it holds again
         elif result in ("wrong", "close") and not open_d and S.wd_remedies < MAX_REMEDIES:
@@ -308,10 +338,7 @@ def finish(item, mode, result, detail, cid):
             kind = "read" if mode == "zh_to_meaning" else "listen"
         else:
             kind = "speak" if detail.get("spoken") else "type"
-        try:
-            db.log_activity(USER_ID, kind, word["chinese"], ve.GRADES[result])
-        except Exception:
-            pass
+        db.background(db.log_activity, USER_ID, kind, word["chinese"], ve.GRADES[result])
     if result == "wrong" and (vid, skill) not in S.wd_retried:
         # one more go later this session, in a gentler mode; practice only
         S.wd_retried.add((vid, skill))

@@ -42,11 +42,108 @@ _TONES = {"\u0304": 1, "\u0301": 2, "\u030c": 3, "\u0300": 4}
 # ======================================================================
 # Meanings
 # ======================================================================
-def short_meaning(english, limit=40):
-    """The first sense of a gloss, trimmed: 'to tell / to inform' -> 'to tell'."""
-    text = re.sub(r"\s*\(Malaysia:[^)]*\)", "", english or "").strip()
-    first = re.split(r"\s*/\s*|;\s*", text)[0].strip()
-    return first[:limit].rstrip(" ,") or text[:limit]
+_CJK = re.compile("[\u3400-\u9fff\uf900-\ufaff]")
+_TONE_MARKED = re.compile(r"[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]")
+# asides that say where or how a word is used, not what it means
+_ASIDE = re.compile(r"^\s*(=|malaysia|malaysian|mainland|cantonese|hokkien|lit\b|literally|"
+                    r"fig\b|e\.g\.|also\b|often\b|more common|loanword|informal\b|formal\b|"
+                    r"colloquial|coll\b|used\b|usually\b|usu\b|idiom|derog|archaic|old\b|"
+                    r"original meaning|abbr)", re.I)
+
+
+def _senses(english):
+    """A gloss split into its senses at the top level only, so a slash or
+    semicolon inside brackets ('(often used for children / pets)') stays
+    where it is."""
+    out, depth, cur = [], 0, []
+    for ch in english or "":
+        if ch in "([（":
+            depth += 1
+        elif ch in ")]）":
+            depth = max(0, depth - 1)
+        if depth == 0 and ch in "/;":
+            out.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    out.append("".join(cur))
+    return [s.strip(" ,") for s in out if s.strip(" ,")]
+
+
+def _balanced(text):
+    """Drop an unclosed bracket and what follows it."""
+    while text.count("(") > text.count(")"):
+        cut = text.rfind("(")
+        text = text[:cut].rstrip(" ,:") if text[:cut].strip() else text[cut + 1:]
+    return text.replace(")", "") if text.count(")") > text.count("(") else text
+
+
+def _clean_sense(sense):
+    """One sense, without usage examples (which would show the Chinese and
+    give the answer away) or asides about who says it."""
+    m = _CJK.search(sense)
+    if m and m.start() > 0:                       # '... : 半只鸡 = half a chicken'
+        sense = sense[:m.start()]
+    sense = re.sub(r"\s*[:=]\s*$", "", sense.strip())
+
+    def aside(p):
+        inner = p.group(1)
+        if _CJK.search(inner) or _TONE_MARKED.search(inner) or _ASIDE.match(inner):
+            return ""
+        return p.group(0)
+    stripped = re.sub(r"\s*\(([^()]*)\)", aside, sense).strip(" ,:")
+    sense = stripped if re.search(r"[A-Za-z]{2}", stripped) else sense
+    sense = _balanced(sense.strip(" ,:"))
+    whole = re.fullmatch(r"\(([^()]*)\)", sense)   # '(question particle)' -> 'question particle'
+    return (whole.group(1) if whole else sense).strip(" ,:")
+
+
+def short_meaning(english, limit=60):
+    """The first sense of a gloss, made to fit an answer option:
+    'to tell / to inform' -> 'to tell'. Never cut mid-word or mid-bracket,
+    never empty, and never carrying the Chinese of an example."""
+    text = (english or "").strip()
+    senses = [_clean_sense(s) for s in _senses(text)]
+    if senses and re.match(r"lit\.", senses[0]):   # idioms: 'lit. ... ; fig. helpless'
+        fig = next((s for s in senses if re.match(r"fig\.", s)), None)
+        senses = [fig] if fig else senses
+    senses = [re.sub(r"^(fig|lit)\.\s*", "", s) for s in senses]
+    first = next((s for s in senses if re.search(r"[A-Za-z]", s)), "") \
+        or next((s for s in senses if s), "") or _clean_sense(text) or text
+    if len(first) <= limit:
+        return first
+    # too long: first lose a trailing bracket, then whole clauses, then words
+    short = re.sub(r"\s*\([^()]*\)\s*$", "", first).strip(" ,")
+    if 3 <= len(short) <= limit:
+        return short
+    cut = max(first.rfind(", ", 0, limit), first.rfind(" or ", 0, limit))
+    if cut >= 15:
+        return _balanced(first[:cut].strip(" ,"))
+    cut = first.rfind(" ", 0, limit - 1)
+    return _balanced(first[:cut if cut > 0 else limit - 1].rstrip(" ,:(")) + "…"
+
+
+def md_safe(text):
+    """An answer option as plain text. Streamlit reads option labels as
+    Markdown, so 'it depends on ~', a price with two '$' (read as maths) or
+    '<...>' (read as a tag, so the option shows up blank) would come out
+    mangled or empty. Use as format_func=wc.md_safe."""
+    return re.sub(r"([\\`*_{}\[\]<>()#+!|~$])", r"\\\1", str(text))
+
+
+def _meaning_key(sense):
+    """'To tell (someone)' and 'tell' count as the same meaning."""
+    s = re.sub(r"\([^()]*\)", " ", sense.lower())
+    s = re.sub(r"^\s*(to|a|an|the)\s+", "", s)
+    return re.sub(r"[^a-z0-9']+", " ", s).strip()
+
+
+def same_meaning(english_a, english_b):
+    """True when two glosses share a sense - offering both as options would
+    give a question two right answers."""
+    a = {_meaning_key(_clean_sense(s)) for s in _senses(english_a)} - {""}
+    b = {_meaning_key(_clean_sense(s)) for s in _senses(english_b)} - {""}
+    return bool(a & b)
 
 
 # ======================================================================
@@ -151,7 +248,7 @@ def meaning_options(word, pool, confusables=(), n=3, rng=None, audio=False):
     has met, so the options are plausible."""
     rng = rng or random.Random()
     right = short_meaning(word["english"])
-    seen = {right.lower()}
+    seen = {_meaning_key(right)}
     target_toneless, target_toned = _toneless(word["pinyin"]), _toned(word["pinyin"])
     picks = {"meaning": [], "tone": [], "homophone": [], "look": [], "other": []}
     by_zh = {w["chinese"]: w for w in pool}
@@ -168,7 +265,7 @@ def meaning_options(word, pool, confusables=(), n=3, rng=None, audio=False):
             picks["look"].append(w)
     others = [w for w in pool if w["chinese"] != word["chinese"]]
     rng.shuffle(others)
-    picks["other"] = others[:40]
+    picks["other"] = others          # the whole pool, so there are always enough
     if audio:   # nothing that sounds identical, from any group
         same = {w["chinese"] for w in picks["homophone"]}
         picks = {k: [w for w in v if w["chinese"] not in same] for k, v in picks.items()}
@@ -180,8 +277,10 @@ def meaning_options(word, pool, confusables=(), n=3, rng=None, audio=False):
             rng.shuffle(group)
         for w in group:
             m = short_meaning(w["english"])
-            if m and m.lower() not in seen and len(options) < n:
-                seen.add(m.lower())
+            key = _meaning_key(m)
+            if (m and key and key not in seen and len(options) < n
+                    and not same_meaning(w["english"], word["english"])):
+                seen.add(key)
                 options.append({"text": m, "kind": kind, "chinese": w["chinese"]})
         if len(options) >= n:
             break

@@ -386,6 +386,29 @@ DISTRACTOR_PLAYBOOKS = {
 }
 
 
+_PLACEHOLDER = re.compile(r"^\s*(<[^>]*>|d\d|distractor\s*\d*|option\s*\d*|\.{2,}|…+|-+|n/?a|none|null)\s*$",
+                          re.I)
+
+
+def usable_distractors(distractors, english_correct, n=3):
+    """The wrong options worth showing: real sentences, not a template's
+    placeholder ('<d1>', '…') a model copied back, not blank, not the answer
+    again and not each other. At most n."""
+    def key(t):
+        return re.sub(r"[^a-z0-9']+", " ", str(t).lower()).strip()
+    seen, out = {key(english_correct)}, []
+    for d in distractors or []:
+        if not isinstance(d, (str, int, float)):
+            continue
+        d = str(d).strip()
+        k = key(d)
+        if not k or _PLACEHOLDER.match(d) or k in seen or len(k) < 2:
+            continue
+        seen.add(k)
+        out.append(d)
+    return out[:n]
+
+
 def generate_distractors_for(chinese, english_correct, n=3):
     """Distractors for an existing (human-written) sentence — used by the
     Tatoeba seeder. The sentence itself is never touched, so grammar risk
@@ -414,7 +437,8 @@ sentence, but tempting for one who misheard a single element (content word,
 time, negation, number, or particle). Same register and similar length as
 the correct translation.
 
-Return ONLY raw JSON: {{"english_distractors": ["<d1>", "<d2>", "<d3>"]}}
+Return ONLY raw JSON with three full English sentences:
+{{"english_distractors": ["<wrong translation 1>", "<wrong translation 2>", "<wrong translation 3>"]}}
 """.strip()
     try:
         resp = client.chat.completions.create(
@@ -433,13 +457,7 @@ Return ONLY raw JSON: {{"english_distractors": ["<d1>", "<d2>", "<d3>"]}}
     if has_ta:
         correct = _normalize_ta_pronouns(correct)
         raw = [_normalize_ta_pronouns(d) for d in raw]
-    seen, out = set(), []
-    for d in raw:
-        key = d.strip().lower()
-        if key and key != correct.strip().lower() and key not in seen:
-            seen.add(key)
-            out.append(d)
-    return out[:n]
+    return usable_distractors(raw, correct, n)
 
 
 def generate_dictation_exercise(target_word_dict, mode='listen',
@@ -601,7 +619,7 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
         "hanzi": "<sentence>",
         "pinyin": "<matching pinyin>",
         "english_correct": "<accurate translation>",
-        "english_distractors": ["<d1>", "<d2>", "<d3>"],
+        "english_distractors": ["<wrong translation 1>", "<wrong translation 2>", "<wrong translation 3>"],
         "word_breakdown": [{{"hanzi": "字", "pinyin": "zì", "english": "meaning"}}],
         "grammar_point": {{"structure": "...", "explanation": "..."}},
         "particle_note": null OR {{"particle": "...", "explanation": "..."}}
@@ -749,23 +767,18 @@ def generate_dictation_exercise(target_word_dict, mode='listen',
             english_correct = _normalize_ta_pronouns(english_correct)
             english_distractors = [_normalize_ta_pronouns(d) for d in english_distractors]
 
-        # ── ALWAYS dedupe distractors and remove any that equal the answer.
-        # (Previously this only ran for pronoun sentences, so duplicate MCQ
-        # options could appear in ordinary exercises.)
-        seen = set()
-        unique_distractors = []
-        for d in english_distractors:
-            key = d.strip().lower()
-            if key and key != english_correct.strip().lower() and key not in seen:
-                seen.add(key)
-                unique_distractors.append(d)
-        english_distractors = unique_distractors
-
-        if len(english_distractors) < 3:
+        # ── ALWAYS dedupe distractors and remove any that equal the answer
+        # or are a copied template placeholder; then top up so a listening
+        # card always has four options.
+        english_distractors = usable_distractors(english_distractors, english_correct)
+        if mode == 'listen' and len(english_distractors) < 3:
             logging.warning(
                 f"[DISTRACTORS] Only {len(english_distractors)} usable distractors "
-                f"for: {final_chinese}"
+                f"for: {final_chinese} - asking for more"
             )
+            english_distractors = usable_distractors(
+                english_distractors + generate_distractors_for(final_chinese, english_correct),
+                english_correct)
 
         # Particle confabulation filter
         particle_note = raw_data.get("particle_note")

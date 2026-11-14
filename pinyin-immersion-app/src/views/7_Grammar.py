@@ -25,6 +25,7 @@ import grammar_curriculum as gc
 import grammar_drills as gd
 import session_store as store
 import today_plan as tp
+import word_content as wc
 from audio_engine import create_audio_file
 from auth import require_login, sidebar_user_badge
 from speech_engine import transcribe_audio
@@ -132,13 +133,15 @@ def load_set(structure):
 
 
 def stages_of(payload):
-    return [s for s in gd.STAGES
-            if (payload.get("contrast") or {}).get("items") or s != "contrast"]
+    return [s for s in gd.STAGES if items_of(payload, s)]
 
 
 def items_of(payload, stage):
-    return (payload.get("contrast") or {}).get("items", []) if stage == "contrast" \
+    items = (payload.get("contrast") or {}).get("items", []) if stage == "contrast" \
         else payload.get(stage, [])
+    if stage in ("identify", "contrast"):    # a stored set may predate the option checks
+        items = [it for it in items or [] if gd.mcq_problem(it) is None]
+    return items or []
 
 
 def record(result):
@@ -320,7 +323,7 @@ def multiple_choice():
         play(item["hanzi"])
         st.caption("Listen first — the text appears after you answer.")
     choice = st.radio(item.get("question") or "What does it mean?", item["options"],
-                      index=None, key=f"mc_{key}")
+                      index=None, key=f"mc_{key}", format_func=wc.md_safe)
     if ans is None:
         if st.button("Check", type="primary", disabled=choice is None):
             S.gr_ans = {"correct": item["options"].index(choice) == item["answer"]}

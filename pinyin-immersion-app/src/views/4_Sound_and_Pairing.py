@@ -28,6 +28,7 @@ import session_store as store
 import sound_drill as sd
 import today_plan as tp
 import vocab_engine as ve
+import word_content as wc
 from audio_engine import create_audio_file
 from auth import require_login, sidebar_user_badge
 from config import SOUND_NEW_PER_DAY
@@ -211,7 +212,8 @@ elif item.get("show_word"):
     big(word_html, "2.4rem")
 
 labels = [o["label"] for o in item["options"]]
-choice = st.radio(item["question"], labels, index=None, key=f"sp_mc_{S.sp_i}")
+choice = st.radio(item["question"], labels, index=None, key=f"sp_mc_{S.sp_i}",
+                  format_func=wc.md_safe)
 if ans is None:
     if st.button("Check", type="primary", disabled=choice is None):
         picked = item["options"][labels.index(choice)]["value"]

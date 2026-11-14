@@ -30,6 +30,7 @@ import db_manager as db
 import session_store as store
 import today_plan as tp
 import vocab_engine as ve
+import ai_prompter as ap
 import word_content as wc
 from ai_prompter import _force_simplified, generate_dictation_exercise
 from audio_engine import create_audio_file
@@ -170,16 +171,42 @@ card = S.sn_cards[S.sn_i]
 word, mode = card["word"], card["mode"]
 
 
+def with_options(ex, banked):
+    """Make sure a listening sentence has three real wrong options: drop
+    blanks and copied placeholders, write more if short, and as a last
+    resort borrow other banked sentences' translations. A banked sentence
+    keeps the topped-up set, so it's fixed once. None if even that fails."""
+    have = ap.usable_distractors(ex.get("english_distractors"), ex["english_correct"])
+    fixed = list(have)
+    if len(fixed) < 3:
+        fixed = ap.usable_distractors(
+            fixed + ap.generate_distractors_for(ex["chinese"], ex["english_correct"]),
+            ex["english_correct"])
+    if len(fixed) < 3:
+        fixed = ap.usable_distractors(
+            fixed + db.bank_other_translations(ex["chinese"]), ex["english_correct"])
+    if len(fixed) < 2:
+        return None
+    if banked and fixed != list(ex.get("english_distractors") or []):
+        try:
+            db.bank_set_distractors(ex["chinese"], fixed)
+        except Exception:
+            pass
+    return {**ex, "english_distractors": fixed}
+
+
 def load_exercise():
     """A vetted sentence from the bank when there is one; otherwise write
     one (and bank it if it's a listening sentence)."""
     ex = db.bank_get(word["chinese"])
-    if ex is not None and mode == "listen" and len(ex.get("english_distractors", [])) < 2:
-        ex = None
+    if ex is not None and mode == "listen":
+        ex = with_options(ex, banked=True)
     if ex is None:
         ex = generate_dictation_exercise(word, mode="listen" if mode == "listen" else "recall",
                                          blocked_sentences=db.get_blocklist(),
                                          flagged_examples=db.get_recent_flags())
+        if ex and mode == "listen":
+            ex = with_options(ex, banked=False)
         if ex and ex.get("generation_mode") == "listen":
             db.bank_add(word["chinese"], ex)
     return ex
@@ -295,7 +322,7 @@ if mode == "listen":
     if ans is None:
         typed = st.text_input("Type the pinyin you hear (optional)", key=f"sn_py_{S.sn_i}")
         choice = st.radio("Meaning", S.sn_opts, index=None, key=f"sn_mc_{S.sn_i}",
-                          label_visibility="collapsed")
+                          label_visibility="collapsed", format_func=wc.md_safe)
         if st.button("Check", type="primary", width="stretch", disabled=choice is None):
             result = "correct" if choice == ex["english_correct"] else "wrong"
             record(result, {"chose": choice, "pinyin_typed": typed.strip(),

@@ -464,7 +464,8 @@ def render_remedy():
             return
     else:
         if R["answered"] is None:
-            choice = st.radio(rnd["question"], rnd["options"], index=None, key=key)
+            choice = st.radio(rnd["question"], rnd["options"], index=None, key=key,
+                              format_func=wc.md_safe)
             if st.button("Check", type="primary", disabled=choice is None):
                 result = "correct" if choice == rnd["answer"] else "wrong"
                 db.log_word_attempt(USER_ID, word["id"], "recognition", f"remedy_{R['cause']}",
@@ -589,7 +590,7 @@ def recognition():
             play(sentence["hanzi"])
         question = "What does the word mean?"
     texts = [o["text"] for o in su["options"]]
-    choice = st.radio(question, texts, index=None, key=f"wd_mc_{S.wd_i}")
+    choice = st.radio(question, texts, index=None, key=f"wd_mc_{S.wd_i}", format_func=wc.md_safe)
     if ans is None:
         if st.button("Check", type="primary", disabled=choice is None):
             picked = su["options"][texts.index(choice)]

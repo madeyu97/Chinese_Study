@@ -1577,6 +1577,50 @@ def db_tests():
         assert cur.fetchall() == [("sentences", False)]
         conn.close()
 
+    @test("Listen & speak: a banked sentence with missing options gets four, and the bank is fixed")
+    def t_sentences_options():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        uid = _fresh_learner()
+        for n, en in enumerate(["The bus is late.", "My shop opens at nine.", "It is raining again."]):
+            db.bank_add(f"别的词{n}", {"chinese": f"别的句子{n}。", "english_correct": en,
+                                    "english_distractors": ["a", "b", "c"], "generation_mode": "listen"})
+        broken = {}
+
+        def bank_get(word):
+            zh = word["chinese"] if isinstance(word, dict) else word
+            ex = {"chinese": f"我说{zh}了。", "pinyin": "wǒ shuō", "english_correct": f"I said {zh}.",
+                  "english_distractors": ["<d1>", "…", ""], "word_breakdown": [], "grammar_point": {},
+                  "particle_note": None, "generation_mode": "listen"}
+            db.bank_add(zh, ex)
+            broken[ex["chinese"]] = ex
+            return ex
+        real = (db.bank_get, audio_engine.create_audio_file, ap.generate_distractors_for)
+        db.bank_get = bank_get
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        ap.generate_distractors_for = lambda *a, **k: []          # the writer is unreachable
+        try:
+            at = AppTest.from_file("views/9_Sentences.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.run()
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            assert not at.exception, at.exception
+            assert at.session_state["sn_cards"][0]["mode"] == "listen"
+            opts = at.session_state["sn_opts"]
+            ex = at.session_state["sn_ex"]
+            assert len(opts) == 4 and len(set(opts)) == 4, opts
+            assert ex["english_correct"] in opts
+            assert not [o for o in opts if not o.strip() or o in ("<d1>", "…")], opts
+            radio = next(r for r in at.radio if (r.key or "").startswith("sn_mc_"))
+            assert list(radio.options) == [wcon.md_safe(o) for o in opts]
+        finally:
+            db.bank_get, audio_engine.create_audio_file, ap.generate_distractors_for = real
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT exercise FROM sentence_bank WHERE chinese = %s", (ex["chinese"],))
+        stored = cur.fetchone()[0]
+        conn.close()
+        assert len(stored["english_distractors"]) == 3, stored["english_distractors"]
+
     def _rows(uid):
         conn = db.get_connection(); cur = conn.cursor()
         cur.execute("SELECT vocab_id, next_review_date FROM word_skill WHERE user_id = %s "
@@ -1863,6 +1907,7 @@ def db_tests():
     t_recap()
     t_reading_plan()
     t_sentences_page()
+    t_sentences_options()
     t_plan_pages()
     t_plan_adopts()
     t_words_resume()
@@ -2250,6 +2295,104 @@ def t_wc_options():
     kinds = {o["chinese"]: o["kind"] for o in opts}
     assert kinds.get("说") == "meaning" and kinds.get("告别") == "look"
     assert len({o["text"] for o in opts}) == len(opts)
+
+
+@test("meanings: an option is a whole sense - never cut mid-word, no stray bracket, no Chinese")
+def t_wc_meanings():
+    import csv as _csv
+    import re
+    from config import FREQUENCY_CSV_PATH, VOCAB_CSV_PATH
+    sm = wcon.short_meaning
+    cases = {
+        "obedient, well-behaved, or good (often used for children / pets) / well-behaved":
+            "obedient, well-behaved, or good",
+        "(marks the object before the verb) 把书放好 = put the book away properly":
+            "marks the object before the verb",
+        "(measure word for animals and birds, or one of a pair): 半只鸡 = half a chicken":
+            "measure word for animals and birds, or one of a pair",
+        "(particle) completed action or change of state (Malaysian: often said 'liao')":
+            "(particle) completed action or change of state",
+        "Saturday (Malaysian; = 星期六)": "Saturday",
+        "or (used in statements/choices, not questions)": "or",
+        "chee cheong fun (steamed rice noodle rolls)": "chee cheong fun (steamed rice noodle rolls)",
+        "emphasizes action happened later than expected / just / only":
+            "emphasizes action happened later than expected",
+        "to tell / to inform": "to tell",
+        "lit. to have one's hands bound (idiom); fig. helpless": "helpless",
+        "(question particle for yes-no questions)": "question particle for yes-no questions",
+        "work / job (做工 = to work)": "work",
+        "empty (kōng); free time is kòng: 有空 = to be free": "empty",
+    }
+    for gloss, want in cases.items():
+        assert sm(gloss) == want, (gloss, sm(gloss))
+    # every gloss the app ships with
+    glosses = [r["English"] for path in (VOCAB_CSV_PATH, FREQUENCY_CSV_PATH)
+               for r in _csv.DictReader(open(path, encoding="utf-8"))]
+    assert len(glosses) > 5000
+    for g in glosses:
+        m = sm(g)
+        assert m.strip(), g
+        assert len(m) <= 61, (g, m)
+        assert m.count("(") == m.count(")"), (g, m)
+        assert not re.search("[一-鿿]", m), (g, m)
+        for tok in re.findall(r"[A-Za-z]+", m):     # every word whole, none cut short
+            assert re.search(r"(?<![A-Za-z])" + tok + r"(?![A-Za-z])", g), (g, m, tok)
+    assert wcon.same_meaning("to tell / to inform", "to inform / to notify")
+    assert wcon.same_meaning("To tell (someone)", "tell")
+    assert not wcon.same_meaning("to tell", "to say")
+
+
+@test("meaning options: always four, all different, never a second right answer")
+def t_wc_options_full():
+    import random as _r
+    word = {"chinese": "告诉", "pinyin": "gào su", "english": "to tell / to inform"}
+    pool = [{"chinese": "通知", "pinyin": "tōng zhī", "english": "to inform / to notify"},
+            {"chinese": "告知", "pinyin": "gào zhī", "english": "To tell (someone)"},
+            {"chinese": "吃", "pinyin": "chī", "english": "to eat"},
+            {"chinese": "喝", "pinyin": "hē", "english": "to drink"},
+            {"chinese": "饮", "pinyin": "yǐn", "english": "to drink (Malaysian)"},
+            {"chinese": "看", "pinyin": "kàn", "english": "to look / to see"}]
+    for seed in range(30):
+        opts = wcon.meaning_options(word, pool, rng=_r.Random(seed))
+        texts = [o["text"] for o in opts]
+        assert len(opts) == 4, texts
+        assert not {"通知", "告知"} & {o["chinese"] for o in opts}, "a synonym is a second right answer"
+        assert len({wcon._meaning_key(t) for t in texts}) == 4, texts
+    assert wcon.md_safe("it depends on ~ $5 <d1> *x*") == r"it depends on \~ \$5 \<d1\> \*x\*"
+
+
+@test("listening options: placeholders and blanks dropped, and topped up to three")
+def t_distractor_topup():
+    assert ap.usable_distractors(["<d1>", "…", "", "  ", "The wet market is hot.", "The wet market is cold",
+                                  "the wet market is COLD!", "d2", "The bus is late"],
+                                 "The wet market is hot") == ["The wet market is cold", "The bus is late"]
+    gen = {"hanzi": "巴刹很热", "english_correct": "The wet market is hot",
+           "english_distractors": ["<wrong translation 1>", "…", "The wet market is cold"],
+           "word_breakdown": [], "grammar_point": {}, "particle_note": None}
+    accept = {"acceptable": True, "problems": "", "corrected_sentence": ""}
+    more = {"english_distractors": ["The wet market is cold", "The night market is hot",
+                                    "The wet market is far"]}
+    responses = iter([fake_response(x) for x in (gen, accept, more)])
+    ap.client = MagicMock()
+    ap.client.chat.completions.create = lambda **kw: next(responses)
+    ex = ap.generate_dictation_exercise(
+        {"chinese": "巴刹", "pinyin": "bā shā", "english": "wet market"})
+    assert ex["english_distractors"] == ["The wet market is cold", "The night market is hot",
+                                         "The wet market is far"], ex["english_distractors"]
+
+
+@test("grammar options: blank, placeholder or near-duplicate options are rejected")
+def t_gr_mcq():
+    ok = {"options": ["is going to", "has already", "never did", "used to"], "answer": 1}
+    assert gdr.mcq_problem(ok) is None
+    for bad in ({**ok, "options": ["…", "…", "…", "…"]},
+                {**ok, "options": ["is going to", "…", "never did", "used to"]},
+                {**ok, "options": ["is going to", "", "never did"]},
+                {**ok, "options": ["<option 1>", "has already", "never did"]},
+                {**ok, "options": ["Has already.", "has already", "never did"]},
+                {**ok, "options": ["is going to", "has already"]},
+                {**ok, "answer": 4}, {**ok, "answer": True}, {**ok, "options": None}):
+        assert gdr.mcq_problem(bad), bad
 
 
 @test("word content: target present, known words only, 儿 and false structure tags rejected")
@@ -2822,16 +2965,16 @@ if __name__ == "__main__":
     print("Generation pipeline (mocked LLM):")
     t_mismatch(); t_pronouns(); t_classify(); t_grammar_gate(); t_erhua_gate()
     t_number_gate(); t_blocklist_and_flags(); t_reviewer_models()
-    t_distractor_dedupe(); t_latin_breakdown(); t_fullwidth_punct()
+    t_distractor_dedupe(); t_distractor_topup(); t_latin_breakdown(); t_fullwidth_punct()
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
     print("Grammar drills:")
-    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_generate()
+    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_generate()
     t_gr_generate_fails_closed(); t_gr_audit_fixes(); t_gr_grade_schedule()
     print("Vocabulary engine:")
     t_ve_schedule(); t_ve_production_gate(); t_ve_modes(); t_ve_allowance(); t_ve_session()
     print("Word content:")
-    t_wc_check(); t_wc_options(); t_wc_validate(); t_wc_generate()
+    t_wc_check(); t_wc_options(); t_wc_meanings(); t_wc_options_full(); t_wc_validate(); t_wc_generate()
     print("Word diagnosis:")
     t_integration(); t_wd_trouble(); t_wd_diagnose(); t_wd_remedies(); t_wd_written()
     print("Sound & Pairing:")

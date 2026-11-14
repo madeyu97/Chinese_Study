@@ -214,13 +214,31 @@ def _fix_pinyin(hanzi, pinyin):
     return pinyin if pinyin and len(syl) == n else derive_pinyin(hanzi)
 
 
-def _check_mcq(item, where, problems):
-    opts = item.get("options") or []
-    if not (3 <= len(opts) <= 4) or len({str(o).strip().lower() for o in opts}) != len(opts):
-        problems.append(f"{where}: needs 3-4 different options")
+_BLANK_OPTION = re.compile(r"^\s*(<[^>]*>|\.{2,}|…+|-+|_+|option\s*\d*|[a-d]\)?|n/?a)\s*$", re.I)
+
+
+def mcq_problem(item):
+    """What's wrong with a multiple-choice item's options, or None: it needs
+    3-4 real, different options (not blanks or a template's '…' copied back)
+    and an answer index that points at one of them."""
+    opts = item.get("options") if isinstance(item, dict) else None
+    if not isinstance(opts, list) or not (3 <= len(opts) <= 4):
+        return "needs 3-4 options"
+    texts = [str(o).strip() if isinstance(o, (str, int, float)) else "" for o in opts]
+    if any(not t or _BLANK_OPTION.match(t) for t in texts):
+        return "has a blank or placeholder option - write every option in full"
+    if len({re.sub(r"[^\w']+", " ", t.lower()).strip() for t in texts}) != len(texts):
+        return "needs 3-4 different options"
     ans = item.get("answer")
-    if not isinstance(ans, int) or not (0 <= ans < len(opts)):
-        problems.append(f"{where}: answer index out of range")
+    if not isinstance(ans, int) or isinstance(ans, bool) or not (0 <= ans < len(opts)):
+        return "answer index out of range"
+    return None
+
+
+def _check_mcq(item, where, problems):
+    problem = mcq_problem(item)
+    if problem:
+        problems.append(f"{where}: {problem}")
 
 
 def validate(payload, structure, known_words, recent=()):

@@ -2042,6 +2042,36 @@ def bank_get(vocab_chinese):
     return exercise
 
 
+def bank_set_distractors(chinese_sentence, distractors):
+    """Replace a banked sentence's wrong options (after topping them up)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """UPDATE sentence_bank
+              SET exercise = jsonb_set(exercise, '{english_distractors}', %s)
+            WHERE chinese = %s""",
+        (psycopg2.extras.Json(list(distractors)), chinese_sentence))
+    conn.commit()
+    conn.close()
+
+
+def bank_other_translations(exclude_chinese, n=3):
+    """English translations of other banked sentences - the last resort for
+    wrong options when none can be written: real sentences, just not tuned
+    to this one."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT exercise->>'english_correct' FROM sentence_bank
+            WHERE chinese <> %s AND status = 'active'
+              AND COALESCE(exercise->>'english_correct', '') <> ''
+            ORDER BY RANDOM() LIMIT %s""",
+        (exclude_chinese, n * 3))
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
 def flag_sentence(chinese_sentence, reason="flagged by learner"):
     conn = get_connection()
     cursor = conn.cursor()

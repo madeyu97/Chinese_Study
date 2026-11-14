@@ -1,15 +1,18 @@
 # src/views/0_Today.py
 """
-🏠 Today - the day's plan, built from everything that's due, with one Start
-button. The only choices here are about the day, not the method: a full or
-a short day, or a game instead of scrolling.
+🏠 Today - an hour of study in three ~20-minute sessions: morning,
+afternoon, evening. The next session is shown in full with one Start
+button; the others are a line each. A session that isn't due yet says when
+it opens, and can still be started early or skipped.
 """
 
 import streamlit as st
 
+import clock
 import db_manager as db
 import today_plan as tp
 from auth import require_login, sidebar_user_badge
+from config import SESSION_GAP_HOURS
 
 st.set_page_config(page_title="Today", page_icon="🏠", layout="centered")
 USER = require_login()
@@ -39,54 +42,93 @@ try:
     bits = []
     if streak:
         bits.append(f"🔥 {streak}-day streak")
+    if week["sessions"]:
+        bits.append(f"{week['sessions']} of 21 sessions this week")
     if week["total"]:
-        bits.append(f"{week['total']} min this week")
-    if week["plan_days"]:
-        bits.append(f"plan done {week['plan_days']} of the last 7 days")
+        bits.append(f"{week['total']} min")
     if bits:
         st.caption(" · ".join(bits))
 except Exception:
     pass
 
-LENGTHS = {"full": "Full day", "short": "Short day (~10 min)"}
-_was_short = bool((tp.plan() or {}).get("short"))
-length = st.radio("How much today?", list(LENGTHS), format_func=LENGTHS.get,
-                  index=1 if _was_short else 0, horizontal=True, key="tp_length",
-                  label_visibility="collapsed")
-short = length == "short"
-
-with st.spinner("Working out today's plan…"):
+with st.spinner("Working out today's sessions…"):
     state = tp.gather_state(USER_ID)
 # steps finished or skipped earlier in this visit count as done too
 cur = tp.plan()
 if cur:
-    state["done"] = set(state["done"]) | set(cur["done"]) | set(cur["skipped"])
-steps = tp.build_plan(state, short=short)
+    state["done"] = set(state["done"]) | {f"{cur['slot']}:{k}" for k in cur["done"] + cur["skipped"]}
+day = tp.build_day(state)
+nxt = tp.next_session(day)
+now = clock.now()
 
-if not steps:
-    st.success("Nothing is due today and there's nothing new to start. Enjoy the day — "
-               "or play a game below.")
-else:
-    for n, s in enumerate(steps, 1):
-        skipped = cur and s["key"] in cur["skipped"]
-        mark = "⏭️" if skipped else "✅" if s["done"] else f"**{n}.**"
-        detail = "skipped" if skipped else "done" if s["done"] else s["detail"]
-        st.markdown(f"{mark} {s['icon']} **{s['title']}** — {detail}")
-    left = tp.minutes_left(steps)
-    nxt = tp.next_step(steps)
-    if nxt:
-        began = bool(cur and (cur["done"] or cur["skipped"])) or any(s["done"] for s in steps)
-        label = (f"▶️ Continue: {nxt['icon']} {nxt['title']}" if began else "▶️ Start") \
-            + f"  ·  about {left} min"
-        if st.button(label, type="primary", width="stretch", key="tp_start"):
-            tp.start(steps, short)
-            st.switch_page(nxt["page"])
-        st.caption("Reviews come first while you're fresh; new words, tones and grammar are "
-                   "capped so tomorrow's reviews stay manageable; the day ends with listening "
-                   "and speaking. A short day still counts.")
+
+def at(moment):
+    return moment.astimezone(clock.tz()).strftime("%H:%M")
+
+
+def step_line(n, s_):
+    skipped = cur and cur["slot"] == s_["slot"] and s_["key"] in cur["skipped"]
+    mark = "⏭️" if skipped else "✅" if s_["done"] else f"**{n}.**"
+    detail = "skipped" if skipped else "done" if s_["done"] else s_["detail"]
+    st.markdown(f"{mark} {s_['icon']} **{s_['title']}** — {detail}")
+
+
+st.caption("An hour a day in three short sessions. Spreading it out is the point: the "
+           "morning's new words come back in the afternoon and again before bed, hours "
+           "apart each time.")
+
+for sess in day:
+    head = f"{sess['icon']} **{sess['title']}** · {sess['theme']}"
+    if sess is nxt:
+        with st.container(border=True):
+            opens = tp.opens_at(sess["slot"], clock.today(), tp.last_finished(day))
+            began = cur and cur["slot"] == sess["slot"] and (cur["done"] or cur["skipped"])
+            began = began or any(s_["done"] for s_ in sess["steps"])
+            st.markdown(f"{head} · about {sess['minutes']} min")
+            st.caption(sess["why"])
+            for n, s_ in enumerate(sess["steps"], 1):
+                step_line(n, s_)
+            first = next(s_ for s_ in sess["steps"] if not s_["done"])
+            label = (f"▶️ Continue: {first['icon']} {first['title']}" if began
+                     else f"▶️ Start the {sess['title'].lower()} session")
+            if opens <= now or began:
+                if st.button(label, type="primary", width="stretch", key="tp_start"):
+                    tp.start(sess)
+                    st.switch_page(first["page"])
+            else:
+                st.info(f"Best from **{at(opens)}**: a gap of at least {SESSION_GAP_HOURS} hours "
+                        f"is what makes this session a real test of memory.")
+                if st.button("Start now anyway", width="stretch", key="tp_start"):
+                    tp.start(sess)
+                    st.switch_page(first["page"])
+            if not began and st.button(f"Skip the {sess['title'].lower()} session today",
+                                       type="tertiary", key="tp_skip_session"):
+                db.mark_session_complete(USER_ID, sess["slot"], skipped=True)
+                S.pop("tp", None)
+                st.rerun()
+    elif sess["done"]:
+        if sess["skipped"]:
+            st.markdown(f"⏭️ {head} — skipped")
+        elif sess["finished_at"]:
+            st.markdown(f"✅ {head} — done at {at(sess['finished_at'])}")
+        else:
+            st.markdown(f"✅ {head} — nothing to do")
     else:
+        opens = tp.opens_at(sess["slot"], clock.today())
+        prev = tp.SESSIONS[tp.SLOTS[tp.SLOTS.index(sess["slot"]) - 1]][1].lower()
+        when = f"from {at(opens)}" if opens > now else f"after the {prev} session"
+        st.markdown(f"{head} — {when} · "
+                    + " · ".join(f"{s_['icon']} {s_['title']}" for s_ in sess["steps"]))
+
+if nxt is None:
+    if any(s_["skipped"] for s_ in day):
+        st.success("That's today done. Anything more is a bonus.")
+    elif any(s_["finished_at"] for s_ in day):
         db.mark_plan_complete(USER_ID)
-        st.success("🎉 Today's plan is done. Anything more is a bonus.")
+        st.success("🎉 All of today's sessions are done. Anything more is a bonus.")
+    else:
+        st.success("Nothing is due today and there's nothing new to start. Enjoy the day — "
+                   "or play a game below.")
 
 st.divider()
 st.subheader("🎮 Play instead of scrolling")

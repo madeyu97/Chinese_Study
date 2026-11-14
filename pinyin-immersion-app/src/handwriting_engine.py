@@ -1,3 +1,4 @@
+import clock
 from config import PRECISION_START, PRECISION_STEP, PRECISION_FLOOR
 # src/handwriting_engine.py
 """
@@ -124,7 +125,7 @@ def compute_next_review(current_interval: int, current_ease: float, grade: int):
             new_interval = int(current_interval * current_ease * HW_EASY_MULT)
 
     new_interval = min(new_interval, 365)
-    next_review_date = (date.today() + timedelta(days=new_interval)).isoformat()
+    next_review_date = (clock.today() + timedelta(days=new_interval)).isoformat()
     return new_interval, round(new_ease, 2), next_review_date
 
 

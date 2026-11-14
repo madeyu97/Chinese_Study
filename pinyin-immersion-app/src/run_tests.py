@@ -48,6 +48,7 @@ def fake_response(payload):
 # ======================================================================
 # DICTIONARY ENGINE (no network, no LLM)
 # ======================================================================
+import clock
 import dictionary_engine as de
 
 
@@ -1247,7 +1248,7 @@ def db_tests():
         conn = db.get_connection(); cur = conn.cursor()
         for tbl in ("word_attempts", "word_skill", "word_content", "vocab_progress", "word_diagnosis",
                     "drill_progress", "grammar_progress", "handwriting_progress", "study_sessions",
-                    "activity_log", "saved_sessions"):
+                    "activity_log", "saved_sessions", "reading_progress"):
             cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (uid,))
         cur.execute("""SELECT id FROM vocab WHERE freq_rank <= 60 AND chinese ~ '^[一-鿿]{1,3}$'
                        AND COALESCE(tag, '') <> 'China' ORDER BY freq_rank LIMIT 12""")
@@ -1356,7 +1357,36 @@ def db_tests():
         plan = db.plan_word_session(uid, new_cap=2)
         assert len([i for i in plan["items"] if i["kind"] == "new"]) == 2
 
-    @test("Today: one Start runs the whole plan page to page, auto-started, then logs it as done")
+    def _run_session(at, label_starts):
+        """From the Today page: start the next session (on time or early) and
+        play it through, page to page. Returns the steps visited."""
+        btn = next(b for b in at.button if b.label.startswith(label_starts))
+        btn.click().run()
+        slot = at.session_state["tp"]["slot"]
+        first = at.session_state["tp"]["order"][0]
+        # AppTest follows st.switch_page within a run but not afterwards; the
+        # browser does, so the test keeps up by hand
+        at.switch_page(tplan.STEPS[first][2])
+        visited = [first]
+        for _ in range(400):
+            assert not at.exception, at.exception
+            if any(b.label == "🏠 Back to Today" for b in at.button):
+                break
+            cont = [b for b in at.button if b.label.startswith("Continue ▶")]
+            if cont:
+                cont[0].click().run()
+                nxt = at.session_state["tp"]["order"][0]
+                visited.append(nxt)
+                at.switch_page(tplan.STEPS[nxt][2])
+                continue
+            _answer_step(at)
+        assert any(b.label == "🏠 Back to Today" for b in at.button), slot
+        next(b for b in at.button if b.label == "🏠 Back to Today").click().run()
+        at.switch_page(tplan.TODAY_PAGE).run()
+        assert not at.exception, at.exception
+        return slot, visited
+
+    @test("Today: three sessions run in order, each page to page from one button; the evening recaps the morning")
     def t_today_flow():
         from streamlit.testing.v1 import AppTest
         import audio_engine
@@ -1369,44 +1399,139 @@ def db_tests():
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
             at.run()
             assert not at.exception, at.exception
-            planned = [s_["key"] for s_ in tplan.build_plan(tplan.gather_state(uid))]
-            assert planned[0] == "words" and planned[-1] == "sentences", planned
-            next(b for b in at.button if b.label.startswith("▶️ Start")).click().run()
-            # AppTest follows st.switch_page within a run but not afterwards; the
-            # browser does, so the test keeps up by hand
-            at.switch_page(tplan.STEPS["words"][2])
-            assert _has(at, "wd_items") and at.session_state["wd_plan"], "Words starts by itself"
-            assert len([i for i in at.session_state["wd_items"] if i["kind"] == "new"]) == 5
-            visited = ["words"]
-            for _ in range(400):
-                assert not at.exception, at.exception
-                if any("today's plan done" in x.value for x in at.success):
-                    break
-                cont = [b for b in at.button if b.label.startswith("Continue ▶")]
-                if cont:
-                    cont[0].click().run()
-                    nxt = at.session_state["tp"]["order"][0]
-                    visited.append(nxt)
-                    at.switch_page(tplan.STEPS[nxt][2])
-                    continue
-                _answer_step(at)
-            assert any("today's plan done" in x.value for x in at.success)
-            assert visited == planned, (visited, planned)
-            # speaking cards were typed and graded by the app: no self-grade buttons anywhere
+            day = tplan.build_day(tplan.gather_state(uid))
+            planned = {s_["slot"]: [x["key"] for x in s_["steps"]] for s_ in day}
+            assert planned["morning"][0] == "words" and planned["afternoon"][-1] == "sentences"
+            assert planned["evening"][0] == "words", planned
+            # morning: today's five new words
+            slot, visited = _run_session(at, "▶️ Start the morning session")
+            assert (slot, visited) == ("morning", planned["morning"])
+            new_ids = {r[0] for r in _intro_today(uid)}
+            assert len(new_ids) == 5
+            # afternoon: not open yet unless it's afternoon and two hours have passed
+            labels = [b.label for b in at.button]
+            assert "▶️ Start the afternoon session" in labels or "Start now anyway" in labels, labels
+            if "Start now anyway" in labels:
+                assert any("Best from" in x.value for x in at.info)
+            slot, visited = _run_session(at, ("▶️ Start the afternoon session", "Start now anyway"))
+            assert (slot, visited) == ("afternoon", planned["afternoon"])
+            # evening: the recap goes over today's new words without moving them
+            before = dict(_rows(uid))
+            slot, visited = _run_session(at, ("▶️ Start the evening session", "Start now anyway"))
+            assert slot == "evening" and visited[0] == "words"
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("""SELECT DISTINCT vocab_id FROM word_attempts WHERE user_id = %s
+                           AND detail->>'kind' = 'recap'""", (uid,))
+            recapped = {r[0] for r in cur.fetchall()}
+            conn.close()
+            assert new_ids <= recapped, "every new word came round again in the evening"
+            after = dict(_rows(uid))
+            # today's new words were last scheduled by the morning; the evening moves none
+            assert all(after[v] == before[v] for v in new_ids)
+            assert any("All of today's sessions are done" in x.value for x in at.success)
             assert not [b for b in at.button if b.label.startswith(("Again", "Hard", "Good", "Easy"))]
-            next(b for b in at.button if b.label == "🏠 Back to Today").click().run()
-            at.switch_page(tplan.TODAY_PAGE).run()
-            assert not at.exception, at.exception
-            assert any("Today's plan is done" in x.value for x in at.success)
         finally:
             db.word_content_for, db.bank_get, audio_engine.create_audio_file = real
-        done = db.plan_done_today(uid)
-        assert set(planned) | {"plan_complete"} <= done, done
+        prog = db.day_progress(uid)
+        assert set(prog["finished"]) == {"morning", "afternoon", "evening"}
+        assert {f"morning:{k}" for k in planned["morning"]} <= prog["done"]
+        assert "plan_complete" in db.plan_done_today(uid)
+        assert db.study_minutes(uid, 7)["sessions"] == 3
         conn = db.get_connection(); cur = conn.cursor()
         cur.execute("SELECT DISTINCT kind FROM activity_log WHERE user_id = %s", (uid,))
         kinds = {r[0] for r in cur.fetchall()}
         conn.close()
         assert {"read", "listen", "type"} <= kinds and "speak" not in kinds, kinds
+
+    def _intro_today(uid):
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("""SELECT vocab_id FROM word_skill WHERE user_id = %s AND skill = 'recognition'
+                       AND introduced_on = %s""", (uid, clock.today().isoformat()))
+        rows = cur.fetchall(); conn.close()
+        return rows
+
+    @test("evening recap: today's new and missed words (not games), quick checks that move no schedule")
+    def t_recap():
+        from streamlit.testing.v1 import AppTest
+        import audio_engine
+        uid = _fresh_learner()
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT vocab_id FROM word_skill WHERE user_id = %s ORDER BY vocab_id", (uid,))
+        seeded = [r[0] for r in cur.fetchall()]
+        cur.execute("""SELECT id FROM vocab WHERE freq_rank BETWEEN 100 AND 400 AND chinese ~ '^[一-鿿]{1,3}$'
+                       AND id <> ALL(%s) ORDER BY freq_rank LIMIT 2""", (seeded,))
+        fresh = [r[0] for r in cur.fetchall()]
+        conn.close()
+        for vid in fresh:                               # introduced this morning
+            db.save_word_track(uid, vid, "recognition",
+                               {"interval": 1, "next_review_date": "2099-01-01"}, "zh_to_meaning")
+        db.log_word_attempt(uid, seeded[0], "recognition", "audio_to_meaning", "wrong", {"kind": "review"})
+        db.log_word_attempt(uid, seeded[1], "recognition", "game_picture", "wrong", {"kind": "game"})
+        db.log_word_attempt(uid, seeded[2], "recognition", "zh_to_meaning", "correct", {"kind": "review"})
+        items = db.recap_session(uid, cap=15)
+        assert {i["word"]["id"] for i in items} == set(fresh) | {seeded[0]}
+        assert all(i["kind"] == "recap" and i["skill"] == "recognition" for i in items)
+        assert {i["mode"] for i in items} == {"audio_to_meaning", "zh_to_meaning"}
+        assert len(db.recap_session(uid, cap=2)) == 2 and db.recap_count(uid) == 3
+        assert {i["word"]["id"] for i in db.recap_session(uid, cap=2)} == set(fresh), "new words first"
+        before = sorted(_rows(uid))
+        real = (db.word_content_for, audio_engine.create_audio_file)
+        db.word_content_for = _fake_content
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        try:
+            at = AppTest.from_file("views/1_Words.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+            at.session_state["tp"] = {"date": clock.today().isoformat(), "slot": "evening",
+                                      "order": ["words"], "params": {"words": {"recap": True, "cap": 15}},
+                                      "done": [], "skipped": []}
+            at.run()
+            assert at.session_state["wd_recap"] and len(at.session_state["wd_items"]) == 3
+            for _ in range(40):
+                assert not at.exception, at.exception
+                if any(b.label == "🏠 Back to Today" for b in at.button):
+                    break
+                _answer_step(at)
+            assert any("Today's words, once more" in x.value for x in at.success)
+        finally:
+            db.word_content_for, audio_engine.create_audio_file = real
+        assert sorted(_rows(uid)) == before, "no schedule moved"
+        assert "evening" in db.day_progress(uid)["finished"]
+        # recap answers are logged, but a missed recap never flags a word as troubled
+        # (that takes missed reviews); they only add evidence once a word is
+        atts = [a for a in db.word_attempts_all(uid, fresh[0]) if (a["detail"] or {}).get("kind") == "recap"]
+        assert atts
+        assert not wdiag.is_troubled({}, [dict(a, result="wrong") for a in atts] * 5)
+
+    @test("Reading in the evening session: starts by itself, reads the set number of sentences, then moves on")
+    def t_reading_plan():
+        from streamlit.testing.v1 import AppTest
+        uid = _fresh_learner()
+        for ch in "我你他好是的不了人们大小":
+            db.update_handwriting_progress(uid, ch, 2, {})
+        for zh, en in (("我好。", "I'm well."), ("你好。", "Hello."), ("他是人。", "He is a person."),
+                       ("我们好。", "We're well."), ("你们是大人。", "You are adults."), ("他不小了。", "He's not small.")):
+            db.reading_bank_add(zh, en, set(zh), uid)
+        at = AppTest.from_file("views/6_Reading.py", default_timeout=120)
+        at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
+        at.session_state["tp"] = {"date": clock.today().isoformat(), "slot": "evening",
+                                  "order": ["reading"], "params": {"reading": {"sentences": 3}},
+                                  "done": [], "skipped": []}
+        at.run()
+        assert not at.exception, at.exception
+        assert not at.slider, "no setting to choose in the plan"
+        assert at.session_state["reading_plan"]["read"] == 1, "the first sentence appears by itself"
+        for _ in range(2):
+            next(b for b in at.button if b.label == "📖 Next sentence").click().run()
+        assert at.session_state["reading_plan"]["read"] == 3
+        labels = [b.label for b in at.button]
+        assert "📖 Next sentence" not in labels and "🏠 Back to Today" in labels, labels
+        assert "reading" in db.plan_done_today(uid) and "evening" in db.day_progress(uid)["finished"]
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM study_sessions WHERE user_id = %s AND activity = 'reading'", (uid,))
+        assert cur.fetchone()[0] == 1, "the step logs its own time, not one row per sentence"
+        cur.execute("SELECT COUNT(*) FROM activity_log WHERE user_id = %s AND kind = 'read'", (uid,))
+        assert cur.fetchone()[0] == 3
+        conn.close()
 
     @test("Listen & speak: moves a schedule only when that skill is due; never introduces words")
     def t_sentences_page():
@@ -1418,7 +1543,7 @@ def db_tests():
         cur.execute("""SELECT vocab_id FROM word_skill WHERE user_id = %s ORDER BY vocab_id LIMIT 1""", (uid,))
         due_vid = cur.fetchone()[0]
         cur.execute("UPDATE word_skill SET next_review_date = %s WHERE user_id = %s AND vocab_id = %s",
-                    (_d.today().isoformat(), uid, due_vid))
+                    (clock.today().isoformat(), uid, due_vid))
         conn.commit(); conn.close()
         before = {(r[0]): r[1] for r in _rows(uid)}
         real = (db.bank_get, audio_engine.create_audio_file)
@@ -1443,7 +1568,7 @@ def db_tests():
             db.bank_get, audio_engine.create_audio_file = real
         after = {(r[0]): r[1] for r in _rows(uid)}
         assert set(after) == set(before), "no new words introduced"
-        assert after[due_vid] > _d.today().isoformat(), "the due word's review moved on"
+        assert after[due_vid] > clock.today().isoformat(), "the due word's review moved on"
         assert all(after[v] == before[v] for v in before if v != due_vid), "nothing else moved"
         conn = db.get_connection(); cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM word_skill WHERE user_id = %s AND skill = 'production'", (uid,))
@@ -1467,8 +1592,9 @@ def db_tests():
         import audio_engine
         uid = _fresh_learner()
         ids = [s_.id for s_ in gcur.learning_order()[:2]]
-        plan_state = lambda order, params: {"date": _d.today().isoformat(), "short": False,
-                                            "order": order, "params": params, "done": [], "skipped": []}
+        plan_state = lambda order, params, slot="afternoon": {
+            "date": clock.today().isoformat(), "slot": slot, "order": order, "params": params,
+            "done": [], "skipped": []}
         real = (db.grammar_known_vocab, db.grammar_pick_set, db.grammar_mark_served,
                 gdr.grade_answer, audio_engine.create_audio_file)
         db.grammar_known_vocab = lambda user_id: GR_KNOWN * 2
@@ -1519,7 +1645,8 @@ def db_tests():
             db.set_handwriting_source(uid, "vocab")
             at = AppTest.from_file("views/2_Handwriting.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
-            at.session_state["tp"] = plan_state(["handwriting"], {"handwriting": {"reviews": 15, "new": 3}})
+            at.session_state["tp"] = plan_state(["handwriting"], {"handwriting": {"reviews": 15, "new": 3}},
+                                                "evening")
             at.run()
             assert not at.exception, at.exception
             assert "Nothing to write today." in [x.value for x in at.success]
@@ -1531,7 +1658,8 @@ def db_tests():
             db.set_handwriting_source(uid, "frequency")
             at = AppTest.from_file("views/2_Handwriting.py", default_timeout=120)
             at.session_state["user"] = {"id": uid, "username": "t", "display_name": "T"}
-            at.session_state["tp"] = plan_state(["handwriting"], {"handwriting": {"reviews": 15, "new": 3}})
+            at.session_state["tp"] = plan_state(["handwriting"], {"handwriting": {"reviews": 15, "new": 3}},
+                                                "evening")
             at.run()
             assert not at.exception, at.exception
             chars = at.session_state["hw_payload"]["chars"]
@@ -1558,7 +1686,7 @@ def db_tests():
             at.switch_page("views/1_Words.py").run()
             next(b for b in at.button if b.label == "▶️ Start").click().run()
             assert at.session_state["wd_plan"] is False
-            at.session_state["tp"] = {"date": _d.today().isoformat(), "short": False,
+            at.session_state["tp"] = {"date": clock.today().isoformat(), "slot": "morning",
                                       "order": ["words", "sentences"],
                                       "params": {"sentences": {"listen": 1, "speak": 0}},
                                       "done": [], "skipped": []}
@@ -1612,10 +1740,11 @@ def db_tests():
             assert "Picked up where you left off." in [c.value for c in back.caption]
             for _ in range(80):
                 assert not back.exception, back.exception
-                if any(b.label.startswith("Continue ▶") for b in back.button):
+                if any(b.label.startswith("Continue ▶") or b.label == "🏠 Back to Today" for b in back.button):
                     break
                 _answer_step(back)
-            assert any(b.label.startswith("Continue ▶") for b in back.button), "the plan moves on"
+            assert any(b.label.startswith("Continue ▶") or b.label == "🏠 Back to Today"
+                       for b in back.button), "the plan moves on"
             assert "words" in db.plan_done_today(uid)
             assert db.saved_session_get(uid, "words") is None, "a finished session isn't kept"
             conn = db.get_connection(); cur = conn.cursor()
@@ -1731,6 +1860,8 @@ def db_tests():
     t_latest_mix_retired()
     t_daily_caps()
     t_today_flow()
+    t_recap()
+    t_reading_plan()
     t_sentences_page()
     t_plan_pages()
     t_plan_adopts()
@@ -2378,64 +2509,140 @@ import today_plan as tplan
 
 
 def _plan_state(**over):
-    st_ = {"done": set(),
+    st_ = {"done": set(), "finished": {}, "skipped": set(),
            "words": {"due": 30, "new_room": 5, "new_available": 40},
+           "recap": {"count": 10},
            "tones": {"due": 2, "fresh": 10, "new_room": 3},
            "grammar": {"known": 150, "due": [("g1", "了"), ("g2", "把"), ("g3", "被")],
                        "fresh": [("g9", "越来越"), ("g10", "连…都")]},
            "handwriting": {"started": True, "due": 40, "new_room": 5, "new_available": 100},
+           "reading": {"characters": 60},
            "sentences": {"words": 200}}
     st_.update(over)
     return st_
 
 
-@test("plan: fixed order, reviews first; caps on new words, tones, grammar and writing")
-def t_plan_build():
-    steps = tplan.build_plan(_plan_state())
-    keys = [s_["key"] for s_ in steps]
-    assert keys == ["words", "tones", "grammar", "handwriting", "sentences"], keys
-    by = {s_["key"]: s_ for s_ in steps}
-    assert by["words"]["params"] == {"reviews": 25, "new": 5, "unlocks": True}
-    assert by["words"]["detail"].startswith("25 reviews · 5 new words")
-    # tones: due groups first, new ones only to fill a five-group session
-    assert by["tones"]["params"]["new"] == 3
-    # grammar: at most two structures, reviews before new, never more than one new
-    assert by["grammar"]["params"]["ids"] == ["g1", "g2"]
-    light = tplan.build_plan(_plan_state(grammar={"known": 150, "due": [], "fresh": [("g9", "越来越"), ("g10", "x")]}))
-    assert {s_["key"]: s_ for s_ in light}["grammar"]["params"]["ids"] == ["g9"]
-    # writing: reviews capped for the plan, a few new
-    assert by["handwriting"]["params"] == {"reviews": 15, "new": 3}
-    assert by["sentences"]["params"] == {"listen": 3, "speak": 3}
-    assert tplan.minutes_left(steps) == sum(s_["minutes"] for s_ in steps) > 20
-    # new words: never more than the queue can supply or the day allows
-    few = tplan.build_plan(_plan_state(words={"due": 0, "new_room": 5, "new_available": 2}))
-    assert few[0]["params"]["new"] == 2 and few[0]["detail"] == "2 new words"
+def _sess(day):
+    return {s_["slot"]: s_ for s_ in day}
 
 
-@test("plan: short day is a few reviews and a little listening; done steps stay visible")
-def t_plan_short():
-    steps = tplan.build_plan(_plan_state(), short=True)
-    assert [s_["key"] for s_ in steps] == ["words", "sentences"]
-    assert steps[0]["params"] == {"reviews": 10, "new": 0, "unlocks": False}
-    assert steps[1]["params"] == {"listen": 3, "speak": 0}
-    assert tplan.minutes_left(steps) <= 10
-    done = tplan.build_plan(_plan_state(done={"words", "grammar"}), short=True)
-    assert [(s_["key"], s_["done"]) for s_ in done] == [("words", True), ("grammar", True), ("sentences", False)]
-    assert tplan.next_step(done)["key"] == "sentences"
+def _keys(sess):
+    return [s_["key"] for s_ in sess["steps"]]
 
 
-@test("plan: steps appear only when there's something to do (writing once started, grammar at 20 words)")
+@test("plan: an hour in three sessions - recall in the morning, use in the afternoon, consolidate at night")
+def t_plan_day():
+    day = tplan.build_day(_plan_state())
+    assert [s_["slot"] for s_ in day] == ["morning", "afternoon", "evening"]
+    m, a, e = (_sess(day)[k] for k in ("morning", "afternoon", "evening"))
+    assert _keys(m) == ["words", "tones"] and _keys(a) == ["grammar", "sentences"]
+    assert _keys(e) == ["words", "handwriting", "reading"]
+    # morning: reviews after sleep, then the day's new words (capped)
+    assert m["steps"][0]["params"] == {"reviews": 25, "new": 5, "unlocks": True}
+    assert m["steps"][0]["detail"].startswith("25 reviews · 5 new words")
+    assert m["steps"][1]["params"]["new"] == 3
+    # afternoon: two structures only when catching up (no new one then), fewer sentences to fit
+    assert a["steps"][0]["params"]["ids"] == ["g1", "g2"]
+    assert a["steps"][1]["params"] == {"listen": 3, "speak": 3}
+    one = _sess(tplan.build_day(_plan_state(grammar={"known": 150, "due": [("g1", "了")],
+                                                     "fresh": [("g9", "越来越")]})))["afternoon"]
+    assert one["steps"][0]["params"]["ids"] == ["g1"] and one["steps"][1]["params"] == {"listen": 4, "speak": 4}
+    new = _sess(tplan.build_day(_plan_state(grammar={"known": 150, "due": [],
+                                                     "fresh": [("g9", "越来越"), ("g10", "x")]})))["afternoon"]
+    assert new["steps"][0]["params"]["ids"] == ["g9"], "at most one new structure"
+    assert "today's new words first" in new["steps"][1]["detail"]
+    # evening: today's words once more (no schedule), then writing and reading
+    assert e["steps"][0]["params"] == {"recap": True, "cap": 15}
+    assert e["steps"][0]["detail"] == "10 words from today, once more"
+    assert e["steps"][1]["params"] == {"reviews": 15, "new": 3}
+    assert e["steps"][2]["params"] == {"sentences": 4}
+    # each session is about 20 minutes, even with a backlog
+    assert all(15 <= s_["minutes"] <= 25 for s_ in day), [s_["minutes"] for s_ in day]
+    assert sum(s_["minutes"] for s_ in day) <= 70
+
+
+@test("plan: no handwriting yet means more listening at night; recap planned before the morning's words exist")
+def t_plan_evening():
+    e = _sess(tplan.build_day(_plan_state(handwriting={"started": False, "due": 0, "new_room": 5,
+                                                       "new_available": 9}, recap={"count": 0})))["evening"]
+    assert _keys(e) == ["words", "sentences"]
+    assert e["steps"][0]["detail"] == "today's new and missed words, once more"
+    assert e["steps"][1]["params"] == {"listen": 5, "speak": 2}
+    # writing started but too few characters to read with: no reading step
+    e2 = _sess(tplan.build_day(_plan_state(reading={"characters": 3})))["evening"]
+    assert _keys(e2) == ["words", "handwriting"]
+
+
+@test("plan: progress through the day - done steps stay visible, finished or skipped sessions close")
+def t_plan_progress():
+    import clock as _clk
+    t = _clk.now()
+    day = tplan.build_day(_plan_state(done={"morning:words", "morning:tones"}, finished={"morning": t},
+                                      words={"due": 0, "new_room": 0, "new_available": 40}))
+    m = _sess(day)["morning"]
+    assert m["done"] and m["finished_at"] == t and [x["done"] for x in m["steps"]] == [True, True]
+    assert m["steps"][0]["detail"] == "nothing due", "the morning's words step stays, ticked"
+    assert tplan.next_session(day)["slot"] == "afternoon" and tplan.last_finished(day) == t
+    day = tplan.build_day(_plan_state(finished={"morning": t}, skipped={"afternoon"}))
+    assert _sess(day)["afternoon"]["skipped"] and tplan.next_session(day)["slot"] == "evening"
+    # a step done in one session doesn't tick the same page in another
+    day = tplan.build_day(_plan_state(done={"morning:words"}))
+    assert not _sess(day)["evening"]["steps"][0]["done"]
+
+
+@test("plan: a session opens at its hour, and at least two hours after the last one")
+def t_plan_opens():
+    import clock as _clk
+    from datetime import date as _dd, datetime as _dt, timedelta as _td
+    d = _dd(2026, 11, 9)
+    tz = _clk.tz()
+    hm = lambda x: x.astimezone(tz).strftime("%H:%M")
+    assert hm(tplan.opens_at("morning", d)) == "04:00"
+    assert hm(tplan.opens_at("afternoon", d)) == "12:00"
+    assert hm(tplan.opens_at("afternoon", d, _dt(2026, 11, 9, 11, 0, tzinfo=tz))) == "13:00"
+    assert hm(tplan.opens_at("evening", d, _dt(2026, 11, 9, 16, 30, tzinfo=tz))) == "18:30"
+    assert hm(tplan.opens_at("evening", d, _dt(2026, 11, 9, 9, 0, tzinfo=tz))) == "17:00"
+    # the gap is measured in real time, whatever zone the last finish was stored in
+    utc = _dt(2026, 11, 9, 8, 30, tzinfo=_clk.ZoneInfo("UTC"))       # 16:30 in Kuala Lumpur
+    if str(tz) == "Asia/Kuala_Lumpur":
+        assert hm(tplan.opens_at("evening", d, utc)) == "18:30"
+
+
+@test("plan: nothing to do means no sessions to start; a backlog holds new words back, and says so")
 def t_plan_gates():
-    quiet = _plan_state(words={"due": 0, "new_room": 0, "new_available": 0},
+    quiet = _plan_state(words={"due": 0, "new_room": 0, "new_available": 0}, recap={"count": 0},
                         tones={"due": 0, "fresh": 0, "new_room": 3},
                         grammar={"known": 12, "due": [("g1", "了")], "fresh": []},
                         handwriting={"started": False, "due": 0, "new_room": 5, "new_available": 9},
                         sentences={"words": 5})
-    assert tplan.build_plan(quiet) == []
-    # backlog: new words held back, and the plan says why
-    held = tplan.build_plan(_plan_state(words={"due": 90, "new_room": 0, "new_available": 40}))
-    assert "held back" in held[0]["detail"] and held[0]["params"]["new"] == 0
-    assert tplan.next_step([]) is None
+    day = tplan.build_day(quiet)
+    assert all(not s_["steps"] and s_["done"] for s_ in day) and tplan.next_session(day) is None
+    held = _sess(tplan.build_day(_plan_state(words={"due": 90, "new_room": 0, "new_available": 40})))
+    assert "held back" in held["morning"]["steps"][0]["detail"]
+    assert held["morning"]["steps"][0]["params"]["new"] == 0
+
+
+@test("clock: the study day is local and starts at 4am, not at midnight UTC")
+def t_clock():
+    import clock as _clk
+    from datetime import date as _dd, datetime as _dt
+    kl = _clk.ZoneInfo("Asia/Kuala_Lumpur")
+    assert _clk.study_day(_dt(2026, 11, 9, 2, 30, tzinfo=kl)) == _dd(2026, 11, 8), "1am belongs to yesterday"
+    assert _clk.study_day(_dt(2026, 11, 9, 4, 0, tzinfo=kl)) == _dd(2026, 11, 9)
+    assert _clk.study_day(_dt(2026, 11, 9, 7, 30, tzinfo=kl)) == _dd(2026, 11, 9)
+    old = os.environ.get("APP_TZ")
+    try:
+        os.environ["APP_TZ"] = "Asia/Kuala_Lumpur"
+        assert str(_clk.tz()) == "Asia/Kuala_Lumpur"
+        start = _clk.day_start(_dd(2026, 11, 9))
+        assert (start.hour, start.utcoffset().total_seconds()) == (4, 8 * 3600)
+        os.environ["APP_TZ"] = "Not/AZone"
+        assert str(_clk.tz()) == "Asia/Kuala_Lumpur", "a bad setting falls back, never crashes"
+    finally:
+        if old is None:
+            os.environ.pop("APP_TZ", None)
+        else:
+            os.environ["APP_TZ"] = old
 
 
 # ======================================================================
@@ -2630,7 +2837,7 @@ if __name__ == "__main__":
     print("Sound & Pairing:")
     t_sd_groups(); t_sd_audio(); t_sd_pairs(); t_sd_session(); t_sd_new_cap(); t_games_accept(); t_store_codec()
     print("Today's plan:")
-    t_plan_build(); t_plan_short(); t_plan_gates()
+    t_plan_day(); t_plan_evening(); t_plan_progress(); t_plan_opens(); t_plan_gates(); t_clock()
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("Frequency list:")

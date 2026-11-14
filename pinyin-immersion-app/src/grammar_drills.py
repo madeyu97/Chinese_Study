@@ -30,6 +30,7 @@ from datetime import date, timedelta
 
 import jieba
 
+import clock
 import ai_prompter as ap
 from config import GENERATION_MODEL, GRADING_MODEL, REVIEW_MODEL
 from dictionary_engine import derive_pinyin, has_erhua, is_cjk_char
@@ -460,7 +461,7 @@ def session_grade(results):
 def schedule(interval, ease, grade, core=False, today=None):
     """Same spacing as the vocabulary SRS; core structures are capped at a
     shorter interval so they keep coming back."""
-    today = today or date.today()
+    today = today or clock.today()
     ease = ease or 2.5
     if grade == 0:
         ease, interval = max(1.3, ease - 0.2), 0

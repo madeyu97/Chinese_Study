@@ -8,7 +8,7 @@ been doing without any messaging service in between.
 A deliberate design choice: this compares EFFORT, not lifetime totals.
 One of you has months of head start, so a raw leaderboard would be
 permanently discouraging for one and meaningless for the other. What's
-shown instead is this week's plan days, minutes, streaks and accuracy -
+shown instead is this week's sessions (three a day), minutes, streaks and accuracy -
 things either person can win on any given day - and how the minutes split
 between studying items, using the language, and play.
 """
@@ -64,22 +64,21 @@ for col, name, tot, tm, streak in (
         (c2, other["display_name"], them, their_time, their_streak)):
     with col:
         st.markdown(f"### {name}")
-        st.metric("Days the plan was done", f"{tm['plan_days']} of 7")
+        st.metric("Sessions", f"{tm['sessions']} of 21")
         st.metric("Minutes studied", tm["total"])
         st.metric("Day streak", f"{streak} 🔥" if streak else "0")
-        st.caption(f"{tot['week_total']} cards · {tot['today']} today"
+        st.caption(f"All three sessions on {tm['plan_days']} of 7 days · "
+                   f"{tot['week_total']} cards · {tot['today']} today"
                    + (f" · {tot['accuracy']}% right" if tot["accuracy"] is not None else ""))
 
-lead = my_time["plan_days"] - their_time["plan_days"]
-days = "day" if abs(lead) == 1 else "days"
+lead = my_time["sessions"] - their_time["sessions"]
+sessions = "session" if abs(lead) == 1 else "sessions"
 if lead > 0:
-    st.info(f"You've done the plan on **{lead}** more {days} than "
-            f"{other['display_name']} this week.")
+    st.info(f"You've done **{lead}** more {sessions} than {other['display_name']} this week.")
 elif lead < 0:
-    st.warning(f"{other['display_name']} has done the plan on **{abs(lead)}** more "
-               f"{days} this week.")
+    st.warning(f"{other['display_name']} has done **{abs(lead)}** more {sessions} this week.")
 else:
-    st.info("Level on plan days this week.")
+    st.info("Level on sessions this week.")
 
 # ----------------------------------------------------------------------
 # WHERE THE TIME WENT

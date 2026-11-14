@@ -22,6 +22,7 @@ from datetime import date
 
 import streamlit as st
 
+import clock
 import db_manager as db
 import session_store as store
 import sound_drill as sd
@@ -51,7 +52,7 @@ def reset():
     store.drop(USER_ID, "sound")
 
 
-if S.get("sp_plan") and S.get("sp_date") != date.today().isoformat():
+if S.get("sp_plan") and S.get("sp_date") != clock.today().isoformat():
     reset()                         # yesterday's plan left open in the tab
 if "sp_items" not in S:
     store.resume(USER_ID, "sound", SAVED, clock="sp_t0")
@@ -74,11 +75,11 @@ def new_allowed(drill_):
 
 
 def begin(drill_, mat_, new_cap, in_plan=False):
-    items = sd.build_session(drill_, mat_, db.drill_progress_get(USER_ID, drill_), date.today(),
+    items = sd.build_session(drill_, mat_, db.drill_progress_get(USER_ID, drill_), clock.today(),
                              new_cap=new_cap)
     reset()
     S.sp_items, S.sp_i, S.sp_results, S.sp_drill = items, 0, [], drill_
-    S.sp_plan, S.sp_t0, S.sp_date = in_plan, time.time(), date.today().isoformat()
+    S.sp_plan, S.sp_t0, S.sp_date = in_plan, time.time(), clock.today().isoformat()
     S.sound_last = drill_
 
 
@@ -122,7 +123,7 @@ def material(drill):
 if "sp_items" not in S:
     mat = material(drill)
     progress = db.drill_progress_get(USER_ID, drill)
-    today = date.today().isoformat()
+    today = clock.today().isoformat()
     due = sum(1 for k, t in progress.items() if (t.get("next_review_date") or "") <= today)
     if drill == "tone":
         st.markdown(f"**{len(mat)}** tone groups from your words · **{due}** due")

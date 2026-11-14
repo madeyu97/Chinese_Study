@@ -148,12 +148,19 @@ SOUND_NEW_PER_DAY = 3
 
 
 # ==========================================
-# TODAY'S PLAN
+# TODAY'S PLAN: AN HOUR IN THREE SESSIONS
 # ==========================================
-# Full day: every step at its usual size. Short day: a few of the most
-# urgent reviews, then a little listening - it still counts as a day.
-PLAN_SHORT_REVIEWS = 10
+# About 20 minutes each, morning, afternoon and evening (see today_plan.py).
+# A session opens at its hour (local time, see clock.py) and no sooner than
+# SESSION_GAP_HOURS after the last one finished - the gap is what makes a
+# word met in the morning a real retrieval in the afternoon. You can always
+# start one early; the Today page just says when it's best.
+SESSION_OPENS = {"morning": 4, "afternoon": 12, "evening": 17}
+SESSION_GAP_HOURS = 2
+SESSION_MINUTES = 20
 PLAN_HANDWRITING_REVIEWS = 15
-PLAN_GRAMMAR_STRUCTURES = 2
-PLAN_SENTENCES_LISTEN = 3
-PLAN_SENTENCES_SPEAK = 3
+PLAN_GRAMMAR_STRUCTURES = 2      # two only when two are due; otherwise one
+PLAN_SENTENCES_LISTEN = 4
+PLAN_SENTENCES_SPEAK = 4
+PLAN_RECAP_WORDS = 15            # evening: today's new and missed words, once more
+PLAN_READING_SENTENCES = 4

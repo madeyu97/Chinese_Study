@@ -18,6 +18,11 @@ learning a word, tucked behind a tap once you've known it for three weeks.
 As a step of today's plan, the session starts straight away with the plan's
 limits. A session in progress is saved as you go (session_store), so leaving
 the app mid-session picks up at the same card.
+
+In the evening session the page runs a recap instead: the words introduced
+today and the ones missed today, one quick check each, by ear and by sight.
+It moves no schedule - it's a third meeting with the day's words, hours
+after the second, close to sleep.
 """
 
 import random
@@ -27,6 +32,7 @@ from datetime import date
 
 import streamlit as st
 
+import clock
 import db_manager as db
 import grammar_curriculum as gc
 import session_store as store
@@ -50,7 +56,7 @@ MAX_REMEDIES = 3        # diagnoses acted on per session, so repair never swamps
 MATURE_DAYS = 21        # from here on, pinyin waits behind a tap
 # what a session in progress is saved as; content, audio and the background
 # jobs are fetched again on return
-SAVED = ("wd_items", "wd_i", "wd_results", "wd_retried", "wd_rot", "wd_plan", "wd_date",
+SAVED = ("wd_items", "wd_i", "wd_results", "wd_retried", "wd_rot", "wd_plan", "wd_recap", "wd_date",
          "wd_enriched", "wd_remedies", "wd_mature", "wd_ans", "wd_setup", "wd_setup_i",
          "wd_intro_done", "wd_diag", "wd_rem", "wd_hook", "wd_logged")
 
@@ -61,7 +67,7 @@ def reset():
     store.drop(USER_ID, "words")
 
 
-if S.get("wd_date") and S.wd_date != str(date.today()):
+if S.get("wd_date") and S.wd_date != str(clock.today()):
     reset()
 if "words_exec" not in S:
     S.words_exec = ThreadPoolExecutor(max_workers=2)
@@ -88,14 +94,19 @@ store.notice()
 # ----------------------------------------------------------------------
 # start screen
 # ----------------------------------------------------------------------
-def begin(in_plan=False, review_cap=None, new_cap=None, unlocks=True):
-    plan = db.plan_word_session(USER_ID, review_cap=review_cap, new_cap=new_cap,
-                                unlocks=unlocks)
+def begin(in_plan=False, review_cap=None, new_cap=None, unlocks=True, recap=None):
+    """A session: reviews and new words, or - with recap=N - today's new and
+    missed words once more (at most N)."""
+    if recap:
+        plan = {"items": db.recap_session(USER_ID, cap=recap)}
+    else:
+        plan = db.plan_word_session(USER_ID, review_cap=review_cap, new_cap=new_cap,
+                                    unlocks=unlocks)
     reset()
-    S.wd_items, S.wd_i, S.wd_results = plan["items"], 0, []
+    S.wd_items, S.wd_i, S.wd_results, S.wd_recap = plan["items"], 0, [], bool(recap)
     S.wd_content, S.wd_futures, S.wd_retried, S.wd_rot = {}, {}, set(), {}
     S.wd_plan, S.wd_t0 = in_plan, time.time()
-    S.wd_date, S.wd_enriched, S.wd_remedies = str(date.today()), 0, 0
+    S.wd_date, S.wd_enriched, S.wd_remedies = str(clock.today()), 0, 0
     if plan["items"]:
         ids = {it["word"]["id"] for it in plan["items"]}
         S.wd_mature = {vid for (vid, skill), t in db.word_tracks(USER_ID, ids).items()
@@ -106,7 +117,8 @@ def begin(in_plan=False, review_cap=None, new_cap=None, unlocks=True):
 
 if "wd_items" not in S and tp.active("words"):
     p_ = tp.params("words")
-    begin(True, p_.get("reviews"), p_.get("new"), p_.get("unlocks", True))
+    begin(True, p_.get("reviews"), p_.get("new"), p_.get("unlocks", True),
+          recap=p_.get("cap") if p_.get("recap") else None)
     st.rerun()
 
 if "wd_items" not in S:
@@ -270,7 +282,7 @@ def finish(item, mode, result, detail, cid):
         # introduced today: a track at the start line; the first check is a
         # learning step and doesn't move it
         db.save_word_track(USER_ID, vid, ve.RECOGNITION,
-                           {"interval": 0, "next_review_date": date.today().isoformat()}, mode)
+                           {"interval": 0, "next_review_date": clock.today().isoformat()}, mode)
     counts = item["kind"] in ("review", "unlock", "step2")
     if counts and result != "ungraded":
         old = tracks.get((vid, skill)) or {}
@@ -489,7 +501,11 @@ if S.wd_i >= len(S.wd_items):
                     step="words" if in_plan else None, once_key="wd_logged")
     store.drop(USER_ID, "words")          # finished: nothing to pick up
     if not S.wd_items:
-        st.success("Nothing due and no new words available right now.")
+        st.success("No words from today to go over." if S.get("wd_recap") else
+                   "Nothing due and no new words available right now.")
+    elif S.get("wd_recap"):
+        st.success(f"Today's words, once more — {right} of {len(first)} right. "
+                   "Tomorrow morning's review will test them again.")
     else:
         st.success(f"Session done — {right} of {len(first)} right first time.")
     new = {r["chinese"]: r["english"] for r in res if r["kind"] in ("new", "step2")}
@@ -529,7 +545,7 @@ mode = su["mode"]
 ans = S.get("wd_ans")
 target = word["chinese"]
 label = {"new": "New word", "step2": "Second look", "unlock": "Now try using it",
-         "retry": "Once more", "review": "Review"}[item["kind"]]
+         "retry": "Once more", "review": "Review", "recap": "From today"}[item["kind"]]
 st.progress(S.wd_i / len(S.wd_items), text=f"{label} · {ve.MODE_TITLES[mode]}")
 
 if S.get("wd_rem"):

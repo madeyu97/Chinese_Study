@@ -11,13 +11,18 @@ them rather than read a transcription.
 Deliberately rendered in a plain screen font rather than the calligraphic
 face used in the writing drill - recognising printed type is a different
 skill from writing, and the one you need for signs, menus and messages.
+
+As a step of the evening session it reads a set number of sentences
+(the first one appears straight away), then moves on.
 """
 
 import time
 
 import streamlit as st
 
+import clock
 import db_manager as db
+import today_plan as tp
 from auth import require_login, sidebar_user_badge
 from reading_engine import annotate, generate_sentence, analyse
 from config import GENERATION_MODEL
@@ -31,22 +36,41 @@ MAX_SECONDS_PER_SENTENCE = 300
 
 def shown(chinese):
     """A new sentence is on screen: log it as reading, and the time spent on
-    the previous one."""
+    the previous one (in a plan step, the step logs its own time)."""
     now = time.time()
-    last = st.session_state.get("reading_t")
-    if last:
-        db.log_study_session(USER_ID, "reading", min(now - last, MAX_SECONDS_PER_SENTENCE),
-                             items=1)
-    st.session_state.reading_t = now
+    rp = st.session_state.get("reading_plan")
+    if rp:
+        rp["read"] += 1
+    else:
+        last = st.session_state.get("reading_t")
+        if last:
+            db.log_study_session(USER_ID, "reading", min(now - last, MAX_SECONDS_PER_SENTENCE),
+                                 items=1)
+        st.session_state.reading_t = now
     db.log_activity(USER_ID, "read", chinese)
+
+
+def reset_plan():
+    for k in ("reading_plan", "reading_current", "reading_revealed", "reading_logged"):
+        st.session_state.pop(k, None)
 
 st.set_page_config(page_title="Reading", page_icon="📖", layout="centered")
 
 USER = require_login()
 USER_ID = USER["id"]
 
+S = st.session_state
+if S.get("reading_plan") and S.reading_plan.get("date") != clock.today().isoformat():
+    reset_plan()                    # yesterday's plan left open in the tab
+if "reading_plan" not in S and tp.active("reading"):
+    S.reading_plan = {"n": tp.params("reading").get("sentences", 4), "read": 0,
+                      "t0": time.time(), "date": clock.today().isoformat()}
+    S.reading_current = None
+PLAN = S.get("reading_plan")
+
 with st.sidebar:
     sidebar_user_badge()
+    tp.sidebar("reading", reset_plan)
     st.header("📖 Reading")
     stats = db.reading_stats(USER_ID)
     st.metric("Characters you can write", stats["known_characters"])
@@ -62,17 +86,25 @@ st.title("📖 Reading")
 # immediately, and the set only ever grows.
 known = db.known_characters(USER_ID)
 focus = [c for c in db.recent_characters(USER_ID, 12) if c in known]
-if len(known) < 8:
+if len(known) < tp.READING_MIN_CHARACTERS:
     st.info(
         f"You've written **{len(known)}** characters so far. Reading practice "
-        f"opens up at about 8 - drill a few more in the handwriting section "
-        f"and sentences will start appearing here.")
+        f"opens up at about {tp.READING_MIN_CHARACTERS} - drill a few more in the "
+        f"handwriting section and sentences will start appearing here.")
+    if PLAN:
+        tp.session_done(USER_ID, "reading", PLAN["t0"], step="reading", once_key="reading_logged")
+        tp.continue_ui(reset_plan)
     st.stop()
 
-max_unknown = st.slider(
-    "New characters allowed per sentence", 0, 6, 3,
-    help="Characters you haven't written yet. They always show their pinyin. "
-         "Set to 0 for sentences built purely from what you know.")
+if PLAN:
+    max_unknown = 3                 # the plan reads at the usual level; no setting to choose
+    st.progress(min(PLAN["read"], PLAN["n"]) / PLAN["n"],
+                text=f"Sentence {max(1, min(PLAN['read'], PLAN['n']))} of {PLAN['n']}")
+else:
+    max_unknown = st.slider(
+        "New characters allowed per sentence", 0, 6, 3,
+        help="Characters you haven't written yet. They always show their pinyin. "
+             "Set to 0 for sentences built purely from what you know.")
 
 # ----------------------------------------------------------------------
 # THE SENTENCE
@@ -97,8 +129,7 @@ if focus:
     st.caption("Recently learned, so sentences will lean on these: "
                + " ".join(focus[:10]))
 
-col1, col2 = st.columns(2)
-if col1.button("📖 Next sentence", type="primary", width="stretch"):
+def next_sentence():
     pool = db.reading_bank_for(USER_ID, known, max_unknown, limit=30,
                                focus=focus)
     current = st.session_state.get("reading_current")
@@ -125,16 +156,24 @@ if col1.button("📖 Next sentence", type="primary", width="stretch"):
         st.session_state.reading_revealed = set()
         db.reading_mark_seen(USER_ID, chosen["id"])
         shown(chosen["chinese"])
-        st.rerun()
     else:
         st.session_state.reading_current = "GENERATE"
-        st.rerun()
-
-topic = col2.text_input("Topic (optional)", placeholder="food, weather…")
-
-if st.button("✨ Write me a new one", width="stretch"):
-    st.session_state.reading_current = "GENERATE"
     st.rerun()
+
+
+plan_finished = bool(PLAN and (PLAN["read"] >= PLAN["n"] or PLAN.get("failed")))
+if PLAN and not plan_finished and S.get("reading_current") is None:
+    next_sentence()                 # the plan starts reading straight away
+topic = ""
+if not plan_finished:
+    col1, col2 = st.columns(2)
+    if col1.button("📖 Next sentence", type="primary", width="stretch"):
+        next_sentence()
+    if not PLAN:
+        topic = col2.text_input("Topic (optional)", placeholder="food, weather…")
+        if st.button("✨ Write me a new one", width="stretch"):
+            st.session_state.reading_current = "GENERATE"
+            st.rerun()
 
 if st.session_state.reading_current == "GENERATE":
     with st.spinner("Writing a sentence from your characters…"):
@@ -155,6 +194,8 @@ if st.session_state.reading_current == "GENERATE":
     else:
         st.warning(report)
         st.session_state.reading_current = None
+        if PLAN:
+            PLAN["failed"] = True       # don't keep retrying; the step can still close
 
 card = st.session_state.reading_current
 if isinstance(card, dict):
@@ -219,3 +260,9 @@ if isinstance(card, dict):
                f"{stats_line['unknown_count']} new to you")
 else:
     st.caption("Press **Next sentence** to begin.")
+
+if PLAN and (PLAN["read"] >= PLAN["n"] or PLAN.get("failed")):
+    st.divider()
+    tp.session_done(USER_ID, "reading", PLAN["t0"], items=PLAN["read"], step="reading",
+                    once_key="reading_logged")
+    tp.continue_ui(reset_plan)

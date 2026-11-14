@@ -14,6 +14,8 @@ import psycopg2.extras
 from psycopg2 import pool
 import streamlit as st
 
+import clock
+
 from config import (
     PRECISION_RELAPSE,
     VOCAB_CSV_PATH,
@@ -334,6 +336,13 @@ def init_db():
     ''')
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_study_sessions "
                    "ON study_sessions (user_id, day)")
+    # Which of the day's three sessions (morning / afternoon / evening) a plan
+    # step belonged to, and when it finished (an absolute time, so the gap
+    # before the next session is measured correctly whatever the server's
+    # time zone).
+    cursor.execute("ALTER TABLE study_sessions ADD COLUMN IF NOT EXISTS slot TEXT")
+    cursor.execute("ALTER TABLE study_sessions ADD COLUMN IF NOT EXISTS "
+                   "finished_at TIMESTAMPTZ DEFAULT NOW()")
     # A session in progress on any page (words, sentences, grammar, tones, a
     # game, today's plan), one per learner and page, so it survives a
     # dropped connection. See session_store.py.
@@ -1128,7 +1137,7 @@ def _import_vocab(force=False):
         by_key.setdefault((c, _pinyin_key(p)), []).append(rec)
         by_chinese.setdefault(c, []).append(rec)
 
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
     inserts, changed = [], {}
 
     def change(rec, **fields):
@@ -1244,7 +1253,7 @@ def _ensure_progress(cursor, user_id, vocab_id):
         INSERT INTO vocab_progress (user_id, vocab_id, next_review_date)
         VALUES (%s, %s, %s)
         ON CONFLICT (user_id, vocab_id) DO NOTHING
-    """, (user_id, vocab_id, date.today().isoformat()))
+    """, (user_id, vocab_id, clock.today().isoformat()))
 
 
 # ======================================================================
@@ -1345,7 +1354,7 @@ def get_session_words(user_id, total=MAX_REVIEWS_PER_DAY,
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    today = date.today().isoformat()
+    today = clock.today().isoformat()
     # 1. everything actually due, oldest/most-urgent first
     cursor.execute(_VOCAB_SELECT + """
         WHERE p.review_count > 0 AND p.next_review_date <= %s
@@ -1483,7 +1492,7 @@ def _hw_entry(ch, is_new, personal_freq, progress, vocab_rows):
         "ease_factor": float((progress or {}).get("ease_factor", 2.5)),
         "review_count": (progress or {}).get("review_count", 0),
         "next_review_date": (progress or {}).get(
-            "next_review_date", date.today().isoformat()),
+            "next_review_date", clock.today().isoformat()),
         "stroke_count": get_stroke_count(ch),
         "char_pinyin": derive_pinyin(ch),
         "word": ctx.get("chinese", ch),
@@ -1553,7 +1562,7 @@ def list_studied_characters(user_id, scope="all"):
     Definitions match the sidebar counters exactly - 'practiced' is any
     character with a progress row, 'mastered' is one pushed 21+ days out.
     """
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute("""SELECT character, interval, ease_factor, review_count,
@@ -1619,7 +1628,7 @@ def get_curriculum_session(user_id, new_count=5, limit_rank=500):
     and gloss are used instead, so nothing in the curriculum is unreachable.
     """
     from character_curriculum import CHARACTERS, INFO
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
     wanted = CHARACTERS[:limit_rank]
 
     conn = get_connection()
@@ -1707,7 +1716,7 @@ def get_handwriting_counts(user_id):
     stroke counts and a context word for every character in the user's
     vocabulary, on every page load. It now counts in SQL.
     """
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT v.chinese FROM vocab v JOIN vocab_progress p
@@ -1736,7 +1745,7 @@ def handwriting_new_today(user_id):
     cursor = conn.cursor()
     cursor.execute("""SELECT COUNT(*) FROM handwriting_progress
                       WHERE user_id = %s AND first_seen_date = %s""",
-                   (user_id, date.today().isoformat()))
+                   (user_id, clock.today().isoformat()))
     n = cursor.fetchone()[0]
     conn.close()
     return n
@@ -1809,7 +1818,7 @@ def get_handwriting_session(user_id, new_count=5):
     """
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
 
     # 1. Pull all vocab the user is actively studying (or has mastered),
     #    with pinyin/english so each character can carry its word context.
@@ -1896,12 +1905,12 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
         current_ease=current_state.get('ease_factor', 2.5),
         grade=grade,
     )
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
 
     if requeue:
         # Even a later-clean requeue can't push it past tomorrow.
         from datetime import timedelta
-        next_review_date = (date.today() + timedelta(days=1)).isoformat()
+        next_review_date = (clock.today() + timedelta(days=1)).isoformat()
         new_interval = min(new_interval, 1)
 
     # A clean write - no mistakes, no reveal - earns one step of extra
@@ -2284,9 +2293,9 @@ def log_activity(user_id, kind, item=None, grade=None, mistakes=0):
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""INSERT INTO activity_log
-                          (user_id, kind, item, grade, mistakes)
-                          VALUES (%s, %s, %s, %s, %s)""",
-                       (user_id, kind, (item or "")[:80], grade, mistakes or 0))
+                          (user_id, day, kind, item, grade, mistakes)
+                          VALUES (%s, %s, %s, %s, %s, %s)""",
+                       (user_id, clock.today(), kind, (item or "")[:80], grade, mistakes or 0))
         conn.commit()
         conn.close()
         clear_caches()
@@ -2299,17 +2308,18 @@ def activity_totals(user_id, days=7):
     """Per-kind counts over the last `days` days, plus today's total."""
     conn = get_connection()
     cursor = conn.cursor()
+    day = clock.today()
     cursor.execute("""SELECT kind, COUNT(*) FROM activity_log
-                      WHERE user_id = %s AND day > CURRENT_DATE - %s::integer
-                      GROUP BY kind""", (user_id, days))
+                      WHERE user_id = %s AND day > %s::date - %s::integer
+                      GROUP BY kind""", (user_id, day, days))
     by_kind = {k: n for k, n in cursor.fetchall()}
     cursor.execute("""SELECT COUNT(*) FROM activity_log
-                      WHERE user_id = %s AND day = CURRENT_DATE""", (user_id,))
+                      WHERE user_id = %s AND day = %s""", (user_id, day))
     today = cursor.fetchone()[0] or 0
     cursor.execute("""SELECT COUNT(*) FILTER (WHERE grade >= 2), COUNT(*)
                       FROM activity_log
-                      WHERE user_id = %s AND day > CURRENT_DATE - %s::integer
-                        AND grade IS NOT NULL""", (user_id, days))
+                      WHERE user_id = %s AND day > %s::date - %s::integer
+                        AND grade IS NOT NULL""", (user_id, day, days))
     good, total = cursor.fetchone()
     conn.close()
     return {"by_kind": by_kind, "today": today,
@@ -2331,7 +2341,7 @@ def activity_streak(user_id):
     if not days:
         return 0
     from datetime import timedelta
-    today = date.today()
+    today = clock.today()
     cursor_day = today if days[0] == today else today - timedelta(days=1)
     streak = 0
     for d in days:
@@ -2349,26 +2359,27 @@ def daily_series(user_id, days=14):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT day, COUNT(*) FROM activity_log
-                      WHERE user_id = %s AND day > CURRENT_DATE - %s::integer
-                      GROUP BY day""", (user_id, days))
+                      WHERE user_id = %s AND day > %s::date - %s::integer
+                      GROUP BY day""", (user_id, clock.today(), days))
     counts = {d: n for d, n in cursor.fetchall()}
     conn.close()
-    today = date.today()
+    today = clock.today()
     return [(today - timedelta(days=i), counts.get(today - timedelta(days=i), 0))
             for i in range(days - 1, -1, -1)]
 
 
-def log_study_session(user_id, activity, seconds, in_plan=False, items=0):
-    """Record one finished session in the time ledger. Never raises."""
+def log_study_session(user_id, activity, seconds, in_plan=False, items=0, slot=None):
+    """Record one finished session in the time ledger. Never raises.
+    slot: the day's session (morning / afternoon / evening) a plan step ran in."""
     try:
         seconds = max(0, min(int(seconds or 0), MAX_SESSION_SECONDS))
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""INSERT INTO study_sessions
-                          (user_id, day, activity, seconds, items, in_plan)
-                          VALUES (%s, %s, %s, %s, %s, %s)""",
-                       (user_id, date.today(), activity, seconds, int(items or 0),
-                        bool(in_plan)))
+                          (user_id, day, activity, seconds, items, in_plan, slot, finished_at)
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                       (user_id, clock.today(), activity, seconds, int(items or 0),
+                        bool(in_plan), slot, clock.now()))
         conn.commit()
         conn.close()
         clear_caches()
@@ -2382,7 +2393,7 @@ def plan_done_today(user_id):
     cursor = conn.cursor()
     cursor.execute("""SELECT DISTINCT activity FROM study_sessions
                       WHERE user_id = %s AND day = %s AND in_plan""",
-                   (user_id, date.today()))
+                   (user_id, clock.today()))
     out = {r[0] for r in cursor.fetchall()}
     conn.close()
     return out
@@ -2394,24 +2405,58 @@ def mark_plan_complete(user_id):
         log_study_session(user_id, "plan_complete", 0, in_plan=True)
 
 
+def day_progress(user_id):
+    """Where today's three sessions stand:
+    {"done": {"morning:words", ...}   plan steps finished, by session
+     "finished": {slot: datetime}     sessions finished, and when
+     "skipped": {slot, ...}}          sessions skipped"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT slot, activity, MAX(finished_at) FROM study_sessions
+                      WHERE user_id = %s AND day = %s AND in_plan AND slot IS NOT NULL
+                      GROUP BY slot, activity""", (user_id, clock.today()))
+    out = {"done": set(), "finished": {}, "skipped": set()}
+    for slot, activity, at in cursor.fetchall():
+        if activity == "session_complete":
+            out["finished"][slot] = at
+        elif activity == "session_skipped":
+            out["skipped"].add(slot)
+        else:
+            out["done"].add(f"{slot}:{activity}")
+    conn.close()
+    return out
+
+
+def mark_session_complete(user_id, slot, skipped=False):
+    """Record that one of today's sessions is finished (or skipped), once."""
+    prog = day_progress(user_id)
+    if slot in prog["finished"] or slot in prog["skipped"]:
+        return
+    log_study_session(user_id, "session_skipped" if skipped else "session_complete", 0,
+                      in_plan=True, slot=slot)
+
+
 @_cached(ttl=20)
 def study_minutes(user_id, days=7):
     """Minutes by activity and by strand over the last `days` days, plus the
     number of days the whole plan was done and days with any study."""
     from datetime import timedelta
-    since = date.today() - timedelta(days=days - 1)
+    since = clock.today() - timedelta(days=days - 1)
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT activity, SUM(seconds) FROM study_sessions
                       WHERE user_id = %s AND day >= %s GROUP BY activity""",
                    (user_id, since))
+    markers = ("plan_complete", "session_complete", "session_skipped")
     by_activity = {a: round((sec or 0) / 60) for a, sec in cursor.fetchall()
-                   if a != "plan_complete"}
+                   if a not in markers}
     cursor.execute("""SELECT COUNT(DISTINCT day) FILTER (WHERE activity = 'plan_complete'),
-                             COUNT(DISTINCT day) FILTER (WHERE activity <> 'plan_complete')
+                             COUNT(DISTINCT day) FILTER (WHERE activity NOT IN
+                                 ('plan_complete', 'session_complete', 'session_skipped')),
+                             COUNT(*) FILTER (WHERE activity = 'session_complete')
                       FROM study_sessions WHERE user_id = %s AND day >= %s""",
                    (user_id, since))
-    plan_days, study_days = cursor.fetchone()
+    plan_days, study_days, sessions = cursor.fetchone()
     conn.close()
     by_strand = {}
     for a, m in by_activity.items():
@@ -2419,7 +2464,7 @@ def study_minutes(user_id, days=7):
         by_strand[k] = by_strand.get(k, 0) + m
     return {"by_activity": by_activity, "by_strand": by_strand,
             "total": sum(by_activity.values()), "plan_days": plan_days or 0,
-            "study_days": study_days or 0}
+            "study_days": study_days or 0, "sessions": sessions or 0}
 
 
 def recent_activity(limit=12):
@@ -2428,9 +2473,9 @@ def recent_activity(limit=12):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute("""SELECT u.display_name, a.kind, a.day, COUNT(*) AS n
                       FROM activity_log a JOIN users u ON u.id = a.user_id
-                      WHERE a.day > CURRENT_DATE - 14
+                      WHERE a.day > %s::date - 14
                       GROUP BY u.display_name, a.kind, a.day
-                      ORDER BY a.day DESC, n DESC LIMIT %s""", (limit,))
+                      ORDER BY a.day DESC, n DESC LIMIT %s""", (clock.today(), limit))
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
@@ -2524,7 +2569,7 @@ def import_herbs_from_csv(path=None, force=False):
         return 0, 0, (f"Couldn't find a Chinese column in {list(df.columns)}. "
                       f"Rename one to 'Chinese'.")
 
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT chinese FROM herbs")
@@ -2605,7 +2650,7 @@ def get_herb_session(user_id, new_count=5):
     counts towards every other herb containing it.
     """
     from radical_engine import describe_word
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
     _by_char, herbs = herb_characters()
     if not herbs:
         return []
@@ -2675,7 +2720,7 @@ def herb_character_counts(user_id):
     if not by_char:
         return {"herbs": 0, "characters": 0, "due": 0, "new": 0}
     chars = list(by_char)
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     ph = ",".join(["%s"] * len(chars))
@@ -2733,7 +2778,7 @@ def recent_characters(user_id, limit=12):
 
 def due_characters(user_id):
     """Characters whose handwriting review is due - worth seeing in print."""
-    today_str = date.today().isoformat()
+    today_str = clock.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT character FROM handwriting_progress
@@ -2800,7 +2845,7 @@ def reading_mark_seen(user_id, sentence_id):
                       ON CONFLICT (user_id, sentence_id) DO UPDATE SET
                         seen_count = reading_progress.seen_count + 1,
                         last_seen = EXCLUDED.last_seen""",
-                   (user_id, sentence_id, date.today().isoformat()))
+                   (user_id, sentence_id, clock.today().isoformat()))
     conn.commit()
     conn.close()
 
@@ -2879,7 +2924,7 @@ def grammar_progress(user_id):
 
 def grammar_save_progress(user_id, structure_id, next_review_date, interval,
                           ease, score):
-    today = date.today().isoformat()
+    today = clock.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -2900,7 +2945,7 @@ def grammar_new_today(user_id):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM grammar_progress WHERE user_id = %s "
-                   "AND first_seen = %s", (user_id, date.today().isoformat()))
+                   "AND first_seen = %s", (user_id, clock.today().isoformat()))
     n = cursor.fetchone()[0]
     conn.close()
     return n
@@ -2918,7 +2963,7 @@ def grammar_pick_set(user_id, structure_id, known_count):
                       ORDER BY created_at DESC""", (user_id, structure_id))
     sets = [dict(r) for r in cursor.fetchall()]
     conn.close()
-    today = date.today().isoformat()
+    today = clock.today().isoformat()
     fresh_enough = [x for x in sets
                     if known_count <= (x["known_count"] or 0) * (1 + GRAMMAR_REFRESH_GROWTH)]
     usable = [x for x in fresh_enough if x["served_count"] < 2 and x["last_served"] != today]
@@ -2970,7 +3015,7 @@ def grammar_mark_served(set_id):
     cursor = conn.cursor()
     cursor.execute("""UPDATE grammar_drill_sets SET served_count = served_count + 1,
                       last_served = %s WHERE id = %s""",
-                   (date.today().isoformat(), set_id))
+                   (clock.today().isoformat(), set_id))
     conn.commit()
     conn.close()
 
@@ -3039,7 +3084,7 @@ def word_tracks(user_id, vocab_ids):
 def due_words(user_id, skill, limit, today=None):
     """Words whose `skill` is due, most overdue first, repeated misses
     breaking ties."""
-    today = (today or date.today()).isoformat()
+    today = (today or clock.today()).isoformat()
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute(f"""
@@ -3055,7 +3100,7 @@ def due_words(user_id, skill, limit, today=None):
 
 
 def count_due(user_id, today=None):
-    today = (today or date.today()).isoformat()
+    today = (today or clock.today()).isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT COUNT(*) FROM word_skill WHERE user_id = %s
@@ -3121,7 +3166,7 @@ def introduced_today(user_id):
     cursor = conn.cursor()
     cursor.execute("""SELECT COUNT(*) FROM word_skill WHERE user_id = %s
                       AND skill = 'recognition' AND introduced_on = %s""",
-                   (user_id, date.today().isoformat()))
+                   (user_id, clock.today().isoformat()))
     n = cursor.fetchone()[0]
     conn.close()
     return n
@@ -3131,7 +3176,7 @@ def save_word_track(user_id, vocab_id, skill, track, mode=None):
     """Store a skill track. The recognition track is mirrored into
     vocab_progress so everything else in the app keeps seeing progress."""
     track = dict(track)
-    track["next_review_date"] = track.get("next_review_date") or date.today().isoformat()
+    track["next_review_date"] = track.get("next_review_date") or clock.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -3147,7 +3192,7 @@ def save_word_track(user_id, vocab_id, skill, track, mode=None):
     """, (user_id, vocab_id, skill, track.get("interval", 0), track.get("ease", 2.5),
           track.get("next_review_date"), track.get("reps", 0), track.get("lapses", 0),
           track.get("streak", 0), mode or track.get("last_mode"), track.get("last_result"),
-          track.get("introduced_on") or date.today().isoformat()))
+          track.get("introduced_on") or clock.today().isoformat()))
     if skill == "recognition":
         cursor.execute("""
             INSERT INTO vocab_progress (user_id, vocab_id, next_review_date, interval,
@@ -3324,7 +3369,7 @@ def word_content_for(user_id, word, allow_generate=True, known=None):
     if cached and not (stale and allow_generate):
         return cached["payload"], cached["id"]
     if allow_generate:
-        structures = wc.practising_structures(grammar_progress(user_id), date.today())
+        structures = wc.practising_structures(grammar_progress(user_id), clock.today())
         recent = [w for w in recent_words(user_id) if w != word["chinese"]]
         payload = wc.generate(word, known, structures, recent)
         if payload:
@@ -3414,7 +3459,7 @@ def recent_words(user_id, days=14, limit=30):
     """Words introduced in the last `days` and answered correctly at least
     once - what grammar drills and new word sentences should recycle."""
     from datetime import timedelta
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    cutoff = (clock.today() - timedelta(days=days)).isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT v.chinese FROM word_skill s JOIN vocab v ON v.id = s.vocab_id
@@ -3496,9 +3541,9 @@ def drill_progress_save(user_id, drill, key, track):
             lapses = EXCLUDED.lapses, streak = EXCLUDED.streak,
             last_result = EXCLUDED.last_result
     """, (user_id, drill, key, track.get("interval", 0), track.get("ease", 2.5),
-          track.get("next_review_date") or date.today().isoformat(), track.get("reps", 0),
+          track.get("next_review_date") or clock.today().isoformat(), track.get("reps", 0),
           track.get("lapses", 0), track.get("streak", 0), track.get("last_result"),
-          date.today().isoformat()))
+          clock.today().isoformat()))
     conn.commit()
     conn.close()
 
@@ -3509,7 +3554,7 @@ def drill_new_today(user_id, drill):
     cursor = conn.cursor()
     cursor.execute("""SELECT COUNT(*) FROM drill_progress WHERE user_id = %s
                       AND drill = %s AND first_seen = %s""",
-                   (user_id, drill, date.today().isoformat()))
+                   (user_id, drill, clock.today().isoformat()))
     n = cursor.fetchone()[0]
     conn.close()
     return n
@@ -3535,7 +3580,7 @@ def save_game_score(user_id, game, score):
                       ON CONFLICT (user_id, game) DO UPDATE SET
                           best = GREATEST(game_scores.best, EXCLUDED.best),
                           plays = game_scores.plays + 1, last_played = EXCLUDED.last_played""",
-                   (user_id, game, score, date.today().isoformat()))
+                   (user_id, game, score, clock.today().isoformat()))
     conn.commit()
     conn.close()
     return score > before
@@ -3550,7 +3595,7 @@ def saved_session_put(user_id, name, state_json, elapsed=0):
                       ON CONFLICT (user_id, name) DO UPDATE SET
                           day = EXCLUDED.day, state = EXCLUDED.state,
                           elapsed = EXCLUDED.elapsed, updated_at = NOW()""",
-                   (user_id, name, date.today(), state_json, float(elapsed or 0)))
+                   (user_id, name, clock.today(), state_json, float(elapsed or 0)))
     conn.commit()
     conn.close()
 
@@ -3570,7 +3615,7 @@ def saved_session_get(user_id, name, same_day=True, max_age_hours=24):
     except Exception as e:
         logging.warning(f"[STORE] saved {name} unreadable: {e}")
         return None
-    if not row or (same_day and row[2] != date.today()):
+    if not row or (same_day and row[2] != clock.today()):
         return None
     return {"state": row[0], "elapsed": row[1]}
 
@@ -3602,13 +3647,15 @@ def vocab_ids_for(chineses):
 
 # ---- sentence practice (Listen & speak) ------------------------------------
 def sentence_practice_words(user_id, limit=40):
-    """Words already introduced, for sentence listening and speaking: due
-    recognition first, then words introduced in the last fortnight (weakest
-    first), then the rest at random. Never a word you haven't met, so this
-    page adds no new material. Each row carries both skill tracks."""
+    """Words already introduced, for sentence listening and speaking: words
+    introduced today first (so the morning's new words come back hours later
+    in sentences), then due recognition, then words introduced in the last
+    fortnight (weakest first), then the rest at random. Never a word you
+    haven't met, so this page adds no new material. Each row carries both
+    skill tracks."""
     from datetime import timedelta
-    today = date.today().isoformat()
-    fortnight = (date.today() - timedelta(days=14)).isoformat()
+    today = clock.today().isoformat()
+    fortnight = (clock.today() - timedelta(days=14)).isoformat()
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute(f"""
@@ -3621,11 +3668,12 @@ def sentence_practice_words(user_id, limit=40):
                                AND p.skill = 'production'
         WHERE r.user_id = %s AND r.skill = 'recognition'
           AND v.chinese ~ '^[一-鿿]{{1,8}}$'
-        ORDER BY (COALESCE(r.next_review_date, '') <= %s) DESC,
+        ORDER BY (COALESCE(r.introduced_on, '') = %s) DESC,
+                 (COALESCE(r.next_review_date, '') <= %s) DESC,
                  (COALESCE(r.introduced_on, '') >= %s) DESC,
                  r.interval ASC, RANDOM()
         LIMIT %s
-    """, (user_id, today, fortnight, limit))
+    """, (user_id, today, today, fortnight, limit))
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
@@ -3647,3 +3695,44 @@ def find_words(query, limit=20):
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
+
+
+def recap_session(user_id, cap=15, rng=None):
+    """The evening's second look: words introduced today and words missed
+    today (anywhere but games), as quick recognition checks - by ear and by
+    sight in turn. They don't move any schedule (tomorrow's reviews are
+    already set); they're one more retrieval, hours after the first, just
+    before sleep."""
+    import random as _random
+    import vocab_engine as ve
+    rng = rng or _random.Random()
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute(f"""
+        SELECT {_WORD_COLS}, BOOL_OR(x.why = 'new') AS is_new
+        FROM (
+            SELECT vocab_id, 'new' AS why FROM word_skill
+            WHERE user_id = %s AND skill = 'recognition' AND introduced_on = %s
+            UNION ALL
+            SELECT vocab_id, 'missed' FROM word_attempts
+            WHERE user_id = %s AND result IN ('wrong', 'close')
+              AND (created_at AT TIME ZONE current_setting('TimeZone')) >= %s
+              AND COALESCE(detail->>'kind', '') NOT IN ('game', 'recap', 'remedy')
+        ) x JOIN vocab v ON v.id = x.vocab_id
+        JOIN word_skill r ON r.user_id = %s AND r.vocab_id = v.id AND r.skill = 'recognition'
+        GROUP BY v.id
+    """, (user_id, clock.today().isoformat(), user_id, clock.day_start(), user_id))
+    words = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    rng.shuffle(words)
+    words.sort(key=lambda w: not w["is_new"])        # today's new words first, then misses
+    words = words[:cap]
+    rng.shuffle(words)
+    return [{"word": w, "skill": ve.RECOGNITION, "kind": "recap",
+             "mode": "audio_to_meaning" if n % 2 == 0 else "zh_to_meaning"}
+            for n, w in enumerate(words)]
+
+
+def recap_count(user_id):
+    """How many words the evening recap would go over right now."""
+    return len(recap_session(user_id, cap=10**6))

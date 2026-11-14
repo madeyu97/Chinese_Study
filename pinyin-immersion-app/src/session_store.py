@@ -26,8 +26,6 @@ import time
 
 import streamlit as st
 
-import db_manager as db
-
 
 def _enc(v):
     if isinstance(v, set):
@@ -68,6 +66,7 @@ def _marker(name):
 def keep(user_id, name, keys, clock=None):
     """Save these session keys if they changed since the last save. Never
     raises: saving must not interrupt study."""
+    import db_manager as db
     S = st.session_state
     try:
         blob = _blob(_enc({k: S[k] for k in keys if k in S}))
@@ -84,6 +83,7 @@ def keep(user_id, name, keys, clock=None):
 def resume(user_id, name, keys, clock=None, same_day=True, max_age_hours=24):
     """Put a saved session back into this browser session. Returns True if
     there was one."""
+    import db_manager as db
     row = db.saved_session_get(user_id, name, same_day=same_day, max_age_hours=max_age_hours)
     if not row:
         return False
@@ -105,6 +105,7 @@ def resume(user_id, name, keys, clock=None, same_day=True, max_age_hours=24):
 
 def drop(user_id, name):
     """The session is finished or abandoned: nothing to pick up later."""
+    import db_manager as db
     S = st.session_state
     if S.get(_marker(name)) == "dropped":
         return

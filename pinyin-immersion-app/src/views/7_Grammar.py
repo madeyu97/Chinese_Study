@@ -19,6 +19,7 @@ from datetime import date
 
 import streamlit as st
 
+import clock
 import db_manager as db
 import grammar_curriculum as gc
 import grammar_drills as gd
@@ -41,7 +42,7 @@ S = st.session_state
 known = db.grammar_known_vocab(USER_ID)
 progress = db.grammar_progress(USER_ID)
 order = gc.learning_order()
-queue = gd.todays_queue(order, progress, date.today(),
+queue = gd.todays_queue(order, progress, clock.today(),
                         db.grammar_new_today(USER_ID), GRAMMAR_NEW_PER_DAY)
 
 
@@ -56,7 +57,7 @@ def reset_all():
     store.drop(USER_ID, "grammar")
 
 
-if S.get("gr_plan") and S.gr_plan.get("date") != date.today().isoformat():
+if S.get("gr_plan") and S.gr_plan.get("date") != clock.today().isoformat():
     reset_all()                     # yesterday's plan left open in the tab
 if "gr_sid" not in S and "gr_plan" not in S:
     store.resume(USER_ID, "grammar", SAVED, clock="gr_t0")
@@ -157,7 +158,7 @@ def next_item():
 # ----------------------------------------------------------------------
 if "gr_sid" not in S and "gr_plan" not in S and tp.active("grammar"):
     ids = [i for i in tp.params("grammar").get("ids", []) if gc.get(i)]
-    S.gr_plan = {"ids": ids, "i": 0, "t0": time.time(), "date": date.today().isoformat()}
+    S.gr_plan = {"ids": ids, "i": 0, "t0": time.time(), "date": clock.today().isoformat()}
     if ids:
         start(ids[0])
     st.rerun()

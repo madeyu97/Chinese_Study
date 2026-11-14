@@ -25,6 +25,8 @@ import random
 import re
 from datetime import date, timedelta
 
+import clock
+
 RECOGNITION, PRODUCTION = "recognition", "production"
 REC_MODES = ("zh_to_meaning", "audio_to_meaning")
 PROD_MODES = ("cloze", "meaning_to_zh", "spoken")
@@ -50,7 +52,7 @@ MAX_INTERVAL = 365
 def update_track(track, result, today=None):
     """Apply one retrieval result to a skill track. Returns a new dict.
     'ungraded' leaves the track untouched."""
-    today = today or date.today()
+    today = today or clock.today()
     track = dict(track or {})
     if result not in GRADES:
         return track

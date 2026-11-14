@@ -25,6 +25,7 @@ from datetime import date
 
 import streamlit as st
 
+import clock
 import db_manager as db
 import session_store as store
 import today_plan as tp
@@ -54,7 +55,7 @@ def reset():
     store.drop(USER_ID, "sentences")
 
 
-if S.get("sn_date") and S.sn_date != str(date.today()):
+if S.get("sn_date") and S.sn_date != str(clock.today()):
     reset()
 if "sn_cards" not in S and store.resume(USER_ID, "sentences", SAVED, clock="sn_t0"):
     if S.get("sn_ex"):                    # the audio file didn't survive; make it again
@@ -81,7 +82,7 @@ def build_cards(n_listen, n_speak, rng=None):
     from words you can say (production due first, then ones you recognise
     reliably). No word appears twice."""
     rng = rng or random.Random()
-    today = date.today().isoformat()
+    today = clock.today().isoformat()
     rows = db.sentence_practice_words(USER_ID, limit=60)
     listen = rows[:n_listen]
     used = {w["id"] for w in listen}
@@ -102,7 +103,7 @@ def begin(n_listen, n_speak, in_plan):
     reset()
     S.sn_cards = build_cards(n_listen, n_speak)
     S.sn_i, S.sn_results, S.sn_plan = 0, [], in_plan
-    S.sn_t0, S.sn_date = time.time(), str(date.today())
+    S.sn_t0, S.sn_date = time.time(), str(clock.today())
 
 
 if "sn_cards" not in S:
@@ -229,7 +230,7 @@ def record(result, detail, kind):
     card_mode = f"sentence_{mode}"
     old = db.word_tracks(USER_ID, [vid]).get((vid, skill))
     scheduled = False
-    if result in ve.GRADES and old and (old.get("next_review_date") or "") <= date.today().isoformat():
+    if result in ve.GRADES and old and (old.get("next_review_date") or "") <= clock.today().isoformat():
         new = ve.update_track(old, result)
         new["introduced_on"] = old.get("introduced_on")
         db.save_word_track(USER_ID, vid, skill, new, card_mode)

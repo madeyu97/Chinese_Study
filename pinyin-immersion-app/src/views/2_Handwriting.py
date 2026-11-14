@@ -25,6 +25,7 @@ from datetime import date
 
 import streamlit as st
 
+import clock
 import today_plan as tp
 from auth import require_login, sidebar_user_badge
 from config import HANDWRITING_NEW_PER_DAY
@@ -66,7 +67,7 @@ def end_session():
         S.pop(k, None)
 
 
-if (S.get("hw_plan") or S.get("hw_plan_empty")) and S.get("hw_day") != date.today().isoformat():
+if (S.get("hw_plan") or S.get("hw_plan_empty")) and S.get("hw_day") != clock.today().isoformat():
     end_session()                   # yesterday's plan left open in the tab
 
 with st.sidebar:
@@ -101,7 +102,7 @@ def launch(chars, mode, in_plan=False, rerun=True):
     S.hw_sid = S.hw_payload["session_id"]
     S.hw_processed = 0
     S.hw_done = False
-    S.hw_plan, S.hw_t0, S.hw_day = in_plan, time.time(), date.today().isoformat()
+    S.hw_plan, S.hw_t0, S.hw_day = in_plan, time.time(), clock.today().isoformat()
     S.pop("hw_logged", None)
     # seed states so the first grade of each char has its SRS/history context
     S.hw_state_seed = {c["character"]: c for c in chars}
@@ -120,7 +121,7 @@ if "hw_payload" not in S and (tp.active("handwriting") or S.get("hw_plan_empty")
         chars = handwriting_session_for(USER_ID, new, max_reviews=p_.get("reviews"))
         if chars:
             launch(chars, "standard", in_plan=True)
-        S.hw_plan_empty, S.hw_day = True, date.today().isoformat()
+        S.hw_plan_empty, S.hw_day = True, clock.today().isoformat()
         tp.session_done(USER_ID, "handwriting", time.time(), step="handwriting")
     st.success("Nothing to write today.")
     tp.continue_ui(end_session)

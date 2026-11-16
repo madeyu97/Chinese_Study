@@ -2422,6 +2422,15 @@ def t_gr_vocab():
     assert "本" in mw and "书" not in mw
     assert gdr.unknown_words("我有一本书", mw) == ["书"]
     assert gdr.unknown_words("我喝了一杯茶", mw) == []
+    # the learner's own Malaysian words count, though jieba splits them (巴 / 刹)
+    assert gdr.unknown_words("我们拜六去巴刹买手信", gdr.allowed_set(["拜六", "巴刹", "买", "手信"], s)) == []
+    assert gdr.unknown_tokens("我打电话给他", gdr.allowed_set(["打"], s)) == ["打电话"]
+    assert gdr._new_words(["打电话"], gdr.allowed_set(["打"], s)) == ["打电话"], "a whole dictionary word, not 电"
+    # a word jieba doesn't know stays whole (巴刹, not 巴 + 刹); one the dictionary
+    # doesn't have either (冰厨) is never declared as its separate characters
+    assert gdr.unknown_tokens("我们去巴刹", gdr.allowed_set([], s)) == ["巴刹"]
+    assert gdr.unknown_tokens("我买冰厨", gdr.allowed_set(["买"], s)) == ["冰厨"]
+    assert gdr._new_words(["冰厨"], gdr.allowed_set([], s)) is None
 
 
 @test("grammar validation: good set passes; missing structure, 儿, unknown words, bad keys fail")
@@ -2433,12 +2442,23 @@ def t_gr_validate():
     bad = _gr_payload()
     bad["identify"][0]["hanzi"] = "我喝咖啡。"            # target structure missing
     bad["produce"][0]["answer_hanzi"] = "我一点儿不吃。"   # Beijing 儿
-    bad["rapid"][0]["answer_hanzi"] = "我不喝啤酒。"       # unstudied word
+    bad["rapid"][0]["answer_hanzi"] = "我不喝啤酒，不吃面包，也不吃蛋糕和水果。"   # too many new words
     bad["contrast"]["items"][0]["answer"] = 7             # key out of range
     _p, problems = gdr.validate(bad, s, GR_KNOWN)
     text = " ".join(problems)
     assert "doesn't use the target" in text and "儿" in text
-    assert "啤酒" in text and "answer index" in text
+    assert "unstudied words" in text and "answer index" in text
+    # one everyday word the writer didn't declare is declared for it, with pinyin and English
+    one = _gr_payload()
+    one["rapid"][0]["answer_hanzi"] = "我不喝啤酒。"
+    payload, problems = gdr.validate(one, s, GR_KNOWN)
+    assert problems == [], problems
+    assert [(w["hanzi"], w["english"], w["pinyin"]) for w in payload["introduced_words"]] == \
+        [("啤酒", "beer", "pí jiǔ")], payload["introduced_words"]
+    two = _gr_payload()
+    two["rapid"][0]["answer_hanzi"] = "我不喝啤酒，也不吃面包。"    # two new words in one sentence: too many
+    _p, problems = gdr.validate(two, s, GR_KNOWN)
+    assert any("面包" in p_ for p_ in problems), problems
 
 
 @test("grammar: 无论/不管 need an open question and 都; 连 needs 都/也 (连续/连忙 don't count)")
@@ -2478,36 +2498,106 @@ def t_gr_requires():
     assert order.index("wulun_dou") > order.index("ruguo_jiu")
 
 
-@test("grammar generation: rejected drafts are rewritten with the problems fed back")
-def t_gr_generate():
-    s = gcur.get("bu_neg")
-    bad = _gr_payload()
-    bad["rapid"][0]["answer_hanzi"] = "我不喝啤酒。"
-    good = _gr_payload()
+def _replies(*items):
     prompts = []
-    replies = iter([fake_response(bad), fake_response(good),
-                    fake_response({"acceptable": False, "problems": ["[rapid 2] unnatural"]}),
-                    fake_response(good),
-                    fake_response({"acceptable": True, "problems": []})])
+    it = iter([fake_response(x) for x in items])
+
     def create(**kw):
         prompts.append(kw["messages"][0]["content"])
-        return next(replies)
+        return next(it)
     ap.client = MagicMock()
     ap.client.chat.completions.create = create
+    return prompts
+
+
+@test("grammar generation: items that pass are kept from draft to draft; a later draft fills the gaps")
+def t_gr_generate():
+    s = gcur.get("bu_neg")
+    first = _gr_payload()
+    first["rapid"][0]["answer_hanzi"] = "我喝咖啡。"        # not the structure: dropped
+    first["rapid"][1]["answer_hanzi"] = "我喝茶。"
+    second = _gr_payload()
+    second["rapid"] = [{"prompt": "You won't call.", "answer_hanzi": "我不打电话。", "answer_pinyin": ""}]
+    second["identify"] = []                                # a thin draft: only the gap matters
+    prompts = _replies(first, second, {"acceptable": True, "problems": []})
     out = gdr.generate(s, GR_KNOWN)
-    assert out and out["structure_id"] == "bu_neg"
-    assert "啤酒" in prompts[1] and "unnatural" in prompts[3]
+    assert out and out["structure_id"] == "bu_neg" and out["reviewed"] is True
+    rapid = [it["answer_hanzi"] for it in out["rapid"]]
+    assert "我喝咖啡。" not in rapid and "我不打电话。" in rapid and len(rapid) == 4
+    assert len(out["identify"]) == 3, "kept from the first draft"
+    assert "doesn't use the target" in prompts[1] and "rapid: 1 more" in prompts[1]
+    assert "我不吃榴莲。" in prompts[1], "kept sentences are listed so they aren't repeated"
     assert "Beijing 儿" in prompts[0] and "咖啡" in prompts[0]
+
+
+@test("grammar generation: items the reviewer flags are dropped; the set stands if enough remain")
+def t_gr_review_salvage():
+    s = gcur.get("bu_neg")
+    rich = _gr_payload()
+    rich["rapid"].append({"prompt": "You don't want rice.", "answer_hanzi": "我不要饭。", "answer_pinyin": ""})
+    prompts = _replies(rich, {"acceptable": False, "problems": ["[rapid 2] unnatural - say 不太贵",
+                                                                 "[rapid 3] odd"]})
+    out = gdr.generate(s, GR_KNOWN)
+    assert out and len(prompts) == 2, "no further draft needed"
+    assert "不贵。" not in [it["answer_hanzi"] for it in out["rapid"]] and len(out["rapid"]) == 4
+    # flagged below a stage's minimum: another draft tops it up, then review again
+    prompts = _replies(_gr_payload(), {"acceptable": False, "problems": ["rapid 2: unnatural",
+                                                                          "rapid 3: odd"]},
+                       rich, {"acceptable": True, "problems": []})
+    out = gdr.generate(s, GR_KNOWN)
+    assert out and len(prompts) == 4 and "unnatural" in prompts[2] and "rapid: 1 more" in prompts[2]
+    assert gdr.flagged_items(["[identify 1]: x", "contrast 2 and rapid 3: y"]) == \
+        {("identify", 1), ("contrast", 2), ("rapid", 3)}
+    assert gdr.flagged_items(["[identify 1]: x", "the whole set is too easy"]) is None
+
+
+@test("grammar generation: a contrast stage with too few good items is left out, not fatal")
+def t_gr_optional_contrast():
+    s = gcur.get("wulun_dou")
+    known = GR_KNOWN + ["忙", "来", "等", "下雨", "买", "怎么样", "天气", "打电话", "什么时候"]
+    d = {"identify": [{"hanzi": h, "pinyin": "", "english": "", "question": "?", "answer": 0,
+                       "options": ["comes whatever happens", "never comes", "comes when free"],
+                       "explain": ""} for h in ("无论多忙，他都来。", "无论下不下雨，我都去。",
+                                                "无论你说什么，我都不去。")],
+         "produce": [{"situation": "x", "answer_hanzi": h, "answer_pinyin": "", "answer_english": ""}
+                     for h in ("无论多晚，我都等你。", "无论多贵，我都买。", "无论什么时候，你都可以打电话给我。")],
+         "contrast": {"with": "即使……也……", "items": [
+             {"hanzi": "即使下雨，我也去。", "pinyin": "", "english": "", "question": "?", "answer": 0,
+              "options": ["one case (even if)", "every case (no matter)", "because of the rain"], "explain": ""}]},
+         "rapid": [{"prompt": "x", "answer_hanzi": h, "answer_pinyin": ""}
+                   for h in ("无论谁来，我都去。", "无论多忙，我都来。", "无论天气怎么样，我都去。",
+                             "无论你去不去，我都去。", "无论多贵，他都买。")],
+         "conversation": [{"question_hanzi": "你来吗？", "question_pinyin": "", "question_english": "",
+                           "sample_hanzi": h, "sample_pinyin": "", "sample_english": ""}
+                          for h in ("无论多忙，我都来。", "无论下不下雨，我都来。", "无论几点，我都来。")]}
+    good, problems, _intro = gdr.check_items(d, s, known)
+    assert good["contrast"], "the look-alike's grammar word (即使) is allowed in contrast items"
+    _replies(d, {"acceptable": True, "problems": []})
+    out = gdr.generate(s, known)
+    assert out and out["contrast"] is None, "one contrast item is too few: the stage is left out"
+
+
+@test("grammar generation: asks once more for recent words to be recycled, but never loses a set over it")
+def t_gr_recycle():
+    s = gcur.get("bu_neg")
+    recent = ["冰厨", "锁匙", "油站"]
+    known = GR_KNOWN + recent
+    again = _gr_payload()
+    again["rapid"] = [{"prompt": "x", "answer_hanzi": "我不去油站。", "answer_pinyin": ""}]
+    prompts = _replies(_gr_payload(), again, {"acceptable": True, "problems": []})
+    out = gdr.generate(s, known, recent=recent)
+    assert "recently learned" in prompts[1] and "我不去油站。" in [i["answer_hanzi"] for i in out["rapid"]]
+    # never managed: the set is still given on the last draft
+    prompts = _replies(*([_gr_payload()] * gdr.MAX_ATTEMPTS + [{"acceptable": True, "problems": []}]))
+    out = gdr.generate(s, known, recent=recent)
+    assert out and len(prompts) == gdr.MAX_ATTEMPTS + 1
 
 
 @test("grammar generation: gives up (returns None) if no draft ever passes review")
 def t_gr_generate_fails_closed():
     s = gcur.get("bu_neg")
-    reject = {"acceptable": False, "problems": ["[identify 1] wrong key"]}
-    replies = iter([fake_response(x) for x in
-                    [_gr_payload(), reject] * gdr.MAX_ATTEMPTS])
-    ap.client = MagicMock()
-    ap.client.chat.completions.create = lambda **kw: next(replies)
+    reject = {"acceptable": False, "problems": ["the sentences are all too similar"]}
+    _replies(*[_gr_payload(), reject] * gdr.MAX_ATTEMPTS)
     assert gdr.generate(s, GR_KNOWN) is None
 
 
@@ -3533,7 +3623,7 @@ if __name__ == "__main__":
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
     print("Grammar drills:")
-    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_requires(); t_gr_generate()
+    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_requires(); t_gr_review_salvage(); t_gr_optional_contrast(); t_gr_recycle(); t_gr_generate()
     t_gr_generate_fails_closed(); t_gr_audit_fixes(); t_gr_grade_schedule()
     print("Vocabulary engine:")
     t_ve_schedule(); t_ve_production_gate(); t_ve_modes(); t_ve_allowance(); t_ve_session()

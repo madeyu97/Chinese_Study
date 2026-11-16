@@ -22,6 +22,7 @@ Five stages per structure, as specified:
   conversation natural questions answered with the structure
 """
 
+import functools
 import json
 import logging
 import re
@@ -37,6 +38,7 @@ from dictionary_engine import derive_pinyin, has_erhua, is_cjk_char
 
 MAX_ATTEMPTS = 3
 MAX_INTRODUCED = 4
+NEW_PER_SENTENCE = 1      # undeclared new words one sentence may bring in on its own
 
 # Words any drill may use whatever the learner's list says: pronouns,
 # particles, numbers and the commonest function words. Content words must
@@ -58,7 +60,7 @@ STAGE_TITLES = {
     "conversation": "Conversation",
 }
 COUNTS = {"identify": (3, 5), "produce": (3, 4), "contrast": (3, 4),
-          "rapid": (5, 8), "conversation": (3, 5)}
+          "rapid": (4, 8), "conversation": (3, 5)}
 
 
 # ======================================================================
@@ -83,19 +85,81 @@ def allowed_set(known_words, structure, introduced=()):
     return set(known_words) | FUNCTION_WORDS | structure_words(structure) | set(introduced)
 
 
+@functools.lru_cache(maxsize=1)
+def grammar_words():
+    """Every structure's grammar words. The contrast stage sets the target
+    against a look-alike; for most structures the curriculum names none and
+    the writer picks one (即使 against 无论), so that look-alike's grammar
+    words have to be allowed there or no contrast item could ever pass."""
+    import grammar_curriculum as gc
+    words = set()
+    for src in gc.STRUCTURES:
+        for marker in src.markers:
+            if len(marker) >= 2 or marker in FUNCTION_WORDS:
+                words.add(marker)
+    return words
+
+
+def _runs_left(text, allowed):
+    """The parts of each Chinese run not covered by known words of two or
+    more characters (matched longest first)."""
+    longest = max((len(w) for w in allowed), default=1)
+    for run in re.findall(r"[\u4e00-\u9fff]+", str(text)):
+        rest, i = [], 0
+        while i < len(run):
+            for L in range(min(longest, len(run) - i), 1, -1):
+                if run[i:i + L] in allowed:
+                    rest.append(" ")
+                    i += L
+                    break
+            else:
+                rest.append(run[i])
+                i += 1
+        yield from "".join(rest).split()
+
+
+def unknown_tokens(text, allowed):
+    """Whole words (as jieba cuts them) that aren't known - what to declare
+    as new: 电话, not the 电 that unknown_words reports for 打电话."""
+    out = []
+    for piece in _runs_left(text, allowed):
+        loose = ""                    # unknown single characters in a row
+        for tok in jieba.lcut(piece, HMM=False):
+            unknown = not (tok in allowed or _splits_into(tok, allowed)) and \
+                not all(ch in "零一二两三四五六七八九十百千万几半" for ch in tok)
+            if unknown and len(tok) == 1:
+                # jieba cuts words it doesn't know (巴刹) into characters,
+                # each a dictionary entry on its own (巴, 刹): keep them together
+                loose += tok
+                continue
+            if loose:
+                out.append(loose)
+                loose = ""
+            if unknown:
+                out.append(tok)
+        if loose:
+            out.append(loose)
+    return out
+
+
 def unknown_words(text, allowed):
     """Words in `text` the learner hasn't met. A token counts as known if it
-    is on the list or splits cleanly into words that are."""
+    is on the list or splits cleanly into words that are.
+
+    Known words of two or more characters are matched first, longest first,
+    before jieba segments what is left: jieba doesn't know Malaysian words
+    (巴刹, 拜六, 月尾, 手信) and splits them into characters that aren't on
+    the list on their own - which made the learner's own words "unstudied"."""
     unknown = []
-    for run in re.findall(r"[\u4e00-\u9fff]+", str(text)):
-        for tok in jieba.lcut(run, HMM=False):
+    for piece in _runs_left(text, allowed):
+        for tok in jieba.lcut(piece, HMM=False):
             if tok in allowed or _splits_into(tok, allowed):
                 continue
             # report only the part that isn't known: 喝啤酒 -> 啤酒
-            gap, i = "", 0
-            while i < len(tok):
-                for L in range(min(4, len(tok) - i), 0, -1):
-                    if tok[i:i + L] in allowed:
+            gap, j = "", 0
+            while j < len(tok):
+                for L in range(min(4, len(tok) - j), 0, -1):
+                    if tok[j:j + L] in allowed:
                         break
                 else:
                     L = 0
@@ -103,10 +167,10 @@ def unknown_words(text, allowed):
                     if gap:
                         unknown.append(gap)
                         gap = ""
-                    i += L
+                    j += L
                 else:
-                    gap += tok[i]
-                    i += 1
+                    gap += tok[j]
+                    j += 1
             if gap:
                 unknown.append(gap)
     return [u for u in unknown
@@ -274,70 +338,185 @@ def stored_set_ok(payload, structure):
         return False
 
 
-def validate(payload, structure, known_words, recent=()):
-    """Returns (cleaned payload, list of problems). Empty list = passes."""
-    problems = []
-    known_words = list(known_words) + [w for w in recent if w not in known_words]
-    if not isinstance(payload, dict):
-        return payload, ["not a JSON object"]
-    introduced = [w for w in (payload.get("introduced_words") or [])
-                  if isinstance(w, dict) and w.get("hanzi")]
-    payload["introduced_words"] = introduced
-    if len(introduced) > MAX_INTRODUCED:
-        problems.append(f"too many introduced words ({len(introduced)}); use known words")
-    allowed = allowed_set(known_words, structure, [w["hanzi"] for w in introduced])
+FIELDS = {"identify": [("hanzi", "pinyin", True)],
+          "contrast": [("hanzi", "pinyin", False)],
+          "produce": [("answer_hanzi", "answer_pinyin", True)],
+          "rapid": [("answer_hanzi", "answer_pinyin", True)],
+          "conversation": [("question_hanzi", "question_pinyin", False),
+                           ("sample_hanzi", "sample_pinyin", True)]}
+OPTIONAL = {"contrast"}          # a set without a good contrast stage is still a set
 
-    contrast = payload.get("contrast")
+
+def _new_words(tokens, allowed):
+    """Dictionary words to declare for unknown tokens: the token itself if
+    it is one (下雨, 晴天, 电话), otherwise its unknown parts. None if some
+    part isn't in the dictionary."""
+    from dictionary_engine import cedict_gloss
+    out = []
+    for tok in tokens:
+        if cedict_gloss(tok)[0]:
+            out.append(tok)
+            continue
+        # split off the known part (喝啤酒 -> 啤酒); a word with no known part
+        # that the dictionary lacks (冰厨) is not declared as its characters
+        parts = unknown_words(tok, allowed)
+        if not parts or "".join(parts) == tok or not all(cedict_gloss(p)[0] for p in parts):
+            return None
+        out += parts
+    return out
+
+
+def _auto_introduce(words, introduced):
+    """Declare unstudied words the writer used but didn't list, while the
+    budget allows: an everyday word in an otherwise good sentence (儿子,
+    晴天) is taught on the spot instead of the sentence being thrown away.
+    Only words the dictionary knows, so each comes with pinyin and English.
+    Returns True if every word is now declared."""
+    from dictionary_engine import cedict_gloss
+    have = {w["hanzi"] for w in introduced}
+    todo = [w for w in dict.fromkeys(words) if w not in have]
+    if len(have) + len(todo) > MAX_INTRODUCED:
+        return False
+    found = []
+    for w in todo:
+        gloss = cedict_gloss(w)[0]
+        if not gloss:
+            return False
+        # a few senses, not just the first: 多晚 needs "late", not "evening"
+        senses = [re.sub(r"\s*\([^)]*\)", "", x).strip() for x in gloss.split(" / ")]
+        english = " / ".join([x for x in senses if x][:3]) or gloss
+        found.append({"hanzi": w, "pinyin": derive_pinyin(w), "english": english, "auto": True})
+    introduced.extend(found)
+    return True
+
+
+def _item_problems(stage, it, structure, allowed, introduced):
+    """What's wrong with one item (cleaning it in place), as a list. Unstudied
+    words are declared automatically (within budget) only for an item with
+    nothing else wrong, so a sentence that is dropped anyway spends none."""
+    problems, missing_all = [], []
+    if not isinstance(it, dict):
+        return ["not an object"]
+    for hz_key, py_key, needs_marker in FIELDS[stage]:
+        hz = ap._force_simplified(str(it.get(hz_key) or "")).strip()
+        it[hz_key] = hz
+        if not hz:
+            problems.append(f"empty {hz_key}")
+            continue
+        if has_erhua(hz, it.get(py_key, "")):
+            problems.append(f"uses Beijing 儿 in '{hz}'")
+        if re.search(r"[A-Za-z0-9]", hz):
+            problems.append(f"digits or Latin letters in '{hz}'")
+        if needs_marker:
+            wrong = structure_problem(hz, structure)
+            if wrong:
+                problems.append(f"'{hz}' {wrong}")
+        it[py_key] = _fix_pinyin(hz, it.get(py_key, ""))
+        known_now = allowed | {w["hanzi"] for w in introduced}
+        missing = unknown_words(hz, known_now)
+        if missing:
+            missing_all.append((hz, missing, unknown_tokens(hz, known_now)))
+    if stage in ("identify", "contrast"):
+        problem = mcq_problem(it)
+        if problem:
+            problems.append(problem)
+        it["read"] = bool(it.get("read"))
+    if stage in ("produce", "rapid") and not (it.get("situation") or it.get("prompt")):
+        problems.append("missing prompt")
+    if missing_all:
+        words = _new_words([t for _hz, _ws, toks in missing_all for t in toks], allowed)
+        # one new word in a sentence is learnable in context; three are not,
+        # and would use up the budget other sentences need
+        if problems or words is None or len(set(words)) > NEW_PER_SENTENCE * len(missing_all) \
+                or not _auto_introduce(words, introduced):
+            problems += [f"'{hz}' uses unstudied words {'、'.join(dict.fromkeys(ws))} "
+                         f"- replace them or declare them in introduced_words"
+                         for hz, ws, _toks in missing_all]
+    return problems
+
+
+def check_items(payload, structure, known_words, recent=(), introduced=None):
+    """Check a draft item by item. Returns (good, problems, introduced):
+    good maps each stage to the items that pass; problems lists what was
+    wrong with the rest (labelled with the draft's own numbering, so the
+    writer can find them); introduced is the words declared so far, the
+    writer's own plus any added automatically."""
+    known = set(known_words) | set(recent)
+    good = {stage: [] for stage in STAGES}
+    problems = []
+    if not isinstance(payload, dict):
+        return good, ["not a JSON object"], introduced or []
+    introduced = list(introduced or [])
+    seen = {w["hanzi"] for w in introduced}
+    for w in payload.get("introduced_words") or []:
+        if isinstance(w, dict) and w.get("hanzi") and w["hanzi"] not in seen \
+                and len(introduced) < MAX_INTRODUCED:
+            introduced.append(w)
+            seen.add(w["hanzi"])
+    allowed = allowed_set(known, structure)
+    contrast = payload.get("contrast") if isinstance(payload.get("contrast"), dict) else None
     for stage in STAGES:
         items = (contrast or {}).get("items") if stage == "contrast" else payload.get(stage)
-        if stage == "contrast" and not contrast:
+        if not isinstance(items, list):
+            if stage not in OPTIONAL:
+                problems.append(f"{stage}: missing")
             continue
+        stage_allowed = allowed | grammar_words() if stage == "contrast" else allowed
+        for i, it in enumerate(items, 1):
+            wrong = _item_problems(stage, it, structure, stage_allowed, introduced)
+            if wrong:
+                problems += [f"[{stage} {i}]: {w}" for w in wrong]
+            else:
+                good[stage].append(it)
+    return good, problems, introduced
+
+
+def _key(stage, it):
+    return it.get(FIELDS[stage][-1][0]) or json.dumps(it, ensure_ascii=False, sort_keys=True)
+
+
+def _shortfall(bank):
+    """{stage: how many more items it needs} for the required stages."""
+    return {stage: COUNTS[stage][0] - len(bank[stage]) for stage in STAGES
+            if stage not in OPTIONAL and len(bank[stage]) < COUNTS[stage][0]}
+
+
+def _assemble(bank, contrast_with, introduced, structure):
+    """A drill set from the items that passed, in the usual shape."""
+    out = {stage: list(bank[stage]) for stage in STAGES if stage != "contrast"}
+    out["contrast"] = ({"with": contrast_with or "", "items": list(bank["contrast"])}
+                       if len(bank["contrast"]) >= COUNTS["contrast"][0] else None)
+    text = "".join(sentences_in(out))
+    out["introduced_words"] = [w for w in introduced if w["hanzi"] in text]
+    out["structure_id"] = structure.id
+    return out
+
+
+def validate(payload, structure, known_words, recent=()):
+    """Returns (cleaned payload, list of problems). Empty list = every item
+    passes and every stage has its share."""
+    good, problems, introduced = check_items(payload, structure, known_words, recent)
+    if not isinstance(payload, dict):
+        return payload, problems
+    payload["introduced_words"] = introduced
+    for stage in STAGES:
         lo, hi = COUNTS[stage]
+        items = (payload.get("contrast") or {}).get("items") if stage == "contrast" \
+            else payload.get(stage)
+        if stage == "contrast" and not payload.get("contrast"):
+            continue
         if not isinstance(items, list) or not (lo <= len(items) <= hi):
             problems.append(f"{stage}: needs {lo}-{hi} items")
-            continue
-        for i, it in enumerate(items, 1):
-            where = f"[{stage} {i}]"
-            if not isinstance(it, dict):
-                problems.append(f"{where}: not an object")
-                continue
-            fields = {"identify": [("hanzi", "pinyin", True)],
-                      "contrast": [("hanzi", "pinyin", False)],
-                      "produce": [("answer_hanzi", "answer_pinyin", True)],
-                      "rapid": [("answer_hanzi", "answer_pinyin", True)],
-                      "conversation": [("question_hanzi", "question_pinyin", False),
-                                       ("sample_hanzi", "sample_pinyin", True)]}[stage]
-            for hz_key, py_key, needs_marker in fields:
-                hz = ap._force_simplified(str(it.get(hz_key) or "")).strip()
-                it[hz_key] = hz
-                if not hz:
-                    problems.append(f"{where}: empty {hz_key}")
-                    continue
-                if has_erhua(hz, it.get(py_key, "")):
-                    problems.append(f"{where}: uses Beijing 儿 in '{hz}'")
-                if re.search(r"[A-Za-z0-9]", hz):
-                    problems.append(f"{where}: digits or Latin letters in '{hz}'")
-                if needs_marker:
-                    wrong = structure_problem(hz, structure)
-                    if wrong:
-                        problems.append(f"{where}: '{hz}' {wrong}")
-                it[py_key] = _fix_pinyin(hz, it.get(py_key, ""))
-                missing = unknown_words(hz, allowed)
-                if missing:
-                    problems.append(f"{where}: '{hz}' uses unstudied words "
-                                    f"{'、'.join(dict.fromkeys(missing))} - replace them "
-                                    f"or declare them in introduced_words")
-            if stage in ("identify", "contrast"):
-                _check_mcq(it, where, problems)
-                it["read"] = bool(it.get("read"))
-            if stage in ("produce", "rapid") and not (it.get("situation") or it.get("prompt")):
-                problems.append(f"{where}: missing prompt")
-    if len(recent) >= 3 and not problems:
-        text = "".join(sentences_in(payload))
-        if not any(w in text for w in recent):
-            problems.append("none of the recently learned words is used - recycle at least one: "
-                            + "、".join(recent[:10]))
+    if not problems:
+        problems += _recycling_problem(payload, recent)
     return payload, problems
+
+
+def _recycling_problem(payload, recent):
+    if len(recent) >= 3 and not any(w in "".join(sentences_in(payload)) for w in recent):
+        return ["none of the recently learned words is used - recycle at least one: "
+                + "、".join(recent[:10])]
+    return []
 
 
 # ======================================================================
@@ -412,14 +591,40 @@ Return ONLY JSON: {{"acceptable": true/false,
     return True, [], False
 
 
+_LABEL = re.compile(r"\b(identify|produce|contrast|rapid|conversation)\s*#?\s*(\d+)", re.I)
+
+
+def flagged_items(problems):
+    """The items a reviewer's problems point at, as {(stage, number)}; None
+    if any problem doesn't name an item (a problem with the whole set)."""
+    out = set()
+    for p in problems:
+        labels = _LABEL.findall(p)
+        if not labels:
+            return None
+        out |= {(stage.lower(), int(n)) for stage, n in labels}
+    return out
+
+
 def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), recent=()):
-    """Write, check and review a drill set. Returns the payload or None."""
-    feedback = ""
+    """Write, check and review a drill set. Returns the payload or None.
+
+    A set has some twenty sentences, and one unstudied word or one
+    reviewer's quibble used to throw all of them away - and the next draft,
+    written from scratch, brought new slips of its own, so after three
+    drafts there was often nothing. Now every item is judged on its own:
+    those that pass are kept from draft to draft, and a later draft only
+    has to supply what is still missing. Items the reviewer flags are
+    dropped; the set is accepted once every stage still has its share."""
+    bank = {stage: [] for stage in STAGES}
+    keys = {stage: set() for stage in STAGES}
+    introduced, contrast_with, feedback = [], None, ""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         prompt = build_prompt(structure, known_words, china_pairs, contrasts,
-                              previous, feedback, recent)
+                              [_key(st_, it) for st_ in STAGES for it in bank[st_]] + list(previous),
+                              feedback, recent)
         try:
-            payload = _chat_json(GENERATION_MODEL, prompt, 0.7)
+            draft = _chat_json(GENERATION_MODEL, prompt, 0.7)
         except json.JSONDecodeError as e:
             feedback = f"- output was not valid JSON ({e})"
             logging.warning(f"[GRAMMAR] attempt {attempt}: {feedback}")
@@ -430,15 +635,57 @@ def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), 
             logging.warning(f"[GRAMMAR] attempt {attempt}: API error {e}")
             time.sleep(min(20, 5 * attempt))
             continue
-        payload, problems = validate(payload, structure, known_words, recent)
-        if not problems:
-            ok, problems, reviewed = review(payload, structure)
+        good, problems, introduced = check_items(draft, structure, known_words, recent,
+                                                 introduced)
+        if isinstance(draft, dict) and isinstance(draft.get("contrast"), dict) \
+                and good["contrast"] and not contrast_with:
+            contrast_with = draft["contrast"].get("with")
+        for stage in STAGES:
+            for it in good[stage]:
+                k = _key(stage, it)
+                if k not in keys[stage] and len(bank[stage]) < COUNTS[stage][1]:
+                    keys[stage].add(k)
+                    bank[stage].append(it)
+        short = _shortfall(bank)
+        recycle = [] if short else _recycling_problem(
+            _assemble(bank, contrast_with, introduced, structure), recent)
+        if recycle and attempt < MAX_ATTEMPTS:
+            # a preference worth one more draft (its items join the set),
+            # not worth losing the set over on the last one
+            problems = problems + recycle
+        elif not short:
+            candidate = _assemble(bank, contrast_with, introduced, structure)
+            ok, review_problems, reviewed = review(candidate, structure)
             if ok:
-                payload["structure_id"] = structure.id
-                payload["reviewed"] = reviewed
-                return payload
+                candidate["reviewed"] = reviewed
+                return candidate
+            flagged = flagged_items(review_problems)
+            if flagged is not None:
+                # drop what the reviewer flagged; the rest it judged sound
+                for stage in STAGES:
+                    items = candidate["contrast"]["items"] if stage == "contrast" and \
+                        candidate.get("contrast") else candidate.get(stage) or []
+                    for n, it in enumerate(items, 1):
+                        if (stage, n) in flagged and it in bank[stage]:
+                            bank[stage].remove(it)
+                if not _shortfall(bank):
+                    candidate = _assemble(bank, contrast_with, introduced, structure)
+                    candidate["reviewed"] = reviewed
+                    return candidate
+            problems = review_problems
+            short = _shortfall(bank)
+        if recycle and not short:
+            # make room: the next draft's items that recycle a word join the set
+            for stage in ("rapid", "identify", "conversation"):
+                if len(bank[stage]) >= COUNTS[stage][1]:
+                    bank[stage].pop()
+        need = "; ".join(f"{stage}: {n} more" for stage, n in short.items())
         feedback = "\n".join(f"- {p}" for p in problems[:15])
-        logging.warning(f"[GRAMMAR] {structure.id} attempt {attempt} rejected:\n{feedback}")
+        if need:
+            feedback += ("\n" if feedback else "") + \
+                f"- Items that passed are kept. Still needed, at least: {need}. Write a full set again."
+        logging.warning(f"[GRAMMAR] {structure.id} attempt {attempt}: kept "
+                        f"{ {st_: len(v) for st_, v in bank.items()} }, still short {short}:\n{feedback}")
     return None
 
 

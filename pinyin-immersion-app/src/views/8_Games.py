@@ -24,6 +24,7 @@ import streamlit as st
 import db_manager as db
 import game_items as gi
 import games as gm
+import quiz
 import game_components as gc
 import session_store as store
 from audio_engine import create_audio_file, warm
@@ -266,17 +267,21 @@ value = gc.choice_board(sid=S.gm_sid, round=i, prompt=prompt,
                         options=[card(o, "word" if game == "picture" else "image") for o in options],
                         answer=answer, answered=(ans or {}).get("chosen"), show_pinyin=show_pinyin,
                         key=f"gm_choice_{S.gm_sid}", default=None)
-if (ans is None and value and value.get("sid") == S.gm_sid and value.get("round") == i
-        and isinstance(value.get("chosen"), int) and 0 <= value["chosen"] < len(options)):
-    chosen = options[value["chosen"]]
-    correct = chosen["chinese"] == target["chinese"]
+tapped = bool(ans is None and value and value.get("sid") == S.gm_sid and value.get("round") == i
+              and isinstance(value.get("chosen"), int) and 0 <= value["chosen"] < len(options))
+# "I don't know": the board shows the answer (chosen = -1 marks no card as tapped)
+dont_know = ans is None and not tapped and st.button(quiz.DONT_KNOW, width="stretch",
+                                                     key=f"gm_dk_{S.gm_sid}_{i}")
+if tapped or dont_know:
+    chosen_n = value["chosen"] if tapped else -1
+    correct = tapped and options[chosen_n]["chinese"] == target["chinese"]
     S.gm_streak = S.gm_streak + 1 if correct else 0
     S.gm_best_streak = max(S.gm_best_streak, S.gm_streak)
     S.gm_score += gm.points(correct, S.gm_streak - 1 if correct else 0)
     if not correct:
         S.gm_missed.append(target)
     record(target, correct, game)
-    S.gm_ans = {"correct": correct, "chosen": value["chosen"]}
+    S.gm_ans = {"correct": correct, "chosen": chosen_n, "dont_know": bool(dont_know)}
     persist()
     st.rerun()
 
@@ -284,7 +289,7 @@ if ans is not None:
     if ans["correct"]:
         st.markdown("✅ **Right!**")
     else:
-        st.markdown("❌ It was:")
+        st.markdown(f"{'🤷' if ans.get('dont_know') else '❌'} It was:")
     html("<div style='display:flex;gap:16px;align-items:center'>"
          f"{img_tag(target['image'], 70)}<div>{word_html(target, '1.8rem')}"
          f"<div style='color:#78909c'>{target['english']}</div></div></div>")

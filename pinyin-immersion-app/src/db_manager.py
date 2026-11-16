@@ -589,7 +589,7 @@ def _build_schema():
     ''')
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_study_sessions "
                    "ON study_sessions (user_id, day)")
-    # Which of the day's three sessions (morning / afternoon / evening) a plan
+    # Which of the day's sessions (morning / evening) a plan
     # step belonged to, and when it finished (an absolute time, so the gap
     # before the next session is measured correctly whatever the server's
     # time zone).
@@ -2653,7 +2653,7 @@ def daily_series(user_id, days=14):
 
 def log_study_session(user_id, activity, seconds, in_plan=False, items=0, slot=None):
     """Record one finished session in the time ledger. Never raises.
-    slot: the day's session (morning / afternoon / evening) a plan step ran in."""
+    slot: the day's session (morning / evening) a plan step ran in."""
     try:
         seconds = max(0, min(int(seconds or 0), MAX_SESSION_SECONDS))
         conn = get_connection(one_shot=True)
@@ -2689,7 +2689,7 @@ def mark_plan_complete(user_id):
 
 
 def day_progress(user_id):
-    """Where today's three sessions stand:
+    """Where today's sessions stand:
     {"done": {"morning:words", ...}   plan steps finished, by session
      "finished": {slot: datetime}     sessions finished, and when
      "skipped": {slot, ...}}          sessions skipped"""

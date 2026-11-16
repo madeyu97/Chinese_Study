@@ -1,7 +1,7 @@
 # src/views/0_Today.py
 """
-🏠 Today - an hour of study in three ~20-minute sessions: morning,
-afternoon, evening. The next session is shown in full with one Start
+🏠 Today - two study sessions of about 25 minutes: morning and
+evening. The next session is shown in full with one Start
 button; the others are a line each. A session that isn't due yet says when
 it opens, and can still be started early or skipped.
 """
@@ -45,7 +45,7 @@ bits = []
 if streak:
     bits.append(f"🔥 {streak}-day streak")
 if week and week["sessions"]:
-    bits.append(f"{week['sessions']} of 21 sessions this week")
+    bits.append(f"{week['sessions']} of {tp.SESSIONS_PER_WEEK} sessions this week")
 if week and week["total"]:
     bits.append(f"{week['total']} min")
 if bits:
@@ -72,9 +72,8 @@ def step_line(n, s_):
     st.markdown(f"{mark} {s_['icon']} **{s_['title']}** — {detail}")
 
 
-st.caption("An hour a day in three short sessions. Spreading it out is the point: the "
-           "morning's new words come back in the afternoon and again before bed, hours "
-           "apart each time.")
+st.caption("Two sessions a day. Splitting it is the point: the morning's new words come "
+           "back in the evening, hours later, when remembering them takes real effort.")
 
 for sess in day:
     head = f"{sess['icon']} **{sess['title']}** · {sess['theme']}"

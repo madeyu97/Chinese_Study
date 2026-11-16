@@ -26,6 +26,7 @@ import grammar_curriculum as gc
 import grammar_drills as gd
 import session_store as store
 import today_plan as tp
+import quiz
 import word_content as wc
 from audio_engine import create_audio_file, warm
 from auth import require_login, sidebar_user_badge
@@ -333,13 +334,17 @@ def multiple_choice():
     choice = st.radio(item.get("question") or "What does it mean?", item["options"],
                       index=None, key=f"mc_{key}", format_func=wc.md_safe)
     if ans is None:
-        if st.button("Check", type="primary", disabled=choice is None):
-            S.gr_ans = {"correct": item["options"].index(choice) == item["answer"]}
+        pressed = quiz.buttons(choice is not None)
+        if pressed:
+            dont_know = pressed == "dont_know"
+            S.gr_ans = {"correct": not dont_know and item["options"].index(choice) == item["answer"],
+                        "dont_know": dont_know}
             record(S.gr_ans["correct"])
             st.rerun()
         return
     right = item["options"][item["answer"]]
-    st.markdown("✅ Right." if ans["correct"] else f"❌ It was: **{right}**")
+    st.markdown("✅ Right." if ans["correct"] else
+                f"{'🤷' if ans.get('dont_know') else '❌'} It was: **{right}**")
     big(item["hanzi"], item.get("pinyin", ""))
     st.caption(f"{item.get('english', '')} — {item.get('explain', '')}")
     if st.button("Next ▶️", type="primary"):
@@ -376,7 +381,7 @@ def spoken_answer(task, reference, reference_pinyin, reference_english, listen_f
             if g["verdict"] != "ungraded":
                 record(g["verdict"])
             st.rerun()
-        if c2.button("Show me"):
+        if c2.button(quiz.DONT_KNOW):
             S.gr_ans = {"verdict": "wrong", "feedback": "", "better": reference, "said": ""}
             record("wrong")
             st.rerun()

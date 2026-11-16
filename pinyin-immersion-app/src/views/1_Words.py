@@ -38,6 +38,7 @@ import grammar_curriculum as gc
 import session_store as store
 import today_plan as tp
 import vocab_engine as ve
+import quiz
 import word_content as wc
 import word_diagnosis as wd
 from ai_prompter import _force_simplified
@@ -493,16 +494,21 @@ def render_remedy():
         if R["answered"] is None:
             choice = st.radio(rnd["question"], rnd["options"], index=None, key=key,
                               format_func=wc.md_safe)
-            if st.button("Check", type="primary", disabled=choice is None):
-                result = "correct" if choice == rnd["answer"] else "wrong"
+            pressed = quiz.buttons(choice is not None, key)
+            if pressed:
+                dont_know = pressed == "dont_know"
+                result = "correct" if not dont_know and choice == rnd["answer"] else "wrong"
                 db.log_word_attempt(USER_ID, word["id"], "recognition", f"remedy_{R['cause']}",
-                                    result, {"chose": choice, "kind": "remedy"})
-                R["answered"] = {"result": result, "said": choice}
+                                    result, {"chose": None if dont_know else choice,
+                                             "dont_know": dont_know, "kind": "remedy"})
+                R["answered"] = {"result": result, "said": None if dont_know else choice,
+                                 "dont_know": dont_know}
                 st.rerun()
             return
     a = R["answered"]
     st.markdown("✅ Right." if a["result"] == "correct" else
-                f"{'🟡' if a['result'] == 'close' else '❌'} It's **{rnd['answer']}**")
+                f"{'🤷' if a.get('dont_know') else '🟡' if a['result'] == 'close' else '❌'} "
+                f"It's **{rnd['answer']}**")
     if rnd.get("full"):
         big(rnd["full"], "1.4rem")
         play(rnd["full"])
@@ -619,15 +625,22 @@ def recognition():
     texts = [o["text"] for o in su["options"]]
     choice = st.radio(question, texts, index=None, key=f"wd_mc_{S.wd_i}", format_func=wc.md_safe)
     if ans is None:
-        if st.button("Check", type="primary", disabled=choice is None):
+        pressed = quiz.buttons(choice is not None)
+        if pressed == "check":
             picked = su["options"][texts.index(choice)]
             result = "correct" if picked["kind"] == "correct" else "wrong"
             finish(item, mode, result, {"chose": picked["chinese"], "chose_kind": picked["kind"],
                                         "sentence": sentence["hanzi"] if sentence else None}, cid)
             st.rerun()
+        elif pressed == "dont_know":
+            # a miss, but not a wrong pick: nothing for diagnosis to read into
+            finish(item, mode, "wrong", {"dont_know": True,
+                                         "sentence": sentence["hanzi"] if sentence else None}, cid)
+            st.rerun()
         return
     right = next(o["text"] for o in su["options"] if o["kind"] == "correct")
-    st.markdown("✅ Right." if ans["result"] == "correct" else f"❌ It means **{right}**")
+    st.markdown("✅ Right." if ans["result"] == "correct" else
+                f"{'🤷' if ans.get('dont_know') else '❌'} It means **{right}**")
     if ans["result"] != "correct" and ans.get("chose"):
         st.caption(f"You picked the meaning of {ans['chose']}.")
     if sentence:
@@ -681,7 +694,7 @@ def production():
                     result = "correct"      # speech can't show which character you meant
                 finish(item, mode, result, {**detail, "said": said, "spoken": spoken}, cid)
             st.rerun()
-        if c2.button("Show me"):
+        if c2.button(quiz.DONT_KNOW):
             finish(item, mode, "wrong", {"gave_up": True}, cid)
             st.rerun()
         return

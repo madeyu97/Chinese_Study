@@ -28,6 +28,7 @@ import session_store as store
 import sound_drill as sd
 import today_plan as tp
 import vocab_engine as ve
+import quiz
 import word_content as wc
 from audio_engine import create_audio_file, warm
 from auth import require_login, sidebar_user_badge
@@ -216,8 +217,10 @@ labels = [o["label"] for o in item["options"]]
 choice = st.radio(item["question"], labels, index=None, key=f"sp_mc_{S.sp_i}",
                   format_func=wc.md_safe)
 if ans is None:
-    if st.button("Check", type="primary", disabled=choice is None):
-        picked = item["options"][labels.index(choice)]["value"]
+    pressed = quiz.buttons(choice is not None)
+    if pressed:
+        dont_know = pressed == "dont_know"
+        picked = None if dont_know else item["options"][labels.index(choice)]["value"]
         right = picked == item["answer"]
         w = item["word"]
         # logged in the background: the answer shows without waiting for the database
@@ -225,16 +228,17 @@ if ans is None:
                       "production" if item["type"] == "tone_pick" else "recognition",
                       item["type"], "correct" if right else "wrong",
                       {"kind": "drill", "chose": picked, "answer": item["answer"],
-                       "key": item["key"]})
+                       "key": item["key"], "dont_know": dont_know})
         S.sp_results.append({"key": item["key"], "right": right, "type": item["type"]})
         db.background(db.log_activity, USER_ID, LOG_KIND[S.sp_drill], w["chinese"],
                       2 if right else 0)
-        S.sp_ans = {"right": right, "picked": picked}
+        S.sp_ans = {"right": right, "picked": picked, "dont_know": dont_know}
         st.rerun()
     st.stop()
 
 answer_label = next(o["label"] for o in item["options"] if o["value"] == item["answer"])
-st.markdown("✅ Right." if ans["right"] else f"❌ It was **{answer_label}**")
+st.markdown("✅ Right." if ans["right"] else
+            f"{'🤷' if ans.get('dont_know') else '❌'} It was **{answer_label}**")
 for line in item["reveal"]:
     st.caption(line)
 if item.get("play") and item["type"] != "tone_hear":

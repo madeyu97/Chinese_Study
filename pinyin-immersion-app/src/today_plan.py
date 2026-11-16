@@ -1,20 +1,20 @@
 # src/today_plan.py
 """
-Today's plan: an hour a day in three short sessions - morning, afternoon,
-evening - instead of one long sitting. Spreading the same hour out means
-the day's new words are met three times, hours apart, which is what turns
-them from something seen into something kept.
+Today's plan: two sessions a day - morning and evening - instead of one long
+sitting. Splitting the day's study in two means the morning's new words are
+met again hours later, which is what turns them from something seen into
+something kept, without the day being chopped into pieces.
 
-    🌅 Morning    Recall        reviews (after a night's sleep), then today's
-                                new words; tones
-    ☀️ Afternoon  Use           grammar, then sentences built on this
-                                morning's words, to hear and to say
-    🌙 Evening    Consolidate   today's new and missed words once more, then
-                                writing and reading (or more listening)
+    🌅 Morning    Learn         reviews (after a night's sleep), then today's
+                                new words; tones; grammar
+    🌙 Evening    Use & keep    today's new and missed words once more, then
+                                sentences built on them to hear and to say;
+                                writing and reading
 
-Each session is about 20 minutes. A session opens at its hour and no sooner
-than two hours after the last one finished (config.SESSION_OPENS,
-SESSION_GAP_HOURS); it can always be started early, or skipped.
+Each session is about 25 minutes. The evening opens at its hour and no
+sooner than SESSION_GAP_HOURS after the morning finished (config.
+SESSION_OPENS, SESSION_GAP_HOURS); it can always be started early, or
+skipped.
 
 build_day() is pure (it decides what goes in each session). The rest keeps
 track of the session in progress as you move from page to page: each page
@@ -45,17 +45,15 @@ STEPS = {
     "reading": ("📖", "Reading", "views/6_Reading.py"),
 }
 SESSIONS = {
-    "morning": ("🌅", "Morning", "Recall",
+    "morning": ("🌅", "Morning", "Learn",
                 "Reviews first, while yesterday's words have had a night's sleep to settle; "
-                "then today's new words, so they come round twice more before bed."),
-    "afternoon": ("☀️", "Afternoon", "Use",
-                  "Grammar, then sentences built on this morning's words — the same words, "
-                  "hours later, heard and said in context."),
-    "evening": ("🌙", "Evening", "Consolidate",
-                "Today's new and missed words one more time, close to sleep, "
-                "then writing and reading."),
+                "then today's new words, tones and grammar."),
+    "evening": ("🌙", "Evening", "Use & keep",
+                "This morning's new and missed words once more, hours later; then sentences "
+                "built on them, heard and said, and writing and reading."),
 }
 SLOTS = list(SESSIONS)
+SESSIONS_PER_WEEK = 7 * len(SLOTS)
 TODAY_PAGE = "views/0_Today.py"
 GAMES_PAGE = "views/8_Games.py"
 
@@ -79,59 +77,56 @@ def _step(slot, key, detail, minutes, params, done):
             "done": f"{slot}:{key}" in done}
 
 
-def _morning(state, done):
-    steps = []
+def _words(state, done):
     w = state.get("words")
-    if w:
-        reviews = min(w["due"], VOCAB_SESSION_REVIEWS)
-        new = min(w["new_room"], w["new_available"])
-        if reviews or new or "morning:words" in done:
-            parts = [_n(reviews, "review")] if reviews else []
-            parts += [_n(new, "new word")] if new else []
-            if w["due"] > VOCAB_BACKLOG_SOFT:
-                parts.append("new words held back until reviews come down")
-            steps.append(_step("morning", "words", " · ".join(parts) or "nothing due",
-                               0.4 * reviews + 1.5 * new,
-                               {"reviews": VOCAB_SESSION_REVIEWS, "new": new, "unlocks": True},
-                               done))
+    if not w:
+        return []
+    reviews = min(w["due"], VOCAB_SESSION_REVIEWS)
+    new = min(w["new_room"], w["new_available"])
+    if not (reviews or new or "morning:words" in done):
+        return []
+    parts = [_n(reviews, "review")] if reviews else []
+    parts += [_n(new, "new word")] if new else []
+    if w["due"] > VOCAB_BACKLOG_SOFT:
+        parts.append("new words held back until reviews come down")
+    return [_step("morning", "words", " · ".join(parts) or "nothing due",
+                  0.4 * reviews + 1.5 * new,
+                  {"reviews": VOCAB_SESSION_REVIEWS, "new": new, "unlocks": True}, done)]
+
+
+def _tones(state, done):
     t = state.get("tones")
-    if t:
-        new = min(t["new_room"], t["fresh"], max(0, TONE_GROUPS_PER_SESSION - t["due"]))
-        due = min(t["due"], TONE_GROUPS_PER_SESSION)
-        if due or new or "morning:tones" in done:
-            parts = [_n(due, "group") + " due"] if due else []
-            parts += [_n(new, "new group")] if new else []
-            steps.append(_step("morning", "tones", " · ".join(parts) or "nothing due",
-                               0.8 * (due + new), {"new": new}, done))
-    return steps
+    if not t:
+        return []
+    new = min(t["new_room"], t["fresh"], max(0, TONE_GROUPS_PER_SESSION - t["due"]))
+    due = min(t["due"], TONE_GROUPS_PER_SESSION)
+    if not (due or new or "morning:tones" in done):
+        return []
+    parts = [_n(due, "group") + " due"] if due else []
+    parts += [_n(new, "new group")] if new else []
+    return [_step("morning", "tones", " · ".join(parts) or "nothing due",
+                  0.8 * (due + new), {"new": new}, done)]
 
 
-def _afternoon(state, done):
-    steps = []
+def _grammar(state, done):
     g = state.get("grammar")
-    two = False
-    if g and g["known"] >= GRAMMAR_MIN_KNOWN:
-        if len(g["due"]) >= PLAN_GRAMMAR_STRUCTURES:            # catching up: reviews only
-            picked = [(sid, name, "review") for sid, name in g["due"][:PLAN_GRAMMAR_STRUCTURES]]
-        elif g["due"]:
-            picked = [(sid, name, "review") for sid, name in g["due"][:1]]
-        else:
-            picked = [(sid, name, "new") for sid, name in g["fresh"][:1]]
-        two = len(picked) > 1
-        if picked or "afternoon:grammar" in done:
-            steps.append(_step("afternoon", "grammar",
-                               " · ".join(f"{name} ({kind})" for _s, name, kind in picked)
-                               or "nothing due", 8 * len(picked),
-                               {"ids": [sid for sid, _nm, _k in picked]}, done))
-    s = state.get("sentences")
-    if s and s["words"] >= SENTENCES_MIN_WORDS:
-        listen = PLAN_SENTENCES_LISTEN - (1 if two else 0)      # room for the second structure
-        speak = PLAN_SENTENCES_SPEAK - (1 if two else 0)
-        steps.append(_step("afternoon", "sentences",
-                           f"{listen} to understand by ear · {speak} to say — "
-                           "today's new words first", listen + 1.5 * speak,
-                           {"listen": listen, "speak": speak}, done))
-    return steps
+    if not (g and g["known"] >= GRAMMAR_MIN_KNOWN):
+        return []
+    if len(g["due"]) >= PLAN_GRAMMAR_STRUCTURES:            # catching up: reviews only
+        picked = [(sid, name, "review") for sid, name in g["due"][:PLAN_GRAMMAR_STRUCTURES]]
+    elif g["due"]:
+        picked = [(sid, name, "review") for sid, name in g["due"][:1]]
+    else:
+        picked = [(sid, name, "new") for sid, name in g["fresh"][:1]]
+    if not (picked or "morning:grammar" in done):
+        return []
+    return [_step("morning", "grammar",
+                  " · ".join(f"{name} ({kind})" for _s, name, kind in picked) or "nothing due",
+                  8 * len(picked), {"ids": [sid for sid, _nm, _k in picked]}, done)]
+
+
+def _morning(state, done):
+    return _words(state, done) + _tones(state, done) + _grammar(state, done)
 
 
 def _evening(state, done):
@@ -149,6 +144,15 @@ def _evening(state, done):
                            {"recap": True, "cap": PLAN_RECAP_WORDS}, done))
     h = state.get("handwriting")
     writing = bool(h and h["started"])
+    s = state.get("sentences")
+    if s and s["words"] >= SENTENCES_MIN_WORDS:
+        # no writing yet: more listening in its place
+        listen = PLAN_SENTENCES_LISTEN + (0 if writing else 2)
+        speak = PLAN_SENTENCES_SPEAK
+        steps.append(_step("evening", "sentences",
+                           f"{listen} to understand by ear · {speak} to say — "
+                           "today's new words first", listen + 1.5 * speak,
+                           {"listen": listen, "speak": speak}, done))
     if writing:
         new = min(3, h["new_room"], h["new_available"])
         due = min(h["due"], PLAN_HANDWRITING_REVIEWS)
@@ -163,20 +167,14 @@ def _evening(state, done):
                                f"{PLAN_READING_SENTENCES} sentences from characters you can write",
                                PLAN_READING_SENTENCES, {"sentences": PLAN_READING_SENTENCES},
                                done))
-    s = state.get("sentences")
-    if not writing and s and s["words"] >= SENTENCES_MIN_WORDS:
-        # no writing yet: the evening's input is listening instead of reading
-        steps.append(_step("evening", "sentences",
-                           "5 to understand by ear · 2 to say, today's words first", 8,
-                           {"listen": 5, "speak": 2}, done))
     return steps
 
 
-BUILDERS = {"morning": _morning, "afternoon": _afternoon, "evening": _evening}
+BUILDERS = {"morning": _morning, "evening": _evening}
 
 
 def build_day(state):
-    """state (from gather_state) -> the day's three sessions, in order:
+    """state (from gather_state) -> the day's sessions, in order:
     {slot, icon, title, theme, why, steps, minutes, done, skipped, finished_at}.
     Each step is {slot, key, icon, title, page, detail, minutes, params, done}.
     A step appears when it has something to do, or was already done today.
@@ -392,7 +390,7 @@ def params(key):
 
 def _close_session(user_id, tp):
     """The session's last step is done: record it, and the whole day when
-    all three are (a skipped session means the day's plan wasn't done; a
+    all of them are (a skipped session means the day's plan wasn't done; a
     session with nothing in it is counted by the Today page)."""
     import db_manager as db
     db.mark_session_complete(user_id, tp["slot"])
@@ -474,7 +472,7 @@ def continue_ui(reset=None, key="tp_continue"):
         st.success(f"🎉 {SESSIONS[slot][1]} session done. Next: {icon} {title.lower()} "
                    f"session, {when}.")
     else:
-        st.success("🎉 That's all three sessions for today. Anything more is a bonus.")
+        st.success("🎉 That's both sessions for today. Anything more is a bonus.")
     c1, c2 = st.columns(2)
     if c1.button("🏠 Back to Today", width="stretch", key=key + "_home"):
         _go(TODAY_PAGE, reset)

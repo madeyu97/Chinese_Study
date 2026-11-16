@@ -1392,7 +1392,7 @@ def db_tests():
         assert not at.exception, at.exception
         return slot, visited
 
-    @test("Today: three sessions run in order, each page to page from one button; the evening recaps the morning")
+    @test("Today: two sessions run in order, each page to page from one button; the evening recaps the morning")
     def t_today_flow():
         from streamlit.testing.v1 import AppTest
         import audio_engine
@@ -1407,24 +1407,22 @@ def db_tests():
             assert not at.exception, at.exception
             day = tplan.build_day(tplan.gather_state(uid))
             planned = {s_["slot"]: [x["key"] for x in s_["steps"]] for s_ in day}
-            assert planned["morning"][0] == "words" and planned["afternoon"][-1] == "sentences"
-            assert planned["evening"][0] == "words", planned
+            assert list(planned) == ["morning", "evening"]
+            assert planned["morning"][0] == "words"
+            assert planned["evening"][:2] == ["words", "sentences"], planned
             # morning: today's five new words
             slot, visited = _run_session(at, "▶️ Start the morning session")
             assert (slot, visited) == ("morning", planned["morning"])
             new_ids = {r[0] for r in _intro_today(uid)}
             assert len(new_ids) == 5
-            # afternoon: not open yet unless it's afternoon and two hours have passed
+            # evening: not open until its hour and four hours after the morning
             labels = [b.label for b in at.button]
-            assert "▶️ Start the afternoon session" in labels or "Start now anyway" in labels, labels
-            if "Start now anyway" in labels:
-                assert any("Best from" in x.value for x in at.info)
-            slot, visited = _run_session(at, ("▶️ Start the afternoon session", "Start now anyway"))
-            assert (slot, visited) == ("afternoon", planned["afternoon"])
-            # evening: the recap goes over today's new words without moving them
+            assert "Start now anyway" in labels, labels      # the morning only just finished
+            assert any("Best from" in x.value for x in at.info)
+            # the recap goes over today's new words without moving them
             before = dict(_rows(uid))
             slot, visited = _run_session(at, ("▶️ Start the evening session", "Start now anyway"))
-            assert slot == "evening" and visited[0] == "words"
+            assert (slot, visited) == ("evening", planned["evening"])
             conn = db.get_connection(); cur = conn.cursor()
             cur.execute("""SELECT DISTINCT vocab_id FROM word_attempts WHERE user_id = %s
                            AND detail->>'kind' = 'recap'""", (uid,))
@@ -1439,10 +1437,10 @@ def db_tests():
         finally:
             db.word_content_for, db.bank_get, audio_engine.create_audio_file = real
         prog = db.day_progress(uid)
-        assert set(prog["finished"]) == {"morning", "afternoon", "evening"}
+        assert set(prog["finished"]) == {"morning", "evening"}
         assert {f"morning:{k}" for k in planned["morning"]} <= prog["done"]
         assert "plan_complete" in db.plan_done_today(uid)
-        assert db.study_minutes(uid, 7)["sessions"] == 3
+        assert db.study_minutes(uid, 7)["sessions"] == 2
         conn = db.get_connection(); cur = conn.cursor()
         cur.execute("SELECT DISTINCT kind FROM activity_log WHERE user_id = %s", (uid,))
         kinds = {r[0] for r in cur.fetchall()}
@@ -1905,7 +1903,7 @@ def db_tests():
         import audio_engine
         uid = _fresh_learner()
         ids = [s_.id for s_ in gcur.learning_order()[:2]]
-        plan_state = lambda order, params, slot="afternoon": {
+        plan_state = lambda order, params, slot="morning": {
             "date": clock.today().isoformat(), "slot": slot, "order": order, "params": params,
             "done": [], "skipped": []}
         real = (db.grammar_known_vocab, db.grammar_pick_set, db.grammar_mark_served,
@@ -2125,6 +2123,112 @@ def db_tests():
             (db.bank_get, audio_engine.create_audio_file, db.grammar_known_vocab,
              db.grammar_pick_set, db.grammar_mark_served, gdr.grade_answer) = real
 
+    @test("I don't know: on every quiz it shows the answer and counts as a miss, never as a pick")
+    def t_dont_know():
+        import audio_engine
+        import game_components as gcomp
+        import quiz
+        uid = _fresh_learner()
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("""INSERT INTO word_skill (user_id, vocab_id, skill, interval, next_review_date, reps,
+                       introduced_on) SELECT %s, id, 'recognition', 3, '2099-01-01', 3, 'seeded'
+                       FROM vocab WHERE freq_rank <= 400 ON CONFLICT DO NOTHING""", (uid,))
+        conn.commit(); conn.close()
+        real = (db.word_content_for, db.bank_get, audio_engine.create_audio_file, db.grammar_known_vocab,
+                db.grammar_pick_set, db.grammar_mark_served, gcomp.choice_board)
+        db.word_content_for, db.bank_get = _fake_content, _fake_exercise
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        db.grammar_known_vocab = lambda user_id: GR_KNOWN * 2
+        db.grammar_pick_set = lambda user_id, sid, n: {"id": 0, "payload": _gr_payload()}
+        db.grammar_mark_served = lambda set_id: None
+        dk = lambda at: next(b for b in at.button if b.label == quiz.DONT_KNOW)
+
+        def last_attempt():
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("""SELECT result, detail FROM word_attempts WHERE user_id = %s
+                           ORDER BY id DESC LIMIT 1""", (uid,))
+            row = cur.fetchone(); conn.close()
+            return row
+        try:
+            # Words: a meaning question
+            at = _new_session(uid, "views/1_Words.py"); at.run()
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            for _ in range(40):
+                if [r for r in at.radio if (r.key or "").startswith("wd_mc_")] and \
+                        at.session_state.get("wd_ans") is None:
+                    break
+                _answer_step(at)
+            else:
+                raise AssertionError("no meaning question came up")
+            dk(at).click().run()
+            assert not at.exception, at.exception
+            ans = at.session_state["wd_ans"]
+            assert ans["result"] == "wrong" and ans["dont_know"] and "chose_kind" not in ans, ans
+            right = next(o["text"] for o in at.session_state["wd_setup"]["options"] if o["kind"] == "correct")
+            assert any(m.value.startswith("🤷 It means") and right in m.value for m in at.markdown)
+            result, detail = last_attempt()
+            assert result == "wrong" and detail["dont_know"] and not detail.get("chose_kind")
+            next(b for b in at.button if b.label == "Next ▶️").click().run()
+
+            # Words, typed: the old "Show me" is now "I don't know" too
+            for _ in range(60):
+                if [t for t in at.text_input if (t.key or "").startswith("wd_type_")] and \
+                        at.session_state.get("wd_ans") is None:
+                    dk(at).click().run()
+                    assert at.session_state["wd_ans"]["result"] == "wrong"
+                    break
+                if "Next ▶️" in [b.label for b in at.button]:
+                    next(b for b in at.button if b.label == "Next ▶️").click().run()
+                    continue
+                _answer_step(at)
+
+            # Tones
+            at = _new_session(uid, "views/4_Sound_and_Pairing.py"); at.run()
+            next(b for b in at.button if "Start" in b.label).click().run()
+            dk(at).click().run()
+            assert not at.exception, at.exception
+            assert at.session_state["sp_ans"] == {"right": False, "picked": None, "dont_know": True}
+            assert any(m.value.startswith("🤷 It was") for m in at.markdown)
+            db.flush_background()
+            result, detail = last_attempt()
+            assert result == "wrong" and detail["dont_know"] and detail["chose"] is None
+
+            # Grammar
+            at = _new_session(uid, "views/7_Grammar.py"); at.run()
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            dk(at).click().run()
+            assert not at.exception, at.exception
+            assert at.session_state["gr_ans"] == {"correct": False, "dont_know": True}
+            assert at.session_state["gr_results"][-1] is False or \
+                at.session_state["gr_results"][-1].get("correct") is False
+            assert any(m.value.startswith("🤷 It was") for m in at.markdown)
+
+            # Listen & speak
+            at = _new_session(uid, "views/9_Sentences.py"); at.run()
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            assert at.session_state["sn_cards"][0]["mode"] == "listen"
+            dk(at).click().run()
+            assert not at.exception, at.exception
+            ans = at.session_state["sn_ans"]
+            assert ans["result"] == "wrong" and ans["dont_know"] and ans["chose"] is None
+            assert [m.value for m in at.info] == [f"It means: **{at.session_state['sn_ex']['english_correct']}**"]
+            assert not at.error, "not shown as a wrong answer"
+
+            # Play: the answer is shown on the cards, no card marked as tapped
+            calls = []
+            gcomp.choice_board = lambda **k: calls.append(k)      # nothing tapped
+            at = _new_session(uid, "views/8_Games.py"); at.run()
+            next(b for b in at.button if b.key == "pick_picture").click().run()
+            dk(at).click().run()
+            assert not at.exception, at.exception
+            assert at.session_state["gm_ans"] == {"correct": False, "chosen": -1, "dont_know": True}
+            assert calls[-1]["answered"] == -1 and at.session_state["gm_streak"] == 0
+            assert any(m.value.startswith("🤷 It was") for m in at.markdown)
+            assert quiz.DONT_KNOW not in [b.label for b in at.button], "once answered, it's gone"
+        finally:
+            (db.word_content_for, db.bank_get, audio_engine.create_audio_file, db.grammar_known_vocab,
+             db.grammar_pick_set, db.grammar_mark_served, gcomp.choice_board) = real
+
     @test("every page opens from the menu; no method choices left in the sidebar")
     def t_pages_smoke():
         from streamlit.testing.v1 import AppTest
@@ -2189,6 +2293,7 @@ def db_tests():
     t_plan_adopts()
     t_words_resume()
     t_pages_resume()
+    t_dont_know()
     t_pages_smoke()
 
 
@@ -3134,35 +3239,31 @@ def _keys(sess):
     return [s_["key"] for s_ in sess["steps"]]
 
 
-@test("plan: an hour in three sessions - recall in the morning, use in the afternoon, consolidate at night")
+@test("plan: two sessions - learn in the morning, use and keep in the evening")
 def t_plan_day():
     day = tplan.build_day(_plan_state())
-    assert [s_["slot"] for s_ in day] == ["morning", "afternoon", "evening"]
-    m, a, e = (_sess(day)[k] for k in ("morning", "afternoon", "evening"))
-    assert _keys(m) == ["words", "tones"] and _keys(a) == ["grammar", "sentences"]
-    assert _keys(e) == ["words", "handwriting", "reading"]
-    # morning: reviews after sleep, then the day's new words (capped)
+    assert [s_["slot"] for s_ in day] == ["morning", "evening"] and tplan.SESSIONS_PER_WEEK == 14
+    m, e = (_sess(day)[k] for k in ("morning", "evening"))
+    assert _keys(m) == ["words", "tones", "grammar"]
+    assert _keys(e) == ["words", "sentences", "handwriting", "reading"]
+    # morning: reviews after sleep, then the day's new words (capped); one structure
     assert m["steps"][0]["params"] == {"reviews": 25, "new": 5, "unlocks": True}
     assert m["steps"][0]["detail"].startswith("25 reviews · 5 new words")
     assert m["steps"][1]["params"]["new"] == 3
-    # afternoon: two structures only when catching up (no new one then), fewer sentences to fit
-    assert a["steps"][0]["params"]["ids"] == ["g1", "g2"]
-    assert a["steps"][1]["params"] == {"listen": 3, "speak": 3}
-    one = _sess(tplan.build_day(_plan_state(grammar={"known": 150, "due": [("g1", "了")],
-                                                     "fresh": [("g9", "越来越")]})))["afternoon"]
-    assert one["steps"][0]["params"]["ids"] == ["g1"] and one["steps"][1]["params"] == {"listen": 4, "speak": 4}
+    assert m["steps"][2]["params"]["ids"] == ["g1"], "reviews first, one a morning"
     new = _sess(tplan.build_day(_plan_state(grammar={"known": 150, "due": [],
-                                                     "fresh": [("g9", "越来越"), ("g10", "x")]})))["afternoon"]
-    assert new["steps"][0]["params"]["ids"] == ["g9"], "at most one new structure"
-    assert "today's new words first" in new["steps"][1]["detail"]
-    # evening: today's words once more (no schedule), then writing and reading
+                                                     "fresh": [("g9", "越来越"), ("g10", "x")]})))["morning"]
+    assert new["steps"][2]["params"]["ids"] == ["g9"], "at most one new structure"
+    # evening: today's words once more (no schedule), sentences on them, then writing and reading
     assert e["steps"][0]["params"] == {"recap": True, "cap": 15}
     assert e["steps"][0]["detail"] == "10 words from today, once more"
-    assert e["steps"][1]["params"] == {"reviews": 15, "new": 3}
-    assert e["steps"][2]["params"] == {"sentences": 4}
-    # each session is about 20 minutes, even with a backlog
-    assert all(15 <= s_["minutes"] <= 25 for s_ in day), [s_["minutes"] for s_ in day]
-    assert sum(s_["minutes"] for s_ in day) <= 70
+    assert e["steps"][1]["params"] == {"listen": 4, "speak": 4}
+    assert "today's new words first" in e["steps"][1]["detail"]
+    assert e["steps"][2]["params"] == {"reviews": 15, "new": 3}
+    assert e["steps"][3]["params"] == {"sentences": 4}
+    # each session is about 25 minutes, no more than 30 even with a backlog
+    assert all(20 <= s_["minutes"] <= 32 for s_ in day), [s_["minutes"] for s_ in day]
+    assert sum(s_["minutes"] for s_ in day) <= 62
 
 
 @test("plan: no handwriting yet means more listening at night; recap planned before the morning's words exist")
@@ -3171,30 +3272,33 @@ def t_plan_evening():
                                                        "new_available": 9}, recap={"count": 0})))["evening"]
     assert _keys(e) == ["words", "sentences"]
     assert e["steps"][0]["detail"] == "today's new and missed words, once more"
-    assert e["steps"][1]["params"] == {"listen": 5, "speak": 2}
+    assert e["steps"][1]["params"] == {"listen": 6, "speak": 4}
     # writing started but too few characters to read with: no reading step
     e2 = _sess(tplan.build_day(_plan_state(reading={"characters": 3})))["evening"]
-    assert _keys(e2) == ["words", "handwriting"]
+    assert _keys(e2) == ["words", "sentences", "handwriting"]
 
 
 @test("plan: progress through the day - done steps stay visible, finished or skipped sessions close")
 def t_plan_progress():
     import clock as _clk
     t = _clk.now()
-    day = tplan.build_day(_plan_state(done={"morning:words", "morning:tones"}, finished={"morning": t},
+    day = tplan.build_day(_plan_state(done={"morning:words", "morning:tones", "morning:grammar"},
+                                      finished={"morning": t},
                                       words={"due": 0, "new_room": 0, "new_available": 40}))
     m = _sess(day)["morning"]
-    assert m["done"] and m["finished_at"] == t and [x["done"] for x in m["steps"]] == [True, True]
+    assert m["done"] and m["finished_at"] == t and [x["done"] for x in m["steps"]] == [True, True, True]
     assert m["steps"][0]["detail"] == "nothing due", "the morning's words step stays, ticked"
-    assert tplan.next_session(day)["slot"] == "afternoon" and tplan.last_finished(day) == t
-    day = tplan.build_day(_plan_state(finished={"morning": t}, skipped={"afternoon"}))
-    assert _sess(day)["afternoon"]["skipped"] and tplan.next_session(day)["slot"] == "evening"
+    assert tplan.next_session(day)["slot"] == "evening" and tplan.last_finished(day) == t
+    day = tplan.build_day(_plan_state(finished={"morning": t}, skipped={"evening"}))
+    assert _sess(day)["evening"]["skipped"] and tplan.next_session(day) is None
     # a step done in one session doesn't tick the same page in another
     day = tplan.build_day(_plan_state(done={"morning:words"}))
     assert not _sess(day)["evening"]["steps"][0]["done"]
+    # a plan saved under the old three-session day isn't resumed
+    assert "afternoon" not in tplan.SESSIONS
 
 
-@test("plan: a session opens at its hour, and at least two hours after the last one")
+@test("plan: a session opens at its hour, and at least four hours after the last one")
 def t_plan_opens():
     import clock as _clk
     from datetime import date as _dd, datetime as _dt, timedelta as _td
@@ -3202,12 +3306,11 @@ def t_plan_opens():
     tz = _clk.tz()
     hm = lambda x: x.astimezone(tz).strftime("%H:%M")
     assert hm(tplan.opens_at("morning", d)) == "04:00"
-    assert hm(tplan.opens_at("afternoon", d)) == "12:00"
-    assert hm(tplan.opens_at("afternoon", d, _dt(2026, 11, 9, 11, 0, tzinfo=tz))) == "13:00"
-    assert hm(tplan.opens_at("evening", d, _dt(2026, 11, 9, 16, 30, tzinfo=tz))) == "18:30"
+    assert hm(tplan.opens_at("evening", d)) == "17:00"
+    assert hm(tplan.opens_at("evening", d, _dt(2026, 11, 9, 14, 30, tzinfo=tz))) == "18:30"
     assert hm(tplan.opens_at("evening", d, _dt(2026, 11, 9, 9, 0, tzinfo=tz))) == "17:00"
     # the gap is measured in real time, whatever zone the last finish was stored in
-    utc = _dt(2026, 11, 9, 8, 30, tzinfo=_clk.ZoneInfo("UTC"))       # 16:30 in Kuala Lumpur
+    utc = _dt(2026, 11, 9, 6, 30, tzinfo=_clk.ZoneInfo("UTC"))       # 14:30 in Kuala Lumpur
     if str(tz) == "Asia/Kuala_Lumpur":
         assert hm(tplan.opens_at("evening", d, utc)) == "18:30"
 

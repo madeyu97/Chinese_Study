@@ -15,7 +15,8 @@
 
   args: sid, round, prompt {kind: "image"|"word", img, zh, py} | null,
         options [{kind: "image"|"word", img, zh, py}], answer (index),
-        answered (index or null - a restored round shows its answer),
+        answered (index or null - a restored round shows its answer;
+                  -1 = "I don't know": the answer shown, no card tapped),
         show_pinyin
 -->
 <style>

@@ -2,9 +2,8 @@
 """
 Entry point and menu.
 
-The app opens on Today: an hour of study in three short sessions (morning,
-afternoon, evening), each built from what's due and started with one
-button. Play is the alternative to scrolling. Everything else - each
+The app opens on Today: two study sessions a day (morning and evening),
+each built from what's due and started with one button. Play is the alternative to scrolling. Everything else - each
 practice page on its own - lives in the Library, where it's there when you
 want it but never the first question.
 

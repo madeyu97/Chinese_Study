@@ -32,6 +32,7 @@ import session_store as store
 import today_plan as tp
 import vocab_engine as ve
 import ai_prompter as ap
+import quiz
 import word_content as wc
 from ai_prompter import _force_simplified, generate_dictation_exercise
 from audio_engine import create_audio_file
@@ -351,14 +352,19 @@ if mode == "listen":
         typed = st.text_input("Type the pinyin you hear (optional)", key=f"sn_py_{S.sn_i}")
         choice = st.radio("Meaning", S.sn_opts, index=None, key=f"sn_mc_{S.sn_i}",
                           label_visibility="collapsed", format_func=wc.md_safe)
-        if st.button("Check", type="primary", width="stretch", disabled=choice is None):
-            result = "correct" if choice == ex["english_correct"] else "wrong"
-            record(result, {"chose": choice, "pinyin_typed": typed.strip(),
+        pressed = quiz.buttons(choice is not None)
+        if pressed:
+            dont_know = pressed == "dont_know"
+            result = "correct" if not dont_know and choice == ex["english_correct"] else "wrong"
+            record(result, {"chose": None if dont_know else choice, "dont_know": dont_know,
+                            "pinyin_typed": typed.strip(),
                             "pinyin_match": pinyin_match(typed, ex.get("pinyin"))}, "listen")
             st.rerun()
         st.stop()
     if ans["result"] == "correct":
         st.success("✅ Right.")
+    elif ans.get("dont_know"):
+        st.info(f"It means: **{ex['english_correct']}**", icon="🤷")
     else:
         st.error(f"❌ It means: **{ex['english_correct']}**")
     if ans.get("pinyin_typed"):
@@ -399,7 +405,7 @@ else:
             record(result, {"said": said, "spoken": spoken, "grading": grading},
                    "speak" if spoken else "type")
             st.rerun()
-        if c2.button("Show me", width="stretch"):
+        if c2.button(quiz.DONT_KNOW, width="stretch"):
             record("wrong", {"said": "", "gave_up": True}, "speak")
             st.rerun()
         st.stop()

@@ -76,6 +76,19 @@ GRADING_MODEL = "openai/gpt-oss-120b"
 REVIEW_MODEL = "qwen/qwen3.8-27b"
 WHISPER_MODEL = "whisper-large-v3"
 
+# Groq's per-model allowance (tokens a minute) on this account, and where a
+# call goes when its model's allowance is used up - each model has its own,
+# so a full one needn't mean waiting. See ai_budget.py.
+AI_TOKENS_PER_MINUTE = {"*": 8000}
+AI_FALLBACKS = {
+    "openai/gpt-oss-120b": ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
+    "qwen/qwen3.8-27b": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    "openai/gpt-oss-20b": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
+}
+# known words listed in an AI prompt (all of them still count as known when
+# the result is checked): the full list was 1,600 tokens of every call
+PROMPT_KNOWN_WORDS = 300
+
 # ==========================================
 # 6b. HANDWRITING PRECISION RAMP
 # ==========================================

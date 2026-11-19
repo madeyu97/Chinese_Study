@@ -46,8 +46,10 @@ def _submit(key, fn, *args):
 
 
 def _safely(key, fn, *args):
+    import ai_budget
     try:
-        return fn(*args)
+        with ai_budget.background():        # never ahead of what's on screen
+            return fn(*args)
     except Exception as e:
         logging.warning(f"[AHEAD] {key} not prepared: {e}")
         return None
@@ -146,7 +148,7 @@ def write_new_words(user_id, count):
 
 def new_words(user_id, count):
     if count > 0:
-        _submit(("words", user_id), write_new_words, user_id, min(count, 6))
+        _submit(("words", user_id), write_new_words, user_id, min(count, 3))
 
 
 def for_day(user_id, day):
@@ -161,7 +163,7 @@ def for_day(user_id, day):
             for step in session.get("steps", []):
                 params = step.get("params") or {}
                 if step.get("key") == "grammar" and not step.get("done"):
-                    grammar(user_id, params.get("ids", [])[:2])
+                    grammar(user_id, params.get("ids", [])[:1])
                 elif step.get("key") == "words" and not step.get("done") and params.get("new"):
                     new_words(user_id, params["new"])
     except Exception as e:

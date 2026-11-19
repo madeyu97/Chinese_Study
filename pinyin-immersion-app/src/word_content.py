@@ -381,7 +381,8 @@ def meaning_options(word, pool, confusables=(), n=3, rng=None, audio=False):
 def build_prompt(word, known_words, structures=(), feedback="", recent=()):
     china = word.get("tag") == "China"
     partner = re.search(r"\(Malaysia: (\S+)", word.get("english") or "")
-    known = "、".join(sorted(set(known_words) - {word["chinese"]}, key=lambda w: (len(w), w)))
+    known = "、".join(sorted(set(gd.prompt_words(known_words, recent)) - {word["chinese"]},
+                            key=lambda w: (len(w), w)))
     grammar = "\n".join(f"  - [{s.id}] {s.name}: {s.pattern}" for s in structures) or "  (none yet)"
     mainland = (f"\nThis is a MAINLAND word; Malaysians say {partner.group(1) if partner else 'something else'}. "
                 "Write sentences as heard in mainland speech or media: the learner only needs to "

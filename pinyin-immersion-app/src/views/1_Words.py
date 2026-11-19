@@ -38,6 +38,7 @@ import grammar_curriculum as gc
 import session_store as store
 import today_plan as tp
 import vocab_engine as ve
+import ai_budget
 import quiz
 import word_content as wc
 import word_diagnosis as wd
@@ -72,6 +73,10 @@ if S.get("wd_date") and S.wd_date != str(clock.today()):
     reset()
 if "words_exec" not in S:
     S.words_exec = ThreadPoolExecutor(max_workers=2)
+if "words_bg_exec" not in S:
+    S.words_bg_exec = ThreadPoolExecutor(max_workers=1)
+if "wd_urgent" not in S:
+    S.wd_urgent = set()          # words the learner has reached (their content no longer yields)
 if "wd_items" not in S and store.resume(USER_ID, "words", SAVED, clock="wd_t0"):
     S.wd_content, S.wd_futures = {}, {}
     if S.wd_items:
@@ -161,10 +166,16 @@ def needs_writing(item):
     return item["kind"] in ("new", "step2", "unlock") or item["skill"] == ve.PRODUCTION
 
 
-def _job(word, allow, known):
+def _job(word, allow, known, urgent=None):
     """One word's content - and, while still in the background, the audio
-    its card will play, so neither is waited for when the card comes up."""
-    out = db.word_content_for(USER_ID, word, allow_generate=allow, known=known)
+    its card will play, so neither is waited for when the card comes up.
+    Its AI calls yield to anything the learner is waiting for, until the
+    learner reaches this word (its id lands in `urgent`); then it doesn't."""
+    if urgent is None:
+        out = db.word_content_for(USER_ID, word, allow_generate=allow, known=known)
+    else:
+        with ai_budget.background(still=lambda: word["id"] not in urgent):
+            out = db.word_content_for(USER_ID, word, allow_generate=allow, known=known)
     try:
         warm([word["chinese"]] + [s_["hanzi"] for s_ in (out[0].get("sentences") or [])[:3]])
     except Exception:
@@ -176,12 +187,14 @@ def prefetch(start, ahead=4):
     for it in S.wd_items[start:start + ahead]:
         vid = it["word"]["id"]
         if vid not in S.wd_content and vid not in S.wd_futures:
-            S.wd_futures[vid] = S.words_exec.submit(_job, it["word"], needs_writing(it), S.wd_known)
+            S.wd_futures[vid] = S.words_exec.submit(_job, it["word"], needs_writing(it), S.wd_known,
+                                                    S.wd_urgent)
 
 
 def content_for(item):
     vid = item["word"]["id"]
     if vid not in S.wd_content:
+        S.wd_urgent.add(vid)                  # the learner is here now: no more yielding
         fut = S.wd_futures.pop(vid, None) or \
             S.words_exec.submit(_job, item["word"], needs_writing(item), S.wd_known)
         with st.spinner("Preparing this word…"):
@@ -195,7 +208,8 @@ def content_for(item):
         if payload.get("source") != "generated" and S.wd_enriched < MAX_ENRICH \
                 and ve.can_produce(item["word"]):
             S.wd_enriched += 1
-            S.words_exec.submit(_job, item["word"], True, S.wd_known)
+            # its own worker, so waiting its turn never holds up a card's content
+            S.words_bg_exec.submit(_job, item["word"], True, S.wd_known, set())   # always yields
     return S.wd_content[vid]
 
 

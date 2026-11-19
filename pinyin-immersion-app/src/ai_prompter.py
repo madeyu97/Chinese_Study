@@ -6,6 +6,7 @@ import json
 import random
 import logging
 from groq import Groq
+from ai_budget import ScheduledClient
 from dotenv import load_dotenv
 from config import GENERATION_MODEL, GRADING_MODEL, REVIEW_MODEL
 from dictionary_engine import (
@@ -18,7 +19,10 @@ from dictionary_engine import (
 )
 
 load_dotenv()
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# every chat call is scheduled within Groq's per-model limits (ai_budget.py);
+# retries are left to the scheduler, which moves a call to a model with room
+client = ScheduledClient(Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0),
+                         audio=Groq(api_key=os.getenv("GROQ_API_KEY")))
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 

@@ -2593,6 +2593,15 @@ def t_gr_recycle():
     assert out and len(prompts) == gdr.MAX_ATTEMPTS + 1
 
 
+@test("grammar generation: a stage under another name (conversations) still counts; two conversation items do")
+def t_gr_aliases():
+    s = gcur.get("bu_neg")
+    d = _gr_payload()
+    d["conversations"] = d.pop("conversation")[:2]
+    good, problems, _i = gdr.check_items(d, s, GR_KNOWN)
+    assert len(good["conversation"]) == 2 and not gdr._shortfall(good), (problems, gdr._shortfall(good))
+
+
 @test("grammar generation: gives up (returns None) if no draft ever passes review")
 def t_gr_generate_fails_closed():
     s = gcur.get("bu_neg")
@@ -2996,6 +3005,114 @@ def t_audio_reuse():
             os.environ.pop("NO_BACKGROUND", None)
 
 
+@test("AI budget: calls stay within each model's allowance; a full model hands over to one with room")
+def t_ai_budget():
+    import threading
+    import types
+    import groq
+    import httpx
+    import ai_budget as ab
+
+    class Inner:
+        def __init__(self):
+            self.calls, self.fail = [], {}
+
+        @property
+        def chat(self):
+            return types.SimpleNamespace(completions=types.SimpleNamespace(create=self.create))
+
+        def create(self, **kw):
+            self.calls.append(kw)
+            err = self.fail.pop(kw["model"], None)
+            if err:
+                raise err
+            return types.SimpleNamespace(usage=types.SimpleNamespace(total_tokens=1000),
+                                         choices=[types.SimpleNamespace(message=types.SimpleNamespace(content="{}"))])
+    big, small, qwen = "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"
+    inner = Inner()
+    client = ab.ScheduledClient(inner)
+    msg = [{"role": "user", "content": "写三个句子" * 50}]
+    client.chat.completions.create(model=big, messages=msg)
+    assert inner.calls[-1]["model"] == big and inner.calls[-1]["reasoning_effort"] == "low"
+    st = client.scheduler.model(big)
+    assert list(st.running) == [] and [t for _, t in st.used] == [1000], "real usage recorded"
+    # qwen answers without reasoning; a qwen call moved to gpt-oss reasons briefly instead
+    client.chat.completions.create(model=qwen, messages=msg, reasoning_effort="none")
+    assert inner.calls[-1]["reasoning_effort"] == "none"
+    # the 120b allowance used up: the call goes to the 20b model at once, no waiting
+    st.used.append((client.scheduler.clock(), 7500))
+    t0 = time.time()
+    client.chat.completions.create(model=big, messages=msg)
+    assert inner.calls[-1]["model"] == small and time.time() - t0 < 1
+    # a 429: that model is marked full for the time Groq gives, and the call tried elsewhere
+    req = httpx.Request("POST", "https://x")
+    inner.fail[small] = groq.RateLimitError(
+        "Rate limit reached ... on tokens per minute (TPM). Please try again in 20.16s.",
+        response=httpx.Response(429, request=req, headers={"retry-after": "21"}), body=None)
+    client.chat.completions.create(model=small, messages=msg)
+    assert [c["model"] for c in inner.calls[-2:]] == [small, big] or \
+        [c["model"] for c in inner.calls[-2:]] == [small, qwen], [c["model"] for c in inner.calls[-2:]]
+    assert client.scheduler.model(small).full_until - client.scheduler.clock() > 15
+    assert ab._retry_after(groq.RateLimitError("Please try again in 1m5.5s.",
+                                               response=httpx.Response(429, request=req), body=None)) == 65.5
+    # a reply Groq couldn't read as JSON is tried again on another model
+    inner.fail[qwen] = groq.BadRequestError(
+        "json_validate_failed", response=httpx.Response(400, request=req), body=None)
+    client.chat.completions.create(model=qwen, messages=msg, reasoning_effort="none")
+    assert inner.calls[-1]["model"] != qwen and inner.calls[-1].get("reasoning_effort") == "low"
+    # other bad requests are not retried
+    inner.fail[qwen] = groq.BadRequestError("model not found", response=httpx.Response(400, request=req),
+                                            body=None)
+    try:
+        client.chat.completions.create(model=qwen, messages=msg)
+        raise AssertionError("should have raised")
+    except groq.BadRequestError:
+        pass
+
+    # background work waits while the learner waits, and leaves room for them
+    sched = ab.Scheduler()
+    for m in (big, small, qwen):
+        sched.model(m).used.append((sched.clock(), 7000))            # every model nearly full
+    order = []
+
+    def run(label, bg):
+        name, cid = sched.acquire(big, 2000, (lambda: True) if bg else (lambda: False))
+        order.append(label)
+        sched.release(name, cid, used=10)
+    t_bg = threading.Thread(target=run, args=("background", True))
+    t_bg.start()
+    time.sleep(0.3)
+    t_fg = threading.Thread(target=run, args=("foreground", False))
+    t_fg.start()
+    time.sleep(0.3)
+    assert order == [], "nothing has room yet"
+    with sched.lock:                                                  # the minute passes
+        for m in (big, small, qwen):
+            sched.model(m).used.clear()
+        sched.lock.notify_all()
+    t_fg.join(5); t_bg.join(5)
+    assert order == ["foreground", "background"], order
+    # a background call needs headroom; promoted (the learner reached it), it doesn't
+    sched = ab.Scheduler()
+    for m in (big, small, qwen):
+        sched.model(m).used.append((sched.clock(), 5000))            # 3000 free: enough, not with a reserve
+    urgent = []
+    got = []
+    t = threading.Thread(target=lambda: got.append(sched.acquire(big, 2000, lambda: "w" not in urgent)))
+    t.start()
+    time.sleep(0.4)
+    assert got == [], "background leaves part of the allowance free"
+    urgent.append("w")
+    with sched.lock:
+        sched.lock.notify_all()
+    t.join(6)
+    assert got and got[0][0] == big
+    with ab.background():
+        assert ab.priority()()
+    assert not ab.priority()()
+    assert 2000 < ab.estimate_tokens({"model": big, "messages": [{"content": "字" * 1000}]}) < 3200
+
+
 @test("ahead: a grammar set is written once however often it is asked for, and can be waited on")
 def t_ahead():
     import time as _t
@@ -3024,8 +3141,9 @@ def t_ahead():
                                          {"key": "grammar", "done": False,
                                           "params": {"ids": ["b_struct", "c_struct", "d_struct"]}}]}]
         ahead.for_day(991, day)
-        ahead.wait_grammar(991, "c_struct"); ahead.wait_grammar(991, "b_struct")
-        assert calls == ["a_struct", "b_struct", "c_struct"], calls    # two ahead, finished sessions left alone
+        ahead.wait_grammar(991, "b_struct")
+        _t.sleep(0.05)
+        assert calls == ["a_struct", "b_struct"], calls    # one ahead, finished sessions left alone
         # the next new words' content too, when the day has a Words step with new words
         wrote, real_words = [], ahead.write_new_words
         ahead.write_new_words = lambda user_id, count: wrote.append(count)
@@ -3036,12 +3154,12 @@ def t_ahead():
             job = ahead.running(("words", 991))
             if job:
                 job.result(timeout=10)
-            assert wrote == [6], wrote                   # capped, and a recap step asks for none
+            assert wrote == [3], wrote                   # capped, and a recap step asks for none
         finally:
             ahead.write_new_words = real_words
         os.environ["NO_BACKGROUND"] = "1"
         ahead.grammar(991, ["e_struct"])
-        assert calls[-1] == "c_struct", "nothing is written in the background during tests"
+        assert calls[-1] == "b_struct", "nothing is written in the background during tests"
     finally:
         ahead.write_grammar_set = real
         ahead._READY.clear()
@@ -3623,12 +3741,12 @@ if __name__ == "__main__":
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
     print("Grammar drills:")
-    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_requires(); t_gr_review_salvage(); t_gr_optional_contrast(); t_gr_recycle(); t_gr_generate()
+    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_requires(); t_gr_review_salvage(); t_gr_optional_contrast(); t_gr_recycle(); t_gr_aliases(); t_gr_generate()
     t_gr_generate_fails_closed(); t_gr_audit_fixes(); t_gr_grade_schedule()
     print("Vocabulary engine:")
     t_ve_schedule(); t_ve_production_gate(); t_ve_modes(); t_ve_allowance(); t_ve_session()
     print("Word content:")
-    t_wc_check(); t_wc_options(); t_wc_meanings(); t_wc_options_full(); t_wc_option_shape(); t_audio_reuse(); t_ahead(); t_wc_validate(); t_wc_generate()
+    t_wc_check(); t_wc_options(); t_wc_meanings(); t_wc_options_full(); t_wc_option_shape(); t_audio_reuse(); t_ai_budget(); t_ahead(); t_wc_validate(); t_wc_generate()
     print("Word diagnosis:")
     t_integration(); t_wd_trouble(); t_wd_diagnose(); t_wd_remedies(); t_wd_written()
     print("Sound & Pairing:")

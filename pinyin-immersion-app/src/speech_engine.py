@@ -96,7 +96,8 @@ Return ONLY a JSON object, no prose around it:
 """.strip()
 
     try:
-        resp = client.chat.completions.create(
+        import ai_prompter                 # the scheduled client (ai_budget.py)
+        resp = ai_prompter.client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model=GRADING_MODEL,
             response_format={"type": "json_object"},

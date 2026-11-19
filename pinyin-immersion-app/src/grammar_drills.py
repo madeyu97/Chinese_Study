@@ -60,7 +60,11 @@ STAGE_TITLES = {
     "conversation": "Conversation",
 }
 COUNTS = {"identify": (3, 5), "produce": (3, 4), "contrast": (3, 4),
-          "rapid": (4, 8), "conversation": (3, 5)}
+          "rapid": (4, 8), "conversation": (2, 5)}
+# names a draft sometimes uses for a stage instead of the one asked for
+STAGE_ALIASES = {"conversation": ("conversations", "dialogue", "dialogues"),
+                 "rapid": ("rapid_fire", "rapid_recall"), "identify": ("identification",),
+                 "produce": ("production",)}
 
 
 # ======================================================================
@@ -192,9 +196,42 @@ def _splits_into(tok, allowed):
 # ======================================================================
 # Prompt
 # ======================================================================
+@functools.lru_cache(maxsize=1)
+def _frequency_rank():
+    import csv
+    from config import FREQUENCY_CSV_PATH
+    try:
+        with open(FREQUENCY_CSV_PATH, encoding="utf-8") as f:
+            return {r["Chinese"]: n for n, r in enumerate(csv.DictReader(f))}
+    except Exception:
+        return {}
+
+
+def prompt_words(known_words, recent=(), limit=None):
+    """The known words to list in a prompt. Every listed word costs tokens
+    on every call, against a per-minute allowance (see ai_budget.py); a
+    writer needs the everyday ones, not all seven hundred. Recent words
+    first, then the most frequent, then a share of the learner's own words
+    that no frequency list has (Malaysian ones). Checking still accepts every
+    known word."""
+    from config import PROMPT_KNOWN_WORDS
+    limit = limit or PROMPT_KNOWN_WORDS
+    words = list(dict.fromkeys(known_words))
+    if len(words) <= limit:
+        return words
+    rank = _frequency_rank()
+    out = [w for w in dict.fromkeys(recent) if w in set(words)]
+    ranked = sorted((w for w in words if w in rank), key=rank.get)
+    own = [w for w in words if w not in rank]
+    room = limit - len(out)
+    take_own = min(len(own), room // 5)
+    out += [w for w in ranked if w not in out][:room - take_own] + own[:take_own]
+    return out[:limit]
+
+
 def build_prompt(structure, known_words, china_pairs=(), contrasts=(),
                  previous=(), feedback="", recent=()):
-    known_list = "、".join(sorted(known_words, key=lambda w: (len(w), w)))
+    known_list = "、".join(sorted(prompt_words(known_words, recent), key=lambda w: (len(w), w)))
     china = "; ".join(f"{m} not {c}" for c, m in china_pairs[:60])
     contrast_text = "\n".join(f"  - {c.name}: {c.pattern} — {c.purpose}" for c in contrasts) \
         or "  (none listed - pick the most commonly confused structure, or set contrast to null if none is useful)"
@@ -454,6 +491,11 @@ def check_items(payload, structure, known_words, recent=(), introduced=None):
             introduced.append(w)
             seen.add(w["hanzi"])
     allowed = allowed_set(known, structure)
+    for stage, aliases in STAGE_ALIASES.items():
+        if not isinstance(payload.get(stage), list):
+            alias = next((a for a in aliases if isinstance(payload.get(a), list)), None)
+            if alias:
+                payload[stage] = payload.pop(alias)
     contrast = payload.get("contrast") if isinstance(payload.get("contrast"), dict) else None
     for stage in STAGES:
         items = (contrast or {}).get("items") if stage == "contrast" else payload.get(stage)
@@ -683,7 +725,8 @@ def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), 
         feedback = "\n".join(f"- {p}" for p in problems[:15])
         if need:
             feedback += ("\n" if feedback else "") + \
-                f"- Items that passed are kept. Still needed, at least: {need}. Write a full set again."
+                (f"- Items that passed are kept. Still needed, at least: {need}. Write a full set "
+                 f"again, with every stage in it ({', '.join(STAGES)}) under exactly those names.")
         logging.warning(f"[GRAMMAR] {structure.id} attempt {attempt}: kept "
                         f"{ {st_: len(v) for st_, v in bank.items()} }, still short {short}:\n{feedback}")
     return None

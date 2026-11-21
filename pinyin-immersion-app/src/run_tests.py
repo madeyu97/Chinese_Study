@@ -1911,7 +1911,7 @@ def db_tests():
         db.grammar_known_vocab = lambda user_id: GR_KNOWN * 2
         db.grammar_pick_set = lambda user_id, sid, n: {"id": 0, "payload": _gr_payload()}
         db.grammar_mark_served = lambda set_id: None
-        gdr.grade_answer = lambda structure, task, reference, said, spoken=True: {
+        gdr.grade_answer = lambda structure, task, reference, said, spoken=True, question=None: {
             "verdict": "correct", "feedback": "", "better": reference}
         audio_engine.create_audio_file = lambda text, voice=None: None
         try:
@@ -2076,7 +2076,7 @@ def db_tests():
         db.grammar_known_vocab = lambda user_id: GR_KNOWN * 2
         db.grammar_pick_set = lambda user_id, sid, n: {"id": 0, "payload": _gr_payload()}
         db.grammar_mark_served = lambda set_id: None
-        gdr.grade_answer = lambda structure, task, reference, said, spoken=True: {
+        gdr.grade_answer = lambda structure, task, reference, said, spoken=True, question=None: {
             "verdict": "correct", "feedback": "", "better": reference}
         try:
             # Listen & speak: one card answered, the next one's answer on screen
@@ -2331,6 +2331,7 @@ def _gr_payload():
             ("You're not going to work tomorrow.", "明天我不做工。"),
             ("You don't drink coffee.", "我不喝咖啡。"), ("You're not sleepy / going to sleep.", "我不睡觉。")]],
         "conversation": [{"question_hanzi": q, "question_pinyin": "", "question_english": qe,
+                          "cue": "Answer it",
                           "sample_hanzi": a, "sample_pinyin": "", "sample_english": ae}
                          for q, qe, a, ae in [
             ("你喝咖啡吗？", "Do you drink coffee?", "我不喝咖啡。", "I don't drink coffee."),
@@ -2568,6 +2569,7 @@ def t_gr_optional_contrast():
                    for h in ("无论谁来，我都去。", "无论多忙，我都来。", "无论天气怎么样，我都去。",
                              "无论你去不去，我都去。", "无论多贵，他都买。")],
          "conversation": [{"question_hanzi": "你来吗？", "question_pinyin": "", "question_english": "",
+                           "cue": "Say you'll come whatever happens",
                            "sample_hanzi": h, "sample_pinyin": "", "sample_english": ""}
                           for h in ("无论多忙，我都来。", "无论下不下雨，我都来。", "无论几点，我都来。")]}
     good, problems, _intro = gdr.check_items(d, s, known)
@@ -2600,6 +2602,30 @@ def t_gr_aliases():
     d["conversations"] = d.pop("conversation")[:2]
     good, problems, _i = gdr.check_items(d, s, GR_KNOWN)
     assert len(good["conversation"]) == 2 and not gdr._shortfall(good), (problems, gdr._shortfall(good))
+
+
+@test("grammar conversation: a cue says what to reply; the reply is judged against the question")
+def t_gr_conversation():
+    s = gcur.get("bu_neg")
+    d = _gr_payload()
+    for it in d["conversation"]:
+        it.pop("cue")
+    good, problems, _i = gdr.check_items(d, s, GR_KNOWN)
+    assert not good["conversation"] and any("missing cue" in p for p in problems), problems
+    # writer and reviewer are both told the reply must answer the question asked
+    prompt = gdr.build_prompt(s, GR_KNOWN)
+    assert "never dodge it" in prompt and '"cue"' in prompt
+    prompts = _replies(_gr_payload(), {"acceptable": True, "problems": []})
+    gdr.generate(s, GR_KNOWN)
+    assert "direct, natural answer to THAT question" in prompts[1] and "| cue: " in prompts[1]
+    # grading a conversation reply: by the question, not by the model answer
+    prompts = _replies({"verdict": "correct", "feedback": "", "better": "我不去。"})
+    g = gdr.grade_answer(s, "Answer naturally", "我不想去。", "我不去。", question="你去吗？ (Are you going?)")
+    assert g["verdict"] == "correct" and "reply to the question 你去吗？" in prompts[0]
+    assert "only an example" in prompts[0]
+    prompts = _replies({"verdict": "correct", "feedback": "", "better": "x"})
+    gdr.grade_answer(s, "Say it", "我不去。", "我不去。")
+    assert "reply to the question" not in prompts[0]
 
 
 @test("grammar generation: gives up (returns None) if no draft ever passes review")
@@ -3741,7 +3767,7 @@ if __name__ == "__main__":
     print("Handwriting engine:")
     t_hw_quality(); t_hw_context(); t_curriculum(); t_char_info(); t_precision(); t_radicals(); t_reading()
     print("Grammar drills:")
-    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_requires(); t_gr_review_salvage(); t_gr_optional_contrast(); t_gr_recycle(); t_gr_aliases(); t_gr_generate()
+    t_gr_curriculum(); t_gr_yue_verb(); t_gr_syllabus(); t_gr_vocab(); t_gr_validate(); t_gr_mcq(); t_gr_requires(); t_gr_review_salvage(); t_gr_optional_contrast(); t_gr_recycle(); t_gr_aliases(); t_gr_conversation(); t_gr_generate()
     t_gr_generate_fails_closed(); t_gr_audit_fixes(); t_gr_grade_schedule()
     print("Vocabulary engine:")
     t_ve_schedule(); t_ve_production_gate(); t_ve_modes(); t_ve_allowance(); t_ve_session()

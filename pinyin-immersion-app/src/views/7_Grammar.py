@@ -150,6 +150,10 @@ def items_of(payload, stage):
         else payload.get(stage, [])
     if stage in ("identify", "contrast"):    # a stored set may predate the option checks
         items = [it for it in items or [] if gd.mcq_problem(it) is None]
+    if stage == "conversation":
+        # questions written before each came with a cue were often answered
+        # with a reply that didn't fit them: those are left out
+        items = [it for it in items or [] if str(it.get("cue") or "").strip()]
     return items or []
 
 
@@ -352,12 +356,15 @@ def multiple_choice():
         st.rerun()
 
 
-def spoken_answer(task, reference, reference_pinyin, reference_english, listen_first=None):
+def spoken_answer(task, reference, reference_pinyin, reference_english, listen_first=None,
+                  cue=None):
     if listen_first:
         play(listen_first["hanzi"])
         with st.expander("Show the question"):
             big(listen_first["hanzi"], listen_first.get("pinyin", ""))
             st.caption(listen_first.get("english", ""))
+        if cue:
+            st.markdown(f"💬 **{cue}**")
     else:
         st.markdown(f"**{task}**")
     if ans is None:
@@ -376,7 +383,9 @@ def spoken_answer(task, reference, reference_pinyin, reference_english, listen_f
                     return
                 said, spoken = _force_simplified(t.get("text", "")), True
             with st.spinner("Checking…"):
-                g = gd.grade_answer(structure, task, reference, said, spoken)
+                g = gd.grade_answer(structure, task, reference, said, spoken,
+                                    question=listen_first and
+                                    f"{listen_first['hanzi']} ({listen_first.get('english', '')})")
             S.gr_ans = {**g, "said": said}
             if g["verdict"] != "ungraded":
                 record(g["verdict"])
@@ -430,9 +439,11 @@ elif stage == "produce":
 elif stage == "rapid":
     rapid()
 else:
-    spoken_answer(f"Answer naturally: {item['question_hanzi']} ({item.get('question_english', '')})",
+    spoken_answer(f"Answer naturally: {item['question_hanzi']} ({item.get('question_english', '')})"
+                  + (f" - {item['cue']}" if item.get("cue") else ""),
                   item["sample_hanzi"], item.get("sample_pinyin", ""),
                   item.get("sample_english", ""),
                   listen_first={"hanzi": item["question_hanzi"],
                                 "pinyin": item.get("question_pinyin", ""),
-                                "english": item.get("question_english", "")})
+                                "english": item.get("question_english", "")},
+                  cue=item.get("cue"))

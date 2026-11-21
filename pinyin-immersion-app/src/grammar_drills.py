@@ -19,7 +19,8 @@ Five stages per structure, as specified:
   produce      situation in English -> say it in Chinese
   contrast     hear or read, tell the target apart from a look-alike
   rapid        quick prompts, answer aloud at once
-  conversation natural questions answered with the structure
+  conversation a question someone would really ask, a cue for what to
+               answer, and a reply that answers it using the structure
 """
 
 import functools
@@ -279,6 +280,16 @@ PRINCIPLES
   inside Chinese sentences. No names - use pronouns and roles.
 - Produce and rapid prompts are situations or intentions ("You want to tell
   your friend…", "Say you've never…"), not word-for-word English to translate.
+- CONVERSATION: write the question so that the most natural reply to it uses
+  the target structure - choose the question for the structure, never force
+  the structure into a reply that doesn't need it. The sample must answer
+  exactly what was asked (what the question asks for: a time, a yes/no, a
+  reason...), the way a person would really reply; never dodge it, change the
+  subject or reply to a different question. "cue" tells the learner in a few
+  English words what to reply ("Say you'll go whatever the weather").
+  Bad (dodges the question): 你明天几点来？ -> 无论几点，我都会来。
+  Good: 下雨的话，你还去吗？ cue "Say you're going whatever the weather"
+        -> 无论下不下雨，我都去。
 - Every sentence that is meant to use the target structure must use it.
 - In multiple choice, exactly one option is correct. Options are meanings or
   functions in English, all written the same way and about the same length:
@@ -299,7 +310,7 @@ Return ONLY a JSON object:
                "items": [ same shape as identify ]}},                    // 3-4 items, or null
   "rapid": [ {{"prompt": "…", "answer_hanzi": "…", "answer_pinyin": "…"}} ],   // 5-8
   "conversation": [ {{"question_hanzi": "…", "question_pinyin": "…",
-                      "question_english": "…", "sample_hanzi": "…",
+                      "question_english": "…", "cue": "…", "sample_hanzi": "…",
                       "sample_pinyin": "…", "sample_english": "…"}} ],   // 3-5
   "introduced_words": [ {{"hanzi": "…", "pinyin": "…", "english": "…"}} ]
 }}
@@ -460,6 +471,8 @@ def _item_problems(stage, it, structure, allowed, introduced):
         it["read"] = bool(it.get("read"))
     if stage in ("produce", "rapid") and not (it.get("situation") or it.get("prompt")):
         problems.append("missing prompt")
+    if stage == "conversation" and not str(it.get("cue") or "").strip():
+        problems.append("missing cue (what the learner should reply, in a few English words)")
     if missing_all:
         words = _new_words([t for _hz, _ws, toks in missing_all for t in toks], allowed)
         # one new word in a sentence is learnable in context; three are not,
@@ -592,7 +605,8 @@ def _describe_for_review(payload):
     for i, it in enumerate(payload.get("rapid", []), 1):
         lines.append(f"[rapid {i}] {it.get('prompt')} -> {it['answer_hanzi']}")
     for i, it in enumerate(payload.get("conversation", []), 1):
-        lines.append(f"[conversation {i}] Q: {it['question_hanzi']} -> sample: {it['sample_hanzi']}")
+        lines.append(f"[conversation {i}] Q: {it['question_hanzi']} ({it.get('question_english', '')}) "
+                     f"| cue: {it.get('cue', '')} -> reply: {it['sample_hanzi']}")
     return "\n".join(lines)
 
 
@@ -616,6 +630,11 @@ Check every item below:
 5. Contrast items genuinely hinge on the difference; explanations are
    accurate. 了 must never be explained as simply "past tense".
 6. No Beijing 儿 (哪儿, 一点儿 etc.).
+7. Conversation: the reply must be a direct, natural answer to THAT question -
+   what a person asked it would actually say. Flag any reply that dodges the
+   question, answers something else, or forces the structure in where a
+   speaker wouldn't use it (then the question should change), and any cue
+   that doesn't match the reply.
 
 DRILLS:
 {_describe_for_review(payload)}
@@ -745,9 +764,11 @@ def sentences_in(payload):
 # ======================================================================
 # Grading spoken / typed answers
 # ======================================================================
-def grade_answer(structure, task, reference, learner_text, spoken=True):
+def grade_answer(structure, task, reference, learner_text, spoken=True, question=None):
     """Judge a produced answer. Returns {"verdict": correct|close|wrong,
-    "feedback": str, "better": str}."""
+    "feedback": str, "better": str}. With `question` (the conversation
+    stage) the reply is judged as an answer to that question: any reply that
+    answers it naturally is right, whatever the model answer says."""
     if not (learner_text or "").strip():
         return {"verdict": "wrong", "feedback": "Nothing was heard - try again aloud.",
                 "better": reference}
@@ -758,6 +779,10 @@ You are a warm but exact Malaysian Mandarin tutor. The learner is practising:
 TASK: {task}
 A GOOD ANSWER (one of many): {reference}
 LEARNER SAID: {learner_text}
+{(f"This is a reply to the question {question}. Judge it as a reply: does it answer what was asked, "
+  "naturally? The good answer above is only an example - a different reply that answers the "
+  "question well is just as right; never mark a sensible reply down for not matching it.")
+ if question else ""}
 {"(This is a speech transcription: ignore homophone mix-ups such as 在/再 and missing punctuation.)" if spoken else ""}
 
 Verdict:

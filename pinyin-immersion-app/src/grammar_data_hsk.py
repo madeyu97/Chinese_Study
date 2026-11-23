@@ -27,7 +27,8 @@ STRUCTURES = [
     _S("numbers", 4, "Building numbers — 两 or 二, 零, 百, 千", "两个 / 二十二 / 一百零五 / 两千",
        "Say any number up to the thousands, and pick 两 or 二.",
        notes="Numbers are built in order: 三十五, 一百二十, 两千三百. 零 fills a gap: 一百零五, "
-             "两千零八. 两 before a measure word (两个人, 两本书) and before 百 / 千 (两百, 两千); "
+             "两千零八; 万 for ten thousands (两万三千). 两 before a measure word (两个人, 两本书) "
+             "and before 百 / 千 / 万 (两百, 两千); "
              "二 when counting, in 十二 / 二十, and in dates and phone numbers (二月, 十二号). "
              "Drill counting people and things, prices and years. Never 二个.",
        markers=("两", "二", "零", "百", "千"), level=1, core=True),
@@ -68,6 +69,44 @@ STRUCTURES = [
        contrast=("ye_also",), markers=("和", "跟"), level=1, core=True,
        requires=((r"(我|你|他|她|们|[一-鿿])(和|跟)[一-鿿]",
                   "和 / 跟 should join two nouns here"),)),
+    # ---- HSK 2 ----
+    _S("jianyu_causative", 25, "请 / 叫 / 让 + person + verb — get someone to do",
+       "妈妈叫我去买菜。/ 我想请老师教我。/ 让他进来。",
+       "Say you ask, tell or let someone do something.",
+       notes="Subject + 请 / 叫 / 让 + person + verb (+ object): the person is the object of "
+             "the first verb and the doer of the second. 请 = invite / ask politely, 叫 = "
+             "tell, 让 = let / make. Negation goes before the first verb: 妈妈不让我去. "
+             "Drill asking, telling and letting; never 让 + 去 + 他.",
+       markers=("请", "叫", "让"), level=2, core=True,
+       requires=((r"(请|叫|让)(我|你|他|她|我们|你们|他们|大家|[\u4e00-\u9fff]{1,3})"
+                  r"[\u4e00-\u9fff]", "请 / 叫 / 让 needs a person and then a verb"),)),
+    _S("shenmede", 29, "……什么的 — and so on", "苹果、香蕉什么的 / 唱歌、跳舞什么的",
+       "End a list with 'and things like that'.",
+       notes="Two or three examples, then 什么的: 我喜欢看书、听音乐什么的. Spoken and "
+             "relaxed. Drill lists of food, hobbies, things to buy.",
+       markers=("什么的",), level=2),
+    _S("double_subject", 1, "Topic + subject + adjective — 她个子很高", "她个子很高。/ 我头疼。/ 这家店菜很好吃。",
+       "Describe one feature of someone or something.",
+       notes="The whole sentence is about the first noun; the second noun is the part "
+             "described: 她个子很高 (she is tall - lit. she, height is high), 我头疼 (I have "
+             "a headache), 这家店菜很便宜. No 的 needed (她的个子很高 is also fine). Drill "
+             "people's looks, health, places.",
+       markers=("个子", "头", "身体", "菜", "工作", "眼睛", "天气", "很", "疼"), level=2),
+    _S("you_reach", 13, "有 + amount / 有…那么 — as much as", "他有三十岁吗？/ 你有他高吗？",
+       "Ask or say whether something reaches an amount or a standard.",
+       notes="有 + amount: reaching it (这条鱼有两公斤 / 他有三十岁吗？). A 有 B (那么 / 这么) "
+             "+ adjective: as … as (你有他高吗？). Mostly in questions and negatives - the "
+             "negative 没有…那么 is its own structure (meiyou_name).",
+       contrast=("meiyou_name",), markers=("有",), level=2,
+       requires=((r"有.{0,6}(岁|块|公斤|米|多|那么|这么|高|大|长|远|吗)",
+                  "有 should reach an amount or a standard here"),)),
+    _S("zheme_name", 14, "这么 / 那么 / 这样 — so, like this", "这么贵！/ 他那么忙 / 这样做",
+       "Say 'so (much)' or 'like this / that'.",
+       notes="这么 / 那么 + adjective: so …: 这么贵 (this expensive), 那么远 (that far). "
+             "这样 / 那样 + verb: like this: 这样写, 你别那样说. 这么 for here and now, 那么 "
+             "for there or what someone said. Drill surprise at prices and distances, "
+             "showing how to do things.",
+       markers=("这么", "那么", "这样", "那样"), level=2),
     _S("dou_all", 18, "都 — all, both (after the group)", "我们都去。/ 他们都是老师。/ 这些都很贵。",
        "Say everyone or everything in a group does or is something.",
        notes="都 goes after the group and before the verb: 我们都喜欢 (not 都我们喜欢). The "
@@ -78,12 +117,17 @@ STRUCTURES = [
 ]
 
 LISTED = {
-    1: [("No 是 before dates, ages, prices — HSK 1 (added)", "noun_predicate")],
+    1: [("No 是 before dates, ages, prices — HSK 1 (added)", "noun_predicate"),
+        ("Topic + subject + adjective (她个子很高) — HSK 2 (added)", "double_subject")],
     4: [("Numbers: 两 / 二, 零, 百, 千 — HSK 1 (added)", "numbers"),
         ("第 + number — HSK 1 (added)", "di_ordinal"),
         ("Prices: 块 / 元 — HSK 1 (added)", "money")],
     6: [("Dates and clock times — HSK 1 (added)", "date_time")],
     15: [("和 joining nouns — HSK 1 (added)", "he_and")],
     18: [("都 — all, both — HSK 1 (added)", "dou_all")],
-    25: [("Verb-object words (睡觉, 上班) — HSK 1 (added)", "lihe_verbs")],
+    25: [("Verb-object words (睡觉, 上班) — HSK 1 (added)", "lihe_verbs"),
+         ("请 / 叫 / 让 + person + verb — HSK 2 (added)", "jianyu_causative")],
+    29: [("……什么的 — HSK 2 (added)", "shenmede")],
+    13: [("有 + amount / 有…那么 — HSK 2 (added)", "you_reach")],
+    14: [("这么 / 那么 / 这样 — HSK 2 (added)", "zheme_name")],
 }

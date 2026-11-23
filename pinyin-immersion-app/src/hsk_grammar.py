@@ -16,8 +16,8 @@ On the HSK track the drills come in HSK order (1 before 2 ...), and within
 a level in the curriculum's own teaching order (core first; a contrast
 pair waits for both halves).
 
-Mapped so far: HSK 1. Levels 2-4 follow; until then the HSK track drills
-only what is mapped.
+Mapped so far: HSK 1 (here) and HSK 2 (hsk_grammar_2.py). Levels 3-4
+follow; until then the HSK track drills only what is mapped.
 """
 
 import functools
@@ -398,6 +398,19 @@ LEARN = {
         "(these are all expensive).",
         "Not before the group: 都我们去 ✗. 都不 = none; 不都 = not all."),
 }
+
+
+def _merge(part):
+    clash = set(part.LEARN) & set(LEARN)
+    assert not clash, f"cards written twice: {clash}"
+    MAP.update(part.MAP)
+    LEXICAL.update(part.LEXICAL)
+    LEARN.update(part.LEARN)
+
+
+import hsk_grammar_2  # noqa: E402
+
+_merge(hsk_grammar_2)
 
 
 @functools.lru_cache(maxsize=1)

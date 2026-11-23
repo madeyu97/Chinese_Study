@@ -16,8 +16,8 @@ On the HSK track the drills come in HSK order (1 before 2 ...), and within
 a level in the curriculum's own teaching order (core first; a contrast
 pair waits for both halves).
 
-Mapped so far: HSK 1 (here) and HSK 2 (hsk_grammar_2.py). Levels 3-4
-follow; until then the HSK track drills only what is mapped.
+Mapped so far: HSK 1 (here), HSK 2 and 3 (hsk_grammar_2.py, _3.py). HSK 4
+follows; until then the HSK track drills only what is mapped.
 """
 
 import functools
@@ -409,8 +409,10 @@ def _merge(part):
 
 
 import hsk_grammar_2  # noqa: E402
+import hsk_grammar_3  # noqa: E402
 
 _merge(hsk_grammar_2)
+_merge(hsk_grammar_3)
 
 
 @functools.lru_cache(maxsize=1)

@@ -3826,11 +3826,12 @@ def t_hsk_write_order():
     assert _hsk.write_info("名")["cue_word"] == "名字"
 
 
-@test("HSK grammar: every HSK 1-3 point drilled or explained, a card for every structure, HSK order")
+@test("HSK grammar: every HSK 1-4 point drilled or explained, a card for every structure, HSK order")
 def t_hsk_grammar():
     import hsk_grammar as hg
     from dictionary_engine import has_erhua
-    for p in _hsk.grammar_points(1) + _hsk.grammar_points(2) + _hsk.grammar_points(3):
+    assert len(_hsk.grammar_points()) == 339
+    for p in _hsk.grammar_points():
         assert p["id"] in hg.MAP, p
         assert hg.MAP[p["id"]] or p["id"] in hg.LEXICAL, ("undrilled point needs a reason", p)
     sids = {s for v in hg.MAP.values() for s in v}
@@ -3839,7 +3840,8 @@ def t_hsk_grammar():
     for sid, (how, trap) in hg.LEARN.items():
         assert how and trap and len(how) < 260 and len(trap) < 160, sid
         assert sid == "nali" or not has_erhua(how + trap), sid   # nali: "not 哪儿"
-    assert {s.id for s in hg.learning_order(3)} == sids and len(hg.learning_order(3)) == len(sids)
+    assert {s.id for s in hg.learning_order(4)} == sids and len(hg.learning_order(4)) == len(sids)
+    assert {s.id for s in hg.learning_order(3)} == {s for s in sids if hg.structure_level()[s] <= 3}
     assert {s.id for s in hg.learning_order(2)} == {s for s in sids if hg.structure_level()[s] <= 2}
     order = hg.learning_order(1)
     assert {s.id for s in order} == {s for s in sids if hg.structure_level()[s] == 1}

@@ -12,6 +12,7 @@ import ahead
 import clock
 import db_manager as db
 import today_plan as tp
+import hsk
 from auth import on_hsk_track, require_login, sidebar_user_badge
 from config import SESSION_GAP_HOURS
 
@@ -39,7 +40,8 @@ levels = state.get("hsk_levels")
 if HSK:
     if levels:
         st.caption(f"🎯 Studying **HSK {levels['listen']}** by ear · "
-                   f"**HSK {levels['read']}** in characters")
+                   f"**HSK {levels['read']}** in characters · "
+                   f"grammar up to **HSK {hsk.grammar_upto(levels)}**")
     else:
         with st.container(border=True):
             st.markdown("🎯 **Find your HSK level first** — about five minutes. Grammar, "

@@ -149,3 +149,13 @@ def known_words(username, hsk_levels):
         hsk_levels = json.loads(hsk_levels)
     level = (hsk_levels or {}).get("listen") or 1
     return [w["word"] for w in words_upto(level) if re.fullmatch(r"[\u4e00-\u9fff]+", w["word"])]
+
+
+def grammar_upto(hsk_levels):
+    """The highest HSK level grammar drills go up to: the grammar level from
+    the level test, or the listening level before grammar was tested
+    (HSK 1 until anything is set)."""
+    if isinstance(hsk_levels, str):
+        hsk_levels = json.loads(hsk_levels)
+    lv = hsk_levels or {}
+    return lv.get("grammar") or lv.get("listen") or 1

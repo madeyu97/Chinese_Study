@@ -925,7 +925,8 @@ def set_handwriting_source(user_id, source):
 
 
 def get_hsk_levels(user_id):
-    """{"listen": n, "read": n, "by": ..., "at": ...} or None if never set."""
+    """{"listen": n, "read": n, "grammar": n (once tested), "by": ..., "at": ...}
+    or None if never set."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT hsk_levels FROM users WHERE id = %s", (user_id,))
@@ -937,9 +938,11 @@ def get_hsk_levels(user_id):
     return value or None
 
 
-def set_hsk_levels(user_id, listen, read, by):
+def set_hsk_levels(user_id, listen, read, by, grammar=None):
     value = {"listen": int(listen), "read": int(read), "by": by,
              "at": clock.now().isoformat(timespec="minutes")}
+    if grammar is not None:
+        value["grammar"] = int(grammar)
     conn = get_connection(one_shot=True)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET hsk_levels = %s WHERE id = %s",

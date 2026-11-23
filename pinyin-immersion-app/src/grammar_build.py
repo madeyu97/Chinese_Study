@@ -45,11 +45,21 @@ SPLIT = ("把", "被", "比", "给", "跟", "对", "往", "从", "在", "都", "
          "又", "再", "没", "不")
 
 
+def _is_word(w):
+    """An HSK word (比赛, 可能, 没有) stays one tile; jieba's glued pairs (把门,
+    在家, 去过) aren't HSK words, so they come apart."""
+    try:
+        import hsk
+        return len(w) > 1 and hsk.word(w) is not None
+    except Exception:
+        return False
+
+
 def _split(words, markers):
     marks = sorted(set(markers) | set(SPLIT), key=len, reverse=True)
     out = []
     for w in words:
-        if w in _WHOLE or w in markers:     # a word in its own right (不错, 还是)
+        if w in _WHOLE or w in markers or _is_word(w):   # a word in its own right (比赛, 不错)
             out.append(w)
             continue
         if len(w) == 2 and w[1] in "过着":   # verb + aspect: 去过 → 去 + 过
@@ -84,13 +94,18 @@ def tiles_of(sentence, markers=()):
     if len(words) > MAX_TILES:
         # fold the longest run of single characters into its neighbour until
         # it fits: 个 + 人 → 个人, keeping particles like 了 / 吗 apart
-        keep = set("了吗呢吧着过的得地都也就才还又再不没把被比")
-        while len(words) > MAX_TILES:
+        keep = set("了吗呢吧着过的得地都也就才还又再不没把被比") | SUBJECTS
+
+        def fold(both_single):
             for i in range(len(words) - 1):
-                if len(words[i]) == 1 and words[i] not in keep and words[i + 1] not in keep:
-                    words[i:i + 2] = [words[i] + words[i + 1]]
-                    break
-            else:
+                a, b = words[i], words[i + 1]
+                if a in keep or b in keep or len(a) != 1 or (both_single and len(b) != 1):
+                    continue
+                words[i:i + 2] = [a + b]
+                return True
+            return False
+        while len(words) > MAX_TILES:
+            if not (fold(True) or fold(False)):
                 return None
     return words if MIN_TILES <= len(words) <= MAX_TILES else None
 

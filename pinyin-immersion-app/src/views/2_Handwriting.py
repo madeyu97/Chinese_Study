@@ -26,8 +26,9 @@ from datetime import date
 import streamlit as st
 
 import clock
+import hsk
 import today_plan as tp
-from auth import require_login, sidebar_user_badge
+from auth import on_hsk_track, require_login, sidebar_user_badge
 from config import HANDWRITING_NEW_PER_DAY
 from hanzi_component import hanzi_drill
 from db_manager import (
@@ -46,6 +47,7 @@ from db_manager import (
     update_handwriting_progress,
     get_handwriting_stats,
     get_char_state,
+    get_hsk_writing_progress,
 )
 
 st.set_page_config(page_title="Handwriting", page_icon="✍️", layout="centered")
@@ -53,6 +55,7 @@ st.set_page_config(page_title="Handwriting", page_icon="✍️", layout="centere
 USER = require_login()
 USER_ID = USER["id"]
 S = st.session_state
+HSK = on_hsk_track(USER)
 SESSION_KEYS = ("hw_payload", "hw_sid", "hw_processed", "hw_done", "hw_final",
                 "hw_state_seed", "hw_plan", "hw_t0", "hw_logged", "hw_plan_empty", "hw_day")
 SOURCES = {
@@ -199,8 +202,20 @@ if S.get("hw_browse") and "hw_payload" not in S:
 # ----------------------------------------------------------------------
 # SETUP SCREEN
 # ----------------------------------------------------------------------
+def hsk_progress_ui(p):
+    """The 400 characters to write for HSK 1-4, band by band."""
+    st.metric("HSK 1–4 characters started", f"{p['started']} / {p['total']}")
+    for band, b in p["bands"].items():
+        st.progress(min(1.0, b["started"] / b["total"]) if b["total"] else 0.0,
+                    text=f"{hsk.BAND_NAMES[band]} · {b['started']}/{b['total']} started · "
+                         f"{b['known']} known")
+    st.caption("Known = next review a week or more away. HSK 1–2 comes first, then 3, then "
+               "4; within each, the parts of a character before the characters built from "
+               "them (女 'woman' before 好 'good' and 妈 'mum').")
+
+
 if "hw_payload" not in S:
-    st.title("✍️ Handwriting")
+    st.title("✍️ Write — HSK 1–4" if HSK else "✍️ Handwriting")
 
     tab_review, tab_weak, tab_focus, tab_mine = st.tabs(
         ["📆 Review", "🎯 Weak characters", "🔍 A word", "📖 My characters"])
@@ -208,12 +223,13 @@ if "hw_payload" not in S:
     # --- standard review session ---
     with tab_review:
         source = get_handwriting_source(USER_ID)
-        picked_source = st.selectbox(
-            "Characters from", list(SOURCES), format_func=SOURCES.get,
-            index=list(SOURCES).index(source) if source in SOURCES else 0, key="hw_source")
-        if picked_source != source:
-            set_handwriting_source(USER_ID, picked_source)
-            source = picked_source
+        if source != "hsk":         # the HSK track has one path, no choice
+            picked_source = st.selectbox(
+                "Characters from", list(SOURCES), format_func=SOURCES.get,
+                index=list(SOURCES).index(source) if source in SOURCES else 0, key="hw_source")
+            if picked_source != source:
+                set_handwriting_source(USER_ID, picked_source)
+                source = picked_source
 
         if source == "herbs" and not herb_character_counts(USER_ID)["herbs"]:
             st.warning("No herb list loaded yet.")
@@ -248,6 +264,18 @@ if "hw_payload" not in S:
                     "on screen throughout, so the name sticks rather than two unrelated "
                     "characters. Each card breaks the character into radicals — 艹 marks a "
                     "plant, 木 something woody, 虫 an insect, 石 a mineral.")
+            elif source == "hsk":
+                p_ = get_hsk_writing_progress(USER_ID)
+                nxt_band = (p_["next"] or {}).get("band")
+                st.progress(min(1.0, p_["started"] / p_["total"]),
+                            text=f"{p_['started']} of {p_['total']} started"
+                                 + (f" · now on {hsk.BAND_NAMES[nxt_band]}" if nxt_band else
+                                    " · all 400 started"))
+                st.caption(
+                    "The 400 characters HSK 1–4 asks you to write by hand, in order. The "
+                    "cue is an HSK word with the character blanked (＿字 míng zi, "
+                    "'name'): write the missing one. New characters run watch → trace → "
+                    "write; reviews go straight to writing.")
             elif source == "frequency":
                 st.caption(
                     "Working through the 500 most common characters in frequency order. "
@@ -320,7 +348,9 @@ if "hw_payload" not in S:
 
     # --- my characters ---
     with tab_mine:
-        if get_handwriting_source(USER_ID) == "frequency":
+        if HSK:
+            hsk_progress_ui(get_hsk_writing_progress(USER_ID))
+        elif get_handwriting_source(USER_ID) == "frequency":
             cp = get_curriculum_progress(USER_ID)
             _total = cp.get("total", 500) or 500
             _started = cp.get("started", 0)
@@ -332,8 +362,9 @@ if "hw_payload" not in S:
                            f"read · {cp.get('mastered', 0)} mastered.")
         hw_stats = get_handwriting_stats(USER_ID)
         total = hw_stats["total_chars_available"]
-        st.metric("Characters in your vocab", total)
-        if total:
+        if not HSK:
+            st.metric("Characters in your vocab", total)
+        if total and not HSK:
             st.write(f"**✏️ Practised:** {hw_stats['practiced']}")
             st.progress(min(1.0, hw_stats["practiced"] / total))
             st.write(f"**🏆 Mastered:** {hw_stats['mastered']}")

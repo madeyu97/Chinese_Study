@@ -8,7 +8,7 @@ word,level,pinyin,pos,english,erhua
 半,1,bàn,数、副,half / semi- / incomplete,0
 包子,1,bāo zi,名,baozi / bao (steamed stuffed bun),0
 杯子,1,bēi zi,名,cup / glass,0
-本1,1,běn,量,(bound form) root / stem / (bound form) origin,0
+本,1,běn,量,(measure word for books) / origin,0
 边,1,biān,名、后缀,side / edge (这边 / 旁边),0
 病,1,bìng,名、动,illness / disease / to fall ill,0
 不,1,bù,副,not / no,0
@@ -31,7 +31,7 @@ word,level,pinyin,pos,english,erhua
 的,1,de,助,(particle) of / 's / (marks a description),0
 第,1,dì,前缀,(prefix for ordinal numbers): 第三 = third,0
 弟弟,1,dì di,名,younger brother,0
-点1,1,diǎn,量、名,to touch briefly / to tap / to mark with a dot,0
+点,1,diǎn,量、名、动,o'clock / dot / a little,0
 店,1,diàn,名,shop / store,0
 电话,1,diàn huà,名,telephone / phone call,0
 电脑,1,diàn nǎo,名,computer,0
@@ -76,11 +76,11 @@ word,level,pinyin,pos,english,erhua
 好玩儿,1,hǎo wánr,形,erhua variant of 好玩,1
 号,1,hào,名、量,date (day of the month) / number,0
 喝,1,hē,动,to drink,0
-和1,1,hé,介、连,(joining two nouns) and / together with / with (Taiwan pr. ),0
+和,1,hé,介、连,and / together with / with,0
 很,1,hěn,副,(adverb of degree) / quite / very,0
 后,1,hòu,名,after / behind,0
 回,1,huí,动、量,to return / to go back / (measure word for times),0
-会1,1,huì,动,can / to have the skill / to know how to,0
+会,1,huì,动、名,can (know how to) / will / likely to,0
 火车,1,huǒ chē,名,train,0
 鸡蛋,1,jī dàn,名,(chicken) egg / hen's egg,0
 几,1,jǐ,代、数,how many / a few,0
@@ -109,7 +109,7 @@ word,level,pinyin,pos,english,erhua
 了,1,le,助,(particle) completed action or change of state (Malaysian: often said 'liao'),0
 冷,1,lěng,形,cold,0
 里,1,lǐ,名,inside / in,0
-两1,1,liǎng,数,two / both / some,0
+两,1,liǎng,数、量,two (before a measure word) / both,0
 零,1,líng,数,zero / nought / zero sign,0
 六,1,liù,数,six / 6,0
 妈妈,1,mā ma,名,mama / mommy,0
@@ -216,7 +216,7 @@ word,level,pinyin,pos,english,erhua
 晚,1,wǎn,形,evening / night / late,0
 晚饭,1,wǎn fàn,名,evening meal / dinner,0
 晚上,1,wǎn shang,名,evening / night,0
-喂1,1,wèi,叹,"hey / to feed (an animal, baby, invalid etc) / to feed",0
+喂,1,wèi,叹,hello (on the phone) / hey / to feed,0
 问,1,wèn,动,to ask,0
 问题,1,wèn tí,名,question / problem,0
 我,1,wǒ,代,I / me / my,0
@@ -309,7 +309,7 @@ word,level,pinyin,pos,english,erhua
 本子,2,běn zi,名,"book / notebook / Japanese-style self-published comic (esp. an erotic one), aka ""dōjinshi""",0
 比,2,bǐ,动、介,than / to compare,0
 笔,2,bǐ,名,pen / pencil / writing brush,0
-别1,2,bié,副,to leave / to part (from) / (literary) to differentiate,0
+别,2,bié,副,don't (imperative) / other,0
 不错,2,bú cuò,形,not bad / pretty good,0
 不好意思,2,bù hǎo yì si,,to feel embarrassed / to find it embarrassing,0
 长,2,cháng,形、动、后缀,long / length,0
@@ -325,16 +325,15 @@ word,level,pinyin,pos,english,erhua
 从,2,cóng,介、副,from,0
 从小,2,cóng xiǎo,副,from childhood / from a young age,0
 错,2,cuò,形,mistake / wrong / bad,0
-打1,2,dǎ,动,"a semantically light, transitive verb that is combined with various grammatical objects to form compound verbs and verb-object phrases with a diverse range of meanings (e.g.  ""to hold an umbrella"",  ""to make a phone call"",  ""to get an injection"",  ""to knit gloves"",  ""to inflate"") / to hit / to strike",0
+打,2,dǎ,动,to hit / to play (a game) / to make (a call),0
 打车,2,dǎ chē,动,to take a taxi (in town) / to hitch a lift,0
 打开,2,dǎ kāi,动,to open / to turn on,0
 但,2,dàn,连,but,0
 但是,2,dàn shì,连,but / however,0
 得,2,de,助、动,(particle) links a verb to its result or degree: 跑得快 = runs fast / 吃得完 = can finish,0
 地,2,de,助、名,(particle) -ly: 慢慢地 = slowly,0
-等1,2,děng,动、介,to wait for / to await / by the time,0
+等,2,děng,动、介、助,to wait / and so on,0
 地铁,2,dì tiě,名,subway / metro,0
-点2,2,diǎn,动、名、量,to touch briefly / to tap / to mark with a dot,0
 懂,2,dǒng,动,to understand / to comprehend,0
 动,2,dòng,动,(of something) to move / to set in movement / to displace,0
 饭馆,2,fàn guǎn,名,restaurant,0
@@ -346,16 +345,15 @@ word,level,pinyin,pos,english,erhua
 跟,2,gēn,介、连,with / and / to follow,0
 公交车,2,gōng jiāo chē,名,public transport vehicle / town bus,0
 过,2,guò,动、助,to pass / to cross; (after a verb) have done before,0
-过来,2,guò lái,动,see 過來|过来[guo4 lai2],0
+过来,2,guò lái,动,to come over / to manage / to handle,0
 过年,2,guò nián,动,to celebrate the Chinese New Year,0
-过去1,2,guò qù,动,(in the) past / former / previous,0
+过去,2,guò qù,动、名,(verb suffix),0
 还是,2,hái shi,副、连,or (in questions) / still,0
 黑色,2,hēi sè,名,black,0
 红茶,2,hóng chá,名,black tea,0
 红色,2,hóng sè,名,red,0
 后面,2,hòu miàn,名,behind / at the back,0
-花1,2,huā,动,flower / blossom / fancy pattern,0
-花2,2,huā,名,flower / blossom / fancy pattern,0
+花,2,huā,动、名,"to spend (money, time) / flower",0
 画,2,huà,动、名,to draw / picture / painting,0
 坏,2,huài,形,bad / spoiled / broken,0
 回来,2,huí lái,动,to return / to come back,0
@@ -400,7 +398,7 @@ word,level,pinyin,pos,english,erhua
 门,2,mén,名,door / gate,0
 门口,2,mén kǒu,名,doorway / gate,0
 门票,2,mén piào,名,"ticket (for theater, cinema etc)",0
-面1,2,miàn,后缀,face / side / surface,0
+面,2,miàn,后缀,noodles / face / side,0
 名,2,míng,名、量,name / (measure word for people),0
 拿,2,ná,动,to hold / to seize / to catch,0
 那么,2,nà me,代、连,so / then / like that,0
@@ -483,7 +481,7 @@ word,level,pinyin,pos,english,erhua
 鱼,2,yú,名,fish,0
 远,2,yuǎn,形,far,0
 运动,2,yùn dòng,动、名,sports / exercise / to exercise,0
-站1,2,zhàn,名,station / to stand / to halt,0
+站,2,zhàn,名、动,to stand / station,0
 丈夫,2,zhàng fu,名,husband,0
 这么,2,zhè me,代,so much / this much,0
 这样,2,zhè yàng,代,like this / this way / so,0
@@ -541,7 +539,7 @@ word,level,pinyin,pos,english,erhua
 不同,3,bù tóng,,different / distinct,0
 不久,3,bù jiǔ,形,not long (after) / before too long,0
 不行,3,bù xíng,动、形,no way / not OK / won't do,0
-才1,3,cái,副,(variant of 才) just now / (variant of 才) (before an expression of quantity) only / ability,0
+才,3,cái,副,ability / talent / someone of a certain type,0
 菜单,3,cài dān,名,menu,0
 参加,3,cān jiā,动,to take part in / to attend,0
 草,3,cǎo,名,grass / straw / manuscript,0
@@ -629,7 +627,7 @@ word,level,pinyin,pos,english,erhua
 服务,3,fú wù,动,to serve / service,0
 附近,3,fù jìn,名,(in the) vicinity / nearby,0
 复习,3,fù xí,动,to review / revision,0
-该1,3,gāi,动,should / ought to / probably,0
+该,3,gāi,动,should / ought to,0
 干净,3,gān jìng,形,clean / neat,0
 感兴趣,3,gǎn xìng qù,,to be interested,0
 感到,3,gǎn dào,动,to feel,0
@@ -654,7 +652,6 @@ word,level,pinyin,pos,english,erhua
 关注,3,guān zhù,动,to pay attention to / to follow something closely,0
 国家,3,guó jiā,名,country / nation,0
 过节,3,guò jié,动,to celebrate a festival / after the celebrations (i.e. once the festival is over),0
-过去2,3,guò qù,名,(in the) past / former / previous,0
 海,3,hǎi,名,sea / ocean,0
 害怕,3,hài pà,动,to be afraid / to be scared,0
 好多,3,hǎo duō,数,many / quite a lot,0
@@ -676,7 +673,6 @@ word,level,pinyin,pos,english,erhua
 换,3,huàn,动,to change / to exchange,0
 黄色,3,huáng sè,名,yellow (color) / pornographic,0
 回答,3,huí dá,动,to reply / to answer,0
-会2,3,huì,名,can / to have the skill / to know how to,0
 会议,3,huì yì,名,meeting / conference,0
 或,3,huò,连,or,0
 或者,3,huò zhě,连,or / possibly,0
@@ -868,7 +864,7 @@ word,level,pinyin,pos,english,erhua
 网球,3,wǎng qiú,名,tennis / tennis ball,0
 网站,3,wǎng zhàn,名,website / network station,0
 忘记,3,wàng jì,动,to forget,0
-为,3,wèi,介,for / because of / (wéi) to be,0
+为,3,wèi,介、动,for / because of / (wéi) to be,0
 为了,3,wèi le,介,in order to / for,0
 卫生间,3,wèi shēng jiān,名,bathroom / toilet (Malaysia: 洗手间 xǐ shǒu jiān),0
 文化,3,wén huà,名,culture / civilization,0
@@ -959,7 +955,6 @@ word,level,pinyin,pos,english,erhua
 脏,3,zāng,形,dirty,0
 怎么办,3,zěn me bàn,,what's to be done,0
 怎样,3,zěn yàng,代,how / what kind,0
-站2,3,zhàn,动,station / to stand / to halt,0
 张,3,zhāng,动、量,"(measure word for flat things: tickets, beds, tables) / to open",0
 着急,3,zháo jí,形,to worry / to feel anxious,0
 照,3,zhào,动,to shine / to take (a photo) / according to,0
@@ -1068,7 +1063,7 @@ word,level,pinyin,pos,english,erhua
 车速,4,chē sù,名,vehicle speed,0
 车位,4,chē wèi,名,parking spot / unloading point / garage place,0
 城,4,chéng,名,city / town,0
-乘1,4,chéng,动,to ride / to mount / to make use of,0
+乘,4,chéng,动,to ride / to mount / to make use of,0
 成功,4,chéng gōng,动、形,success / to succeed,0
 乘客,4,chéng kè,名,passenger,0
 诚实,4,chéng shí,形,honest / honesty,0
@@ -1137,7 +1132,6 @@ word,level,pinyin,pos,english,erhua
 道歉,4,dào qiàn,动,to apologize,0
 得意,4,dé yì,形,proud of oneself / pleased with oneself,0
 登机,4,dēng jī,动,to board a plane,0
-等2,4,děng,助,to wait for / to await / by the time,0
 等到,4,děng dào,介,to wait until / by the time when (something is ready etc),0
 低,4,dī,形、动,low / beneath / to lower (one's head),0
 低价,4,dī jià,名,low price,0
@@ -1461,7 +1455,6 @@ word,level,pinyin,pos,english,erhua
 联系,4,lián xì,动,to contact / connection,0
 凉,4,liáng,形,cool / cold,0
 量,4,liáng,动,capacity / quantity / amount,0
-两2,4,liǎng,量,two / both / some,0
 亮,4,liàng,形、动,bright / light,0
 列,4,liè,动、量,to arrange / to line up / file,0
 零下,4,líng xià,,below zero (esp. temperature),0
@@ -1634,11 +1627,10 @@ word,level,pinyin,pos,english,erhua
 身份证,4,shēn fèn zhèng,名,identity card / ID,0
 申请,4,shēn qǐng,动,to apply for something / application (form etc),0
 甚至,4,shèn zhì,连,even / so much so that,0
-生1,4,shēng,动,to be born / to give birth / life,0
-生2,4,shēng,形,to be born / to give birth / life,0
+生,4,shēng,动、形,to be born / to give birth / raw / life,0
 生命,4,shēng mìng,名,life,0
 生意,4,shēng yi,名,business,0
-省1,4,shěng,名,to save / to economize / to be frugal,0
+省,4,shěng,名,to save / province,0
 剩,4,shèng,动,to remain / to be left / to have as remainder,0
 失败,4,shī bài,动、形,to be defeated / to lose,0
 师傅,4,shī fu,名,master / qualified worker,0
@@ -1759,7 +1751,6 @@ word,level,pinyin,pos,english,erhua
 网友,4,wǎng yǒu,名,online friend / netizen / Internet user,0
 网址,4,wǎng zhǐ,名,website / web address / URL,0
 危险,4,wēi xiǎn,形、名,danger / dangerous,0
-为1,4,wéi,动,as (in the capacity of) / to take sth as / to act as,0
 味,4,wèi,名,taste / flavour / smell,0
 味道,4,wèi dào,名,flavor / smell,0
 卫生,4,wèi shēng,形、名,health / hygiene,0
@@ -1806,7 +1797,7 @@ word,level,pinyin,pos,english,erhua
 小组,4,xiǎo zǔ,名,group,0
 效果,4,xiào guǒ,名,result / effect,0
 笑话,4,xiào hua,名、动,joke / jest,0
-血,4,xiě,名,blood / colloquial pr. [xie3],0
+血,4,xiě,名,blood / colloquial pr.,0
 心,4,xīn,名,heart / mind,0
 辛苦,4,xīn kǔ,形、动,hard / tiring / to work hard,0
 心情,4,xīn qíng,名,mood / frame of mind,0
@@ -1925,7 +1916,7 @@ word,level,pinyin,pos,english,erhua
 证明,4,zhèng míng,动、名,to prove / proof,0
 正确,4,zhèng què,形,correct / proper,0
 正式,4,zhèng shì,形,formal / official,0
-之1,4,zhī,助,"(possessive particle, literary equivalent of 的) / him / her",0
+之,4,zhī,助,"(literary particle, like 的): 之前 / 之后",0
 支持,4,zhī chí,动,to support,0
 支付,4,zhī fù,动,to pay (money),0
 之后,4,zhī hòu,名,after / later,0
@@ -1957,7 +1948,7 @@ word,level,pinyin,pos,english,erhua
 专业,4,zhuān yè,名、形,specialty / specialized field,0
 转,4,zhuǎn,动,to turn / to transfer,0
 转发,4,zhuǎn fā,动,"to transmit / to forward (mail, SMS, packets of data) / to pass on",0
-转机1,4,zhuǎn jī,动,(to take) a turn for the better / to change planes,0
+转机,4,zhuǎn jī,动,(to take) a turn for the better / to change planes,0
 赚,4,zhuàn,动,to earn / to make a profit,0
 装,4,zhuāng,动,adornment / to adorn / dress,0
 准,4,zhǔn,形,accurate / standard / definitely,0
@@ -1981,7 +1972,7 @@ word,level,pinyin,pos,english,erhua
 作家,4,zuò jiā,名,author,0
 做梦,4,zuò mèng,动,to dream / to have a dream,0
 作品,4,zuò pǐn,名,work (of art) / opus,0
-作为1,4,zuò wéi,动、介,one's conduct / deed / activity,0
+作为,4,zuò wéi,动、介,as / in the role of,0
 座位,4,zuò wèi,名,seat,0
 作文,4,zuò wén,动、名,to write an essay / composition (student essay),0
 作用,4,zuò yòng,名,to act on / to affect,0

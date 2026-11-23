@@ -901,12 +901,17 @@ def set_session_mode(user_id, mode):
 
 
 def get_handwriting_source(user_id):
+    """'vocab', 'frequency' or 'herbs' as chosen - or 'hsk', the one path
+    on the HSK track: the 400 characters to write for HSK 1-4, in order."""
+    from config import HSK_TRACK_USERS
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT handwriting_source FROM users WHERE id = %s",
+    cursor.execute("SELECT handwriting_source, username FROM users WHERE id = %s",
                    (user_id,))
     row = cursor.fetchone()
     conn.close()
+    if row and row[1] and row[1].lower() in HSK_TRACK_USERS:
+        return "hsk"
     return (row[0] if row and row[0] else "vocab")
 
 
@@ -1978,6 +1983,78 @@ def get_curriculum_session(user_id, new_count=5, limit_rank=500):
     return due + new
 
 
+def _hsk_hw_progress(cursor, user_id):
+    import hsk
+    chars = [r["char"] for r in hsk.write_order()]
+    ph = ",".join(["%s"] * len(chars))
+    cursor.execute(f"""SELECT * FROM handwriting_progress
+                       WHERE user_id = %s AND character IN ({ph})""", [user_id] + chars)
+    return {r["character"]: dict(r) for r in cursor.fetchall()}
+
+
+def _hsk_hw_entry(row, is_new, progress):
+    """A drill entry for one of the 400: the cue is the syllabus word chosen
+    for it (＿字 for 名), not a word from the app's vocabulary."""
+    cue = {"chinese": row["cue_word"], "pinyin": row["cue_pinyin"],
+           "english": row["cue_english"], "review_count": 0}
+    entry = _hw_entry(row["char"], is_new, 1, progress, [cue])
+    if entry["word"] == row["char"] and not entry["word_english"]:
+        entry["word_english"] = entry.get("char_gloss", "")
+    entry["hsk_band"] = row["band"]
+    entry["hsk_order"] = row["order"]
+    entry["builds_on"] = row["builds_on"]
+    return entry
+
+
+def get_hsk_writing_session(user_id, new_count=5):
+    """HSK track: due reviews of the 400 (earliest due first), then the
+    next new ones in teaching order - HSK 1-2 before 3 before 4, parts
+    before the characters built from them."""
+    import hsk
+    today_str = clock.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    progress = _hsk_hw_progress(cursor, user_id)
+    conn.close()
+    order = hsk.write_order()
+    due = [_hsk_hw_entry(r, False, progress[r["char"]]) for r in order
+           if r["char"] in progress and progress[r["char"]]["next_review_date"] <= today_str]
+    due.sort(key=lambda e: (e["next_review_date"], e["hsk_order"]))
+    new = [_hsk_hw_entry(r, True, None) for r in order if r["char"] not in progress][:new_count]
+    return due + new
+
+
+@_cached(ttl=20)
+def get_hsk_writing_progress(user_id):
+    """How far through the 400: started / known / mastered per band, the
+    number due today and the next new character."""
+    import hsk
+    today_str = clock.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    progress = _hsk_hw_progress(cursor, user_id)
+    conn.close()
+    bands = {b: {"total": 0, "started": 0, "known": 0, "mastered": 0} for b in hsk.WRITE_BANDS}
+    due, nxt = 0, None
+    for r in hsk.write_order():
+        b = bands[r["band"]]
+        b["total"] += 1
+        p = progress.get(r["char"])
+        if not p:
+            nxt = nxt or r
+            continue
+        b["started"] += 1
+        interval = p.get("interval") or 0
+        b["known"] += interval >= 7
+        b["mastered"] += interval >= 21
+        due += (p.get("next_review_date") or "") <= today_str
+    return {"bands": bands, "due": due, "next": nxt,
+            "total": sum(b["total"] for b in bands.values()),
+            "started": sum(b["started"] for b in bands.values()),
+            "known": sum(b["known"] for b in bands.values()),
+            "mastered": sum(b["mastered"] for b in bands.values())}
+
+
 @_cached(ttl=20)
 def get_curriculum_progress(user_id, limit_rank=500):
     """How far through the frequency curriculum this user has got.
@@ -2085,6 +2162,9 @@ def handwriting_started(user_id):
 def handwriting_due_and_new(user_id, source=None):
     """(due, new_available) for the learner's chosen character source."""
     source = source or get_handwriting_source(user_id)
+    if source == "hsk":
+        p = get_hsk_writing_progress(user_id)
+        return p["due"], p["total"] - p["started"]
     if source == "herbs":
         hc = herb_character_counts(user_id)
         return hc["due"], hc["new"]
@@ -2102,6 +2182,8 @@ def handwriting_session_for(user_id, new_chars, max_reviews=None, source=None):
     source = source or get_handwriting_source(user_id)
     if source == "herbs":
         chars = get_herb_session(user_id, new_count=(new_chars + 1) // 2)
+    elif source == "hsk":
+        chars = get_hsk_writing_session(user_id, new_count=new_chars)
     elif source == "frequency":
         chars = get_curriculum_session(user_id, new_count=new_chars)
     else:

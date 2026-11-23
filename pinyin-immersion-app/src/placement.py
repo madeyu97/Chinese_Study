@@ -55,6 +55,9 @@ def show(english):
         sense = sense.strip()
         if ":" in sense and _CJK.search(sense.split(":", 1)[1]):
             sense = sense.split(":", 1)[0].strip()
+        m = _CJK.search(sense)
+        if m:                          # '(marks the object) 把书放好 = ...': keep what's before
+            sense = sense[:m.start()].strip(" =,")
         if (not sense or _CJK.search(sense) or len(sense) > 45
                 or re.match(r"see\b|variant\b|\(malaysian", sense, re.I)):
             continue

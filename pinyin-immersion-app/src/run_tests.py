@@ -3507,7 +3507,7 @@ def t_plan_hsk():
     m, e = (_sess(day)[k] for k in ("morning", "evening"))
     assert _keys(m) == ["grammar"], _keys(m)
     assert _keys(e) == ["handwriting", "reading"], _keys(e)
-    assert e["steps"][0]["params"]["new"] == 3, "new characters offered before writing is started"
+    assert e["steps"][0]["params"]["new"] == 5, "the day's new characters, before writing is started"
     assert day[0]["why"] == tplan.HSK_SESSIONS["morning"][3]
     # the original app is untouched
     assert _keys(_sess(tplan.build_day(_plan_state()))["morning"]) == ["words", "tones", "grammar"]
@@ -3800,6 +3800,28 @@ def t_hsk_data():
     assert _hsk.known_words("selina", {"listen": 3}) == [] and _hsk.known_words(None, None) == []
 
 
+@test("HSK writing: the 400 in order - band by band, parts first, an HSK word to cue each")
+def t_hsk_write_order():
+    import handwriting_engine as _he
+    order = _hsk.write_order()
+    chars = [r["char"] for r in order]
+    assert len(chars) == 400 and set(chars) == set(_hsk.write_chars())
+    assert [r["band"] for r in order] == sorted(r["band"] for r in order), "HSK 1-2, then 3, then 4"
+    assert [r["order"] for r in order] == list(range(1, 401))
+    pos = {c: i for i, c in enumerate(chars)}
+    for r in order:
+        assert all(pos[p] < pos[r["char"]] for p in r["builds_on"]), r
+        assert r["char"] in r["cue_word"] and r["cue_english"], r
+        assert not any("\u4e00" <= ch <= "\u9fff" for ch in r["cue_english"]), \
+            ("the meaning must not show the character", r)
+        lv = _hsk.level_of(r["cue_word"])
+        assert lv is not None and lv <= max(r["band"], 1), ("cue from a later level", r)
+        assert not _hsk.word(r["cue_word"])["erhua"], r
+        assert r["strokes"] and _he.get_stroke_count(r["char"]) == r["strokes"], r
+    assert pos["女"] < pos["好"] and pos["女"] < pos["妈"]
+    assert _hsk.write_info("名")["cue_word"] == "名字"
+
+
 @test("level test: fair options - four distinct meanings, none that could also be right")
 def t_pl_items():
     import random as _r
@@ -3894,7 +3916,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_pl_items(); t_pl_flow(); t_hsk_track(); t_plan_hsk()
+    t_hsk_data(); t_hsk_write_order(); t_pl_items(); t_pl_flow(); t_hsk_track(); t_plan_hsk()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

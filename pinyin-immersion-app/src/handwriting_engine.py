@@ -75,7 +75,16 @@ DEFAULT_STROKE_COUNT = 8  # median fallback for unknown chars
 
 
 def get_stroke_count(char: str) -> int:
-    return STROKE_COUNTS.get(char, DEFAULT_STROKE_COUNT)
+    if char in STROKE_COUNTS:
+        return STROKE_COUNTS[char]
+    try:                       # the HSK writing list carries real counts for its 400
+        import hsk
+        info = hsk.write_info(char)
+        if info and info["strokes"]:
+            return info["strokes"]
+    except Exception:
+        pass
+    return DEFAULT_STROKE_COUNT
 
 
 def score_character(char: str, personal_freq: int) -> float:

@@ -23,6 +23,7 @@ import ahead
 import clock
 import db_manager as db
 import grammar_curriculum as gc
+import grammar_build as gb
 import grammar_drills as gd
 import hsk_grammar as hg
 import session_store as store
@@ -146,8 +147,14 @@ def load_set(structure):
     return payload
 
 
+# On the HSK track a Build stage sits between hearing a structure and saying
+# it: the identify sentences, rebuilt from shuffled word tiles (grammar_build)
+STAGE_ORDER = gd.STAGES[:1] + ("build",) + gd.STAGES[1:]
+STAGE_TITLES = {**gd.STAGE_TITLES, "build": "Build the sentence"}
+
+
 def stages_of(payload):
-    return [s for s in gd.STAGES if items_of(payload, s)]
+    return [s for s in STAGE_ORDER if items_of(payload, s)]
 
 
 def items_of(payload, stage):
@@ -282,6 +289,8 @@ if "gr_set" not in S:
             del S["gr_sid"]
             st.rerun()
         st.stop()
+    if HSK:
+        payload = {**payload, "build": gb.items(payload, structure)}
     S.gr_set, S.gr_stages, S.gr_stage, S.gr_item, S.gr_results = \
         payload, stages_of(payload), 0, 0, []
 
@@ -366,7 +375,7 @@ stage = S.gr_stages[S.gr_stage]
 items = items_of(payload, stage)
 item = items[S.gr_item]
 st.progress((S.gr_stage + S.gr_item / max(len(items), 1)) / len(S.gr_stages),
-            text=f"{S.gr_stage + 1}. {gd.STAGE_TITLES[stage]} · "
+            text=f"{S.gr_stage + 1}. {STAGE_TITLES[stage]} · "
                  f"{S.gr_item + 1} of {len(items)}")
 key = f"{stage}_{S.gr_item}"
 ans = S.get("gr_ans")
@@ -459,6 +468,45 @@ def spoken_answer(task, reference, reference_pinyin, reference_english, listen_f
         st.rerun()
 
 
+def build_sentence():
+    """Tap the word tiles into order; then the sentence, its pinyin and audio."""
+    st.markdown(f"**Build it:** {item.get('english', '')}")
+    a = ans or {"picked": []}
+    picked = a["picked"]
+    tiles = item["tiles"]
+    built = [tiles[i] for i in picked]
+    st.markdown(f"<div style='font-size:1.9rem;line-height:1.5;min-height:2.9rem'>"
+                f"{' '.join(built) or '…'}</div>", unsafe_allow_html=True)
+    if "verdict" not in a:
+        left = [i for i in range(len(tiles)) if i not in picked]
+        cols = st.columns(min(4, max(1, len(left))))
+        for n, i in enumerate(left):
+            if cols[n % len(cols)].button(tiles[i], key=f"{key}_t{i}", width="stretch"):
+                S.gr_ans = {"picked": picked + [i]}
+                st.rerun()
+        c1, c2, c3 = st.columns(3)
+        if c1.button("↩️ Undo", disabled=not picked, key=f"{key}_undo", width="stretch"):
+            S.gr_ans = {"picked": picked[:-1]}
+            st.rerun()
+        if c2.button(quiz.DONT_KNOW, key=f"{key}_dk", width="stretch"):
+            S.gr_ans = {"picked": picked, "verdict": "wrong"}
+            record("wrong")
+            st.rerun()
+        if not left and c3.button("Check", type="primary", key=f"{key}_check",
+                                  width="stretch"):
+            verdict = gb.check(built, item)
+            S.gr_ans = {"picked": picked, "verdict": verdict}
+            record(verdict)
+            st.rerun()
+        return
+    st.markdown("✅ Right." if a["verdict"] == "correct" else "❌ The order is:")
+    big(item["hanzi"], item.get("pinyin", ""))
+    play(item["hanzi"])
+    if st.button("Next ▶️", type="primary", key=f"{key}_next"):
+        next_item()
+        st.rerun()
+
+
 def rapid():
     st.markdown(f"**{item['prompt']}**")
     st.caption("Say it aloud straight away, then check.")
@@ -481,6 +529,8 @@ def rapid():
 
 if stage in ("identify", "contrast"):
     multiple_choice()
+elif stage == "build":
+    build_sentence()
 elif stage == "produce":
     spoken_answer(item["situation"], item["answer_hanzi"], item.get("answer_pinyin", ""),
                   item.get("answer_english", ""))

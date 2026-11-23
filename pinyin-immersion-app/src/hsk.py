@@ -15,6 +15,8 @@ HSK 1 and 2 together), 3 and 4.
 
 import csv
 import functools
+import json
+import re
 from pathlib import Path
 
 DATA = Path(__file__).resolve().parent.parent / "data" / "hsk"
@@ -107,3 +109,17 @@ def counts():
             "recognise": {lv: sum(1 for _c, l in _recognise() if l == lv) for lv in LEVELS},
             "write": {b: sum(1 for _c, x in _write() if x == b) for b in WRITE_BANDS},
             "grammar": {lv: len(grammar_points(lv)) for lv in LEVELS}}
+
+
+def known_words(username, hsk_levels):
+    """The words grammar drills may build from, on top of words studied in
+    the app. On the HSK track vocabulary is learnt in Anki, not here, so it
+    is the syllabus: every HSK word up to the level studied by ear (HSK 1
+    until a level is set). Off the track: none."""
+    from config import HSK_TRACK_USERS
+    if not username or username.lower() not in HSK_TRACK_USERS:
+        return []
+    if isinstance(hsk_levels, str):
+        hsk_levels = json.loads(hsk_levels)
+    level = (hsk_levels or {}).get("listen") or 1
+    return [w["word"] for w in words_upto(level) if re.fullmatch(r"[\u4e00-\u9fff]+", w["word"])]

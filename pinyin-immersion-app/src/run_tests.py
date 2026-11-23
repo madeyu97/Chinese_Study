@@ -3793,6 +3793,11 @@ def t_hsk_data():
     assert "哪儿" not in {w["word"] for w in _hsk.words(1)}
     assert "哪儿" in {w["word"] for w in _hsk.words(1, include_erhua=True)}
     assert "女儿" in {w["word"] for w in _hsk.words(1)}
+    # grammar builds from the syllabus on the HSK track (vocabulary is in Anki)
+    k1 = _hsk.known_words("matt", None)
+    assert 280 <= len(k1) <= 300 and "学校" in k1 and "哪儿" not in k1
+    assert len(_hsk.known_words("matt", '{"listen": 3, "read": 1}')) > 900
+    assert _hsk.known_words("selina", {"listen": 3}) == [] and _hsk.known_words(None, None) == []
 
 
 @test("level test: fair options - four distinct meanings, none that could also be right")

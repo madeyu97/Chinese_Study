@@ -3236,8 +3236,11 @@ def grammar_known_vocab(user_id):
     if len(words) < GRAMMAR_KNOWN_FLOOR:
         cursor.execute(query, (user_id, 1, 0, GRAMMAR_VOCAB_CAP))
         words = [r[0] for r in cursor.fetchall()]
+    cursor.execute("SELECT username, hsk_levels FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
     conn.close()
-    return list(dict.fromkeys(words))
+    import hsk
+    return list(dict.fromkeys(words + hsk.known_words(*(row or (None, None)))))
 
 
 def grammar_china_pairs():

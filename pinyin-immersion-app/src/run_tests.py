@@ -4088,6 +4088,79 @@ def t_pl_grammar():
     assert _hsk.grammar_upto({"listen": 3, "read": 1, "grammar": 2}) == 2
 
 
+@test("HSK games: fair rounds - one right answer, distinct options, at the level asked")
+def t_games_hsk():
+    import random as _r
+    import games_hsk as _gh
+    rng = _r.Random(11)
+    lv2 = {w["word"] for w in _hsk.words_upto(2)}
+    for game in ("listen", "meaning", "lookalike", "measure"):
+        rounds = _gh.rounds_for(game, {"listen": 2, "read": 2}, rng=rng)
+        assert len(rounds) == _gh.ROUNDS, (game, len(rounds))
+        for r in rounds:
+            labels = [o["zh"] or o["en"] for o in r["options"]]
+            assert len(labels) == _gh.OPTIONS and len(set(labels)) == _gh.OPTIONS, (game, labels)
+            assert 0 <= r["answer"] < _gh.OPTIONS and r["reveal"]["zh"] and r["reveal"]["py"]
+    # listening: the other options sound close but are never homophones
+    for r in _gh.listen_rounds(2, rng=rng):
+        target = r["options"][r["answer"]]["zh"]
+        assert target in lv2 and r["audio"] == target and r["prompt"] is None
+        assert all(_gh.sound_distance(target, o["zh"]) > 0
+                   for n, o in enumerate(r["options"]) if n != r["answer"])
+    assert _gh.sound_distance("是", "十") > 0 and _gh.sound_distance("是", "事") == -1
+    # look-alikes: no wrong option makes another real word in the blank
+    words = {w["word"] for w in _hsk.words_upto(4)}
+    for r in _gh.lookalike_rounds(3, rng=rng):
+        blank, right = r["prompt"]["zh"], r["options"][r["answer"]]["zh"]
+        assert blank.replace("＿", right) == r["reveal"]["zh"]
+        assert not any(blank.replace("＿", o["zh"]) in words
+                       for n, o in enumerate(r["options"]) if n != r["answer"])
+    assert "清" in _hsk.lookalikes("请") and _hsk.lookalikes("己") == ["已"]
+    assert "己" not in _hsk.lookalike_chars(4), "too few look-alikes to make a round"
+    # measure words: 本 for a book, and no option that would also be right
+    assert _gh.measure_answer(_hsk.word("书")) == "本"
+    for r in _gh.measure_rounds(2, rng=rng):
+        noun = r["prompt"]["zh"][2:]
+        own = _hsk.word(noun)["measure"]
+        wrong = [o["zh"] for n, o in enumerate(r["options"]) if n != r["answer"]]
+        assert r["options"][r["answer"]]["zh"] in own and not set(wrong) & set(own)
+    # scramble: official sentences up to the grammar level, shuffled
+    items = _gh.scramble_items(2, rng=rng)
+    assert len(items) == _gh.SCRAMBLE_ROUNDS
+    assert all(int(i["point"][1]) <= 2 and sorted(i["tiles"]) == sorted(i["answer"]) for i in items)
+    assert _gh.level_for("scramble", {"listen": 3, "read": 2}) == 3
+    assert _gh.level_for("meaning", {"listen": 3, "read": 2}) == 2 and _gh.level_for("listen", None) == 1
+    # memory: word and meaning faces, pairs that match, meanings that don't clash
+    cards = _gh.memory_cards(1, rng=rng)
+    assert len(cards) == 2 * _gh.MEMORY_PAIRS
+    word_n = [n for n, c in enumerate(cards) if c["face"] == "word"]
+    text_n = {c["pair"]: n for n, c in enumerate(cards) if c["face"] == "text"}
+    w0 = word_n[0]
+    assert _gh.memory_matches(cards, [w0, text_n[cards[w0]["pair"]]]) == {w0, text_n[cards[w0]["pair"]]}
+    assert _gh.memory_matches(cards, [w0, word_n[1]]) == set(), "two words are not a pair"
+
+
+@test("herb game: separate from HSK - names, characters, tier-1 first")
+def t_games_herbs():
+    import random as _r
+    import games_hsk as _gh
+    hs = _gh.herbs()
+    assert len(hs) > 100 and all(h["zh"] and h["name"] for h in hs)
+    assert any(h["zh"] != h["trad"] for h in hs), "simplified shown, traditional kept"
+    rng = _r.Random(3)
+    tiers = []
+    for game in ("herb_name", "herb_find"):
+        for _ in range(5):
+            for r in _gh.herb_rounds(game, rng=rng):
+                labels = [o["zh"] or o["en"] for o in r["options"]]
+                assert len(set(labels)) == _gh.OPTIONS, labels
+                kind = "text" if game == "herb_name" else "word"
+                assert all(o["kind"] == kind for o in r["options"])
+                tiers.append(next(h["tier"] for h in hs if r["reveal"]["zh"].startswith(h["zh"])))
+    assert tiers.count(1) > len(tiers) / 2, "tier-1 herbs most often"
+    assert set(_gh.HERB_GAMES).isdisjoint(_gh.GAMES)
+
+
 @test("HSK track: only the people named in config, and menus stay separate")
 def t_hsk_track():
     stub = "db_manager" not in sys.modules and not os.environ.get("DATABASE_URL")
@@ -4134,7 +4207,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

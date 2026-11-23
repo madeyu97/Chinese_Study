@@ -64,9 +64,10 @@ def running(key):
 # ----------------------------------------------------------------------
 # grammar drill sets
 # ----------------------------------------------------------------------
-def write_grammar_set(user_id, structure_id):
+def write_grammar_set(user_id, structure_id, hsk=False):
     """Write and store a drill set for the structure unless a usable one is
-    stored already. Returns True if one is ready afterwards."""
+    stored already (on the HSK track: one with transform items, once those
+    exist). Returns True if one is ready afterwards."""
     import db_manager as db
     import grammar_curriculum as gc
     import grammar_drills as gd
@@ -80,7 +81,7 @@ def write_grammar_set(user_id, structure_id):
     contrasts = [gc.get(c) for c in structure.contrast if gc.get(c)]
     payload = gd.generate(structure, known, db.grammar_china_pairs(), contrasts,
                           db.grammar_recent_sentences(user_id, structure.id),
-                          recent=db.recent_words(user_id))
+                          recent=db.recent_words(user_id), hsk=hsk)
     if payload and payload.get("reviewed", True):
         db.grammar_save_set(user_id, structure.id, len(known), payload)
         try:
@@ -95,17 +96,17 @@ def write_grammar_set(user_id, structure_id):
 _READY = {}          # (user, structure) -> the day a set was found or written
 
 
-def _grammar_job(user_id, sid):
+def _grammar_job(user_id, sid, hsk=False):
     import clock
-    if write_grammar_set(user_id, sid):
+    if write_grammar_set(user_id, sid, hsk):
         _READY[(user_id, sid)] = clock.today()
 
 
-def grammar(user_id, structure_ids):
+def grammar(user_id, structure_ids, hsk=False):
     import clock
     for sid in structure_ids or []:
         if _READY.get((user_id, sid)) != clock.today():
-            _submit(("grammar", user_id, sid), _grammar_job, user_id, sid)
+            _submit(("grammar", user_id, sid), _grammar_job, user_id, sid, hsk)
 
 
 def wait_grammar(user_id, structure_id, timeout=150):
@@ -151,11 +152,16 @@ def new_words(user_id, count):
         _submit(("words", user_id), write_new_words, user_id, min(count, 3))
 
 
-def for_day(user_id, day):
+def for_day(user_id, day, hsk_upcoming=(), hsk=False):
     """Start preparing what today's sessions (as built by today_plan) will
     need: called when the Today page is shown, so the drills for a later
     step - or a later session - are written while the learner does
-    something else."""
+    something else.
+
+    On the HSK track this is the drill bank: every grammar structure in
+    today's plan, then the next new ones in HSK order (hsk_upcoming), are
+    written and stored ahead of time - so opening Grammar never waits on
+    the AI, and the sets have their transform items."""
     try:
         for session in day or []:
             if session.get("done"):
@@ -163,8 +169,11 @@ def for_day(user_id, day):
             for step in session.get("steps", []):
                 params = step.get("params") or {}
                 if step.get("key") == "grammar" and not step.get("done"):
-                    grammar(user_id, params.get("ids", [])[:1])
+                    ids = params.get("ids", [])
+                    grammar(user_id, ids if hsk else ids[:1], hsk=hsk)
                 elif step.get("key") == "words" and not step.get("done") and params.get("new"):
                     new_words(user_id, params["new"])
+        if hsk:
+            grammar(user_id, list(hsk_upcoming), hsk=True)
     except Exception as e:
         logging.warning(f"[AHEAD] day not prepared: {e}")

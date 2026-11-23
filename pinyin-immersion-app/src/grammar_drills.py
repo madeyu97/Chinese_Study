@@ -52,16 +52,20 @@ FUNCTION_WORDS = set("""
 最 更 真 好 人 东西 事 时候 地方
 """.split())
 
-STAGES = ("identify", "produce", "contrast", "rapid", "conversation")
+STAGES = ("identify", "produce", "contrast", "rapid", "conversation", "transform")
+# "transform" (rewrite a plain sentence using the structure) is only asked for
+# on the HSK track; sets without it are complete sets
+HSK_ONLY_STAGES = ("transform",)
 STAGE_TITLES = {
     "identify": "Hear → identify",
     "produce": "Meaning → Chinese",
     "contrast": "Contrast",
     "rapid": "Rapid retrieval",
     "conversation": "Conversation",
+    "transform": "Change it",
 }
 COUNTS = {"identify": (3, 5), "produce": (3, 4), "contrast": (3, 4),
-          "rapid": (4, 8), "conversation": (2, 5)}
+          "rapid": (4, 8), "conversation": (2, 5), "transform": (2, 4)}
 # names a draft sometimes uses for a stage instead of the one asked for
 STAGE_ALIASES = {"conversation": ("conversations", "dialogue", "dialogues"),
                  "rapid": ("rapid_fire", "rapid_recall"), "identify": ("identification",),
@@ -230,8 +234,21 @@ def prompt_words(known_words, recent=(), limit=None):
     return out[:limit]
 
 
+TRANSFORM_PROMPT = """
+- TRANSFORM (2-4 items): a correct everyday sentence that does NOT yet use the
+  target structure, and a short English instruction to rewrite it so that it
+  does ("Say it's already happened", "Use 把", "Make it a 是…的 question about
+  when", "Say it's not as … as"). The answer is the one natural rewrite, using
+  the structure; keep everything else the same.
+"""
+TRANSFORM_JSON = """,
+  "transform": [ {{"instruction": "…", "source_hanzi": "…", "source_pinyin": "…",
+                   "answer_hanzi": "…", "answer_pinyin": "…",
+                   "answer_english": "…"}} ]                               // 2-4"""
+
+
 def build_prompt(structure, known_words, china_pairs=(), contrasts=(),
-                 previous=(), feedback="", recent=()):
+                 previous=(), feedback="", recent=(), hsk=False):
     known_list = "、".join(sorted(prompt_words(known_words, recent), key=lambda w: (len(w), w)))
     china = "; ".join(f"{m} not {c}" for c, m in china_pairs[:60])
     contrast_text = "\n".join(f"  - {c.name}: {c.pattern} — {c.purpose}" for c in contrasts) \
@@ -240,6 +257,7 @@ def build_prompt(structure, known_words, china_pairs=(), contrasts=(),
     recent_text = ("\nRECENTLY LEARNED WORDS - recycle several of these across the items (at "
                    "least one is required), so new vocabulary gets used inside the grammar:\n  "
                    + "、".join(recent) + "\n") if recent else ""
+    transform_json = TRANSFORM_JSON.replace("{{", "{").replace("}}", "}") if hsk else ""
     kind_note = ("This is a CONTRAST DRILL: every stage should make the learner choose "
                  "between the structures listed below (use each of them across the items), "
                  "not just use one." if structure.kind == "contrast" else "")
@@ -296,6 +314,7 @@ PRINCIPLES
   the right one must never stand out by being longer or more detailed, and
   its position in the list must vary from item to item. Set "read": true only when the item can't be told apart
   by ear (e.g. 的/得/地, which sound identical) - the text is then shown first.
+{TRANSFORM_PROMPT if hsk else ""}
 {("PREVIOUS ATTEMPT WAS REJECTED. Fix every one of these problems:\n" + feedback) if feedback else ""}
 
 Return ONLY a JSON object:
@@ -312,7 +331,7 @@ Return ONLY a JSON object:
   "conversation": [ {{"question_hanzi": "…", "question_pinyin": "…",
                       "question_english": "…", "cue": "…", "sample_hanzi": "…",
                       "sample_pinyin": "…", "sample_english": "…"}} ],   // 3-5
-  "introduced_words": [ {{"hanzi": "…", "pinyin": "…", "english": "…"}} ]
+  "introduced_words": [ {{"hanzi": "…", "pinyin": "…", "english": "…"}} ]{transform_json}
 }}
 """.strip()
 
@@ -391,8 +410,10 @@ FIELDS = {"identify": [("hanzi", "pinyin", True)],
           "produce": [("answer_hanzi", "answer_pinyin", True)],
           "rapid": [("answer_hanzi", "answer_pinyin", True)],
           "conversation": [("question_hanzi", "question_pinyin", False),
-                           ("sample_hanzi", "sample_pinyin", True)]}
-OPTIONAL = {"contrast"}          # a set without a good contrast stage is still a set
+                           ("sample_hanzi", "sample_pinyin", True)],
+          "transform": [("source_hanzi", "source_pinyin", False),
+                        ("answer_hanzi", "answer_pinyin", True)]}
+OPTIONAL = {"contrast", "transform"}   # a set without these is still a set
 
 
 def _new_words(tokens, allowed):
@@ -471,6 +492,11 @@ def _item_problems(stage, it, structure, allowed, introduced):
         it["read"] = bool(it.get("read"))
     if stage in ("produce", "rapid") and not (it.get("situation") or it.get("prompt")):
         problems.append("missing prompt")
+    if stage == "transform":
+        if not str(it.get("instruction") or "").strip():
+            problems.append("missing instruction (what to change, in a few English words)")
+        if it.get("source_hanzi") and it.get("source_hanzi") == it.get("answer_hanzi"):
+            problems.append("the answer must change the source sentence")
     if stage == "conversation" and not str(it.get("cue") or "").strip():
         problems.append("missing cue (what the learner should reply, in a few English words)")
     if missing_all:
@@ -560,6 +586,8 @@ def validate(payload, structure, known_words, recent=()):
             else payload.get(stage)
         if stage == "contrast" and not payload.get("contrast"):
             continue
+        if stage in HSK_ONLY_STAGES and not payload.get(stage):
+            continue
         if not isinstance(items, list) or not (lo <= len(items) <= hi):
             problems.append(f"{stage}: needs {lo}-{hi} items")
     if not problems:
@@ -607,6 +635,9 @@ def _describe_for_review(payload):
     for i, it in enumerate(payload.get("conversation", []), 1):
         lines.append(f"[conversation {i}] Q: {it['question_hanzi']} ({it.get('question_english', '')}) "
                      f"| cue: {it.get('cue', '')} -> reply: {it['sample_hanzi']}")
+    for i, it in enumerate(payload.get("transform") or [], 1):
+        lines.append(f"[transform {i}] {it.get('source_hanzi')} | do: {it.get('instruction')} "
+                     f"-> {it.get('answer_hanzi')}")
     return "\n".join(lines)
 
 
@@ -635,6 +666,9 @@ Check every item below:
    question, answers something else, or forces the structure in where a
    speaker wouldn't use it (then the question should change), and any cue
    that doesn't match the reply.
+8. Transform (if any): the source is correct and doesn't use the structure;
+   the answer does what the instruction says, uses the structure, and is
+   the natural rewrite.
 
 DRILLS:
 {_describe_for_review(payload)}
@@ -652,7 +686,8 @@ Return ONLY JSON: {{"acceptable": true/false,
     return True, [], False
 
 
-_LABEL = re.compile(r"\b(identify|produce|contrast|rapid|conversation)\s*#?\s*(\d+)", re.I)
+_LABEL = re.compile(r"\b(identify|produce|contrast|rapid|conversation|transform)\s*#?\s*(\d+)",
+                    re.I)
 
 
 def flagged_items(problems):
@@ -667,7 +702,8 @@ def flagged_items(problems):
     return out
 
 
-def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), recent=()):
+def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), recent=(),
+             hsk=False):
     """Write, check and review a drill set. Returns the payload or None.
 
     A set has some twenty sentences, and one unstudied word or one
@@ -680,10 +716,11 @@ def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), 
     bank = {stage: [] for stage in STAGES}
     keys = {stage: set() for stage in STAGES}
     introduced, contrast_with, feedback = [], None, ""
+    asked = [s_ for s_ in STAGES if hsk or s_ not in HSK_ONLY_STAGES]
     for attempt in range(1, MAX_ATTEMPTS + 1):
         prompt = build_prompt(structure, known_words, china_pairs, contrasts,
                               [_key(st_, it) for st_ in STAGES for it in bank[st_]] + list(previous),
-                              feedback, recent)
+                              feedback, recent, hsk=hsk)
         try:
             draft = _chat_json(GENERATION_MODEL, prompt, 0.7)
         except json.JSONDecodeError as e:
@@ -745,7 +782,7 @@ def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), 
         if need:
             feedback += ("\n" if feedback else "") + \
                 (f"- Items that passed are kept. Still needed, at least: {need}. Write a full set "
-                 f"again, with every stage in it ({', '.join(STAGES)}) under exactly those names.")
+                 f"again, with every stage in it ({', '.join(asked)}) under exactly those names.")
         logging.warning(f"[GRAMMAR] {structure.id} attempt {attempt}: kept "
                         f"{ {st_: len(v) for st_, v in bank.items()} }, still short {short}:\n{feedback}")
     return None
@@ -758,6 +795,7 @@ def sentences_in(payload):
     out += [it.get("answer_hanzi") for it in payload.get("rapid", [])]
     out += [it.get("sample_hanzi") for it in payload.get("conversation", [])]
     out += [it.get("hanzi") for it in (payload.get("contrast") or {}).get("items", [])]
+    out += [it.get("answer_hanzi") for it in payload.get("transform") or []]
     return [s for s in out if s]
 
 

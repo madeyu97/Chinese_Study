@@ -139,7 +139,7 @@ def load_set(structure):
     with st.spinner("Writing drills from your vocabulary and checking them…"):
         payload = gd.generate(structure, known, db.grammar_china_pairs(), contrasts,
                               db.grammar_recent_sentences(USER_ID, structure.id),
-                              recent=db.recent_words(USER_ID))
+                              recent=db.recent_words(USER_ID), hsk=HSK)
     if payload and payload.get("reviewed", True):
         # sets the reviewer couldn't check are shown once, never stored
         set_id = db.grammar_save_set(USER_ID, structure.id, len(known), payload)
@@ -150,13 +150,16 @@ def load_set(structure):
 
 
 # On the HSK track a Build stage sits between hearing a structure and saying
-# it: the identify sentences, rebuilt from shuffled word tiles (grammar_build)
-STAGE_ORDER = gd.STAGES[:1] + ("build",) + gd.STAGES[1:]
+# it: the identify sentences, rebuilt from shuffled word tiles (grammar_build) -
+# and a Change-it stage (rewrite a plain sentence using the structure) after it
+STAGE_ORDER = ("identify", "build", "transform", "produce", "contrast", "rapid",
+               "conversation")
 STAGE_TITLES = {**gd.STAGE_TITLES, "build": "Build the sentence"}
 
 
 def stages_of(payload):
-    return [s for s in STAGE_ORDER if items_of(payload, s)]
+    return [s for s in STAGE_ORDER if items_of(payload, s)
+            and (HSK or s not in ("build", "transform"))]
 
 
 def items_of(payload, stage):
@@ -254,7 +257,7 @@ def learn_card(card):
 # HSK track: a structure met for the first time is explained before it's drilled
 card_ = hg.card(structure.id) if HSK else None
 if card_ and structure.id not in progress and S.get("gr_learned") != structure.id:
-    ahead.grammar(USER_ID, [structure.id])      # its drills are written while you read
+    ahead.grammar(USER_ID, [structure.id], hsk=True)   # its drills are written while you read
     st.subheader(structure.name)
     st.markdown(f"<div style='font-size:1.5rem'>{structure.pattern}</div>",
                 unsafe_allow_html=True)
@@ -270,7 +273,7 @@ if "gr_set" not in S:
     payload = load_set(structure)
     # while this one is drilled, the next one's drills are written
     gp_ids = (S.get("gr_plan") or {}).get("ids") or [s_.id for s_ in queue]
-    ahead.grammar(USER_ID, [i for i in gp_ids if i != structure.id][:1])
+    ahead.grammar(USER_ID, [i for i in gp_ids if i != structure.id][:1], hsk=HSK)
     if not payload:
         st.error("Couldn't build a drill for this structure that passed the checks. "
                  "Try again, or pick another structure.")
@@ -533,6 +536,12 @@ if stage in ("identify", "contrast"):
     multiple_choice()
 elif stage == "build":
     build_sentence()
+elif stage == "transform":
+    st.markdown(f"**{item.get('instruction', '')}**")
+    big(item.get("source_hanzi", ""), item.get("source_pinyin", ""))
+    play(item.get("source_hanzi", ""))
+    spoken_answer(f"Change it: {item.get('instruction', '')}", item["answer_hanzi"],
+                  item.get("answer_pinyin", ""), item.get("answer_english", ""))
 elif stage == "produce":
     spoken_answer(item["situation"], item["answer_hanzi"], item.get("answer_pinyin", ""),
                   item.get("answer_english", ""))

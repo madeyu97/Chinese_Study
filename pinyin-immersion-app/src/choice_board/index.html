@@ -13,8 +13,9 @@
   board reports {sid, round, chosen} to Python, which scores the round, saves
   it and shows the word with its sound and a Next button.
 
-  args: sid, round, prompt {kind: "image"|"word", img, zh, py} | null,
-        options [{kind: "image"|"word", img, zh, py}], answer (index),
+  args: sid, round, prompt {kind: "image"|"word"|"text", img, zh, py, en} | null,
+        options [{kind: "image"|"word"|"text", img, zh, py, en}], answer (index),
+        ("text" is an English card; a word card may carry an English line too)
         answered (index or null - a restored round shows its answer;
                   -1 = "I don't know": the answer shown, no card tapped),
         show_pinyin
@@ -37,6 +38,7 @@
                 border-radius: 10px; }
   #prompt .zh { font-size: 2.6rem; line-height: 1.3; }
   #prompt .py { font-size: 1rem; color: var(--muted); }
+  #prompt .en { font-size: 1.1rem; color: var(--muted); margin-top: 2px; }
   #grid { display: grid; grid-template-columns: repeat(2, minmax(0, 230px)); gap: 10px;
           justify-content: center; padding: 2px; }
   .card { position: relative; border: 2px solid var(--edge); border-radius: 12px;
@@ -44,7 +46,8 @@
           display: flex; flex-direction: column; align-items: center; justify-content: center;
           -webkit-tap-highlight-color: transparent; transition: border-color 0.15s, background 0.15s; }
   .card.image { aspect-ratio: 1 / 1; }
-  .card.word { min-height: 76px; }
+  .card.word, .card.text { min-height: 76px; }
+  .card .en { font-size: 1.05rem; line-height: 1.3; text-align: center; }
   .card img { width: 86%; height: 86%; object-fit: contain; border-radius: 8px; }
   .card .zh { font-size: clamp(1.3rem, 6vw, 1.8rem); line-height: 1.25; }
   .card .py { font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
@@ -88,7 +91,9 @@ function esc(s) {
 
 function content(x) {
   if (x.kind === "image") return `<img src="${x.img}" alt="">`;
-  return `<div class="zh">${esc(x.zh)}</div>` + (R.showPinyin && x.py ? `<div class="py">${esc(x.py)}</div>` : "");
+  return (x.zh ? `<div class="zh">${esc(x.zh)}</div>` : "") +
+         (R.showPinyin && x.py ? `<div class="py">${esc(x.py)}</div>` : "") +
+         (x.en ? `<div class="en">${esc(x.en)}</div>` : "");
 }
 
 function build(prompt) {
@@ -100,7 +105,7 @@ function build(prompt) {
     b.className = `card ${o.kind}`;
     b.dataset.n = n;
     b.innerHTML = content(o);
-    b.setAttribute("aria-label", o.kind === "word" ? o.zh : `Picture ${n + 1}`);
+    b.setAttribute("aria-label", o.kind === "image" ? `Picture ${n + 1}` : (o.zh || o.en));
     b.addEventListener("click", () => choose(n));
     grid.appendChild(b);
   });

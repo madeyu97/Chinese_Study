@@ -11,7 +11,8 @@ Run once from pinyin-immersion-app/, pointing at two checkouts:
 
 Writes, for levels 1-4 only:
 
-  words.csv       word, level, pinyin, pos, english, erhua
+  words.csv       word, level, pinyin, pos, english, erhua, measure (the
+                  noun's measure words from CC-CEDICT, 、-separated: 本 for 书)
   recognise.csv   char, level          characters to recognise (认读字)
   write.csv       char, band           characters to write by hand (手写字);
                                        band 2 = the syllabus's "HSK 1-2" list
@@ -22,11 +23,14 @@ Writes, for levels 1-4 only:
                   from them (女 before 好 and 妈), commonest first.
                   Each with its stroke count, the HSK word that cues it and
                   the parts it builds on.
+  lookalike.csv   char, level, similar: recognition characters easily taken
+                  for one another (请 清 情 晴; 未 末), for the look-alike game
 
 See data/hsk/SOURCES.md for where each comes from.
 """
 
 import csv
+import json
 import re
 import sys
 from pathlib import Path
@@ -71,6 +75,17 @@ def short_gloss(cedict):
     return " / ".join(senses)
 
 
+def measure_words(cedict):
+    """CC-CEDICT's 'CL:個|个[ge4],位[wei4]' -> ['个', '位']."""
+    out = []
+    for cl in re.findall(r"CL:([^/]+)", cedict or ""):
+        for part in cl.split(","):
+            m = re.match(r"\s*(?:[^|\[]+\|)?([^\[|]+)\[", part)
+            if m and m.group(1).strip() not in out:
+                out.append(m.group(1).strip())
+    return out
+
+
 def build_words(anki):
     house = house_glosses()
     rows, seen = [], {}
@@ -91,7 +106,8 @@ def build_words(anki):
         english = re.sub(r"\s*\((Taiwan|also) pr\.[^)]*\)", "", english).strip()
         row = {"word": word, "level": level, "pinyin": pinyin,
                "pos": r["part_of_speech"], "english": english,
-               "erhua": int(de.has_erhua(word, pinyin) and word not in ("儿子", "女儿"))}
+               "erhua": int(de.has_erhua(word, pinyin) and word not in ("儿子", "女儿")),
+               "measure": "、".join(measure_words(r["definition_cc-cedict"]))}
         seen[word] = row
         rows.append(row)
     return rows
@@ -201,6 +217,61 @@ def build_write_order(write_rows, words, strokes_dir):
     return rows
 
 
+# shapes the component split can't see: single-part characters, and pairs
+# that differ by a stroke
+CONFUSABLE = ["人入八", "己已", "大太犬天夫", "未末", "土士", "日曰目白", "王玉主", "午牛",
+              "千干于", "刀力", "免兔", "找我", "买卖", "今令", "问间", "休体", "住往",
+              "左右在", "白百自", "见贝", "鸟乌", "儿几", "开井", "由甲申田", "很狠",
+              "象像", "历厉", "候侯", "己己", "子孑", "末未本", "勿匆", "夭天",
+              "办为", "风凤", "冷冷", "折拆", "辩辨", "侍待", "籍藉", "拨拔", "已己",
+              "厂广", "斤斥", "师帅", "思恩", "坐座", "做作", "带常", "进近", "边过"]
+
+
+def build_lookalike(recognise_rows, strokes_dir):
+    import radical_engine as rad
+
+    level = {r["char"]: r["level"] for r in recognise_rows}
+
+    def strokes(ch):
+        path = Path(strokes_dir or "/nonexistent") / f"{ch}.json"
+        return len(json.loads(path.read_text(encoding="utf-8"))["strokes"]) if path.exists() else 0
+
+    strokes_only = set("一丨丿丶乀乙乚亅𠃌𠄌㇀㇒⺄乛")
+    parts = {c: [p["component"] for p in rad.decompose(c)["components"]
+                 if p["component"] not in strokes_only] for c in level}
+    # a part shared by few characters (青 in 请 清 情 晴) makes a closer
+    # look-alike than a common radical (讠 in 请 说 话 语 ...)
+    used = {}
+    for ps in parts.values():
+        for p in set(ps):
+            used[p] = used.get(p, 0) + 1
+    count = {c: strokes(c) for c in level}
+    manual = {}
+    for group in CONFUSABLE:
+        for c in group:
+            manual.setdefault(c, set()).update(d for d in group if d != c)
+
+    def score(c, d):
+        if d in manual.get(c, ()):
+            return 20
+        a, b = parts[c], parts[d]
+        shared = set(a) & set(b)
+        if not shared:
+            return 0
+        # same part in the same place (请 清: 青 on the right) looks most alike
+        weight = sum(6 if used[p] <= 12 else 3 for p in shared)
+        same_place = len(a) == len(b) and any(x == y and x in shared for x, y in zip(a, b))
+        return weight + 3 * same_place - abs(count[c] - count[d]) / 2
+
+    rows = []
+    for c in level:
+        ranked = sorted(((score(c, d), d) for d in level if d != c), reverse=True)
+        similar = [d for s, d in ranked if s >= 6][:6]
+        if similar:
+            rows.append({"char": c, "level": level[c], "similar": "、".join(similar)})
+    return rows
+
+
 def write(name, rows, fields):
     OUT.mkdir(parents=True, exist_ok=True)
     with open(OUT / name, "w", encoding="utf-8", newline="") as f:
@@ -213,8 +284,10 @@ def write(name, rows, fields):
 def main(anki, hsk3, strokes_dir=None):
     anki, hsk3 = Path(anki), Path(hsk3)
     words = build_words(anki)
-    write("words.csv", words, ["word", "level", "pinyin", "pos", "english", "erhua"])
-    write("recognise.csv", build_recognise(hsk3), ["char", "level"])
+    write("words.csv", words, ["word", "level", "pinyin", "pos", "english", "erhua", "measure"])
+    recognise = build_recognise(hsk3)
+    write("recognise.csv", recognise, ["char", "level"])
+    write("lookalike.csv", build_lookalike(recognise, strokes_dir), ["char", "level", "similar"])
     write_rows = build_write(anki)
     write("write.csv", write_rows, ["char", "band"])
     write("write_order.csv", build_write_order(write_rows, words, strokes_dir),

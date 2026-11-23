@@ -34,7 +34,8 @@ def _words():
     rows = []
     for r in _read("words.csv"):
         rows.append({"word": r["word"], "level": int(r["level"]), "pinyin": r["pinyin"],
-                     "pos": r["pos"], "english": r["english"], "erhua": r["erhua"] == "1"})
+                     "pos": r["pos"], "english": r["english"], "erhua": r["erhua"] == "1",
+                     "measure": [m for m in r.get("measure", "").split("、") if m]})
     return rows
 
 
@@ -159,3 +160,19 @@ def grammar_upto(hsk_levels):
         hsk_levels = json.loads(hsk_levels)
     lv = hsk_levels or {}
     return lv.get("grammar") or lv.get("listen") or 1
+
+
+@functools.lru_cache(maxsize=1)
+def _lookalike():
+    return {r["char"]: (int(r["level"]), r["similar"].split("、")) for r in _read("lookalike.csv")}
+
+
+def lookalikes(ch):
+    """Recognition characters easily taken for ch (请: 清 情 晴 ...), closest
+    first; [] if none."""
+    return list(_lookalike().get(ch, (0, []))[1])
+
+
+def lookalike_chars(upto=4):
+    """Characters up to a level that have at least three look-alikes."""
+    return [c for c, (lv, sim) in _lookalike().items() if lv <= upto and len(sim) >= 3]

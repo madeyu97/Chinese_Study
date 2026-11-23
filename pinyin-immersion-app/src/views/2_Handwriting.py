@@ -215,15 +215,22 @@ def hsk_progress_ui(p):
 
 
 if "hw_payload" not in S:
-    st.title("✍️ Write — HSK 1–4" if HSK else "✍️ Handwriting")
+    # herb names stay a separate thing on the HSK track: Play's herb game
+    # opens this page in herb mode, with a way back to the HSK characters
+    HERBS = HSK and S.get("hw_herbs", False)
+    st.title("✍️ Write — herb names" if HERBS else "✍️ Write — HSK 1–4" if HSK
+             else "✍️ Handwriting")
+    if HERBS and st.button("← Back to HSK 1–4 characters", key="hw_herbs_off"):
+        S.hw_herbs = False
+        st.rerun()
 
     tab_review, tab_weak, tab_focus, tab_mine = st.tabs(
         ["📆 Review", "🎯 Weak characters", "🔍 A word", "📖 My characters"])
 
     # --- standard review session ---
     with tab_review:
-        source = get_handwriting_source(USER_ID)
-        if source != "hsk":         # the HSK track has one path, no choice
+        source = "herbs" if HERBS else get_handwriting_source(USER_ID)
+        if not HSK:                 # the HSK track has one path, no choice
             picked_source = st.selectbox(
                 "Characters from", list(SOURCES), format_func=SOURCES.get,
                 index=list(SOURCES).index(source) if source in SOURCES else 0, key="hw_source")
@@ -348,7 +355,7 @@ if "hw_payload" not in S:
 
     # --- my characters ---
     with tab_mine:
-        if HSK:
+        if HSK and not HERBS:
             hsk_progress_ui(get_hsk_writing_progress(USER_ID))
         elif get_handwriting_source(USER_ID) == "frequency":
             cp = get_curriculum_progress(USER_ID)
@@ -396,8 +403,9 @@ if S.get("hw_done"):
     st.success(
         f"Session saved — Easy {counts[3]} · Good {counts[2]} · "
         f"Hard {counts[1]} · Again {counts[0]}")
-    if tp.active("handwriting"):
+    if tp.active("handwriting") and not (HSK and S.get("hw_herbs")):
         S.hw_plan = True            # a Library session counts if the plan is waiting on it
+                                    # (herb names don't stand in for the HSK characters)
     in_plan = S.get("hw_plan")
     tp.session_done(USER_ID, "handwriting", S.get("hw_t0"), items=len(S.get("hw_final", [])),
                     step="handwriting" if in_plan else None, once_key="hw_logged")

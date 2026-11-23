@@ -179,6 +179,7 @@ BUILDERS = {"morning": _morning, "evening": _evening}
 
 
 HSK_STEPS = ("grammar", "handwriting", "reading")
+HSK_BANK_AHEAD = 3      # new structures beyond today's whose drills are written ahead
 HSK_SESSIONS = {
     "morning": ("🌅", "Morning", "Learn",
                 "New grammar while you're fresh, and the structures due back."),
@@ -334,6 +335,12 @@ def gather_state(user_id, also=(), hsk_track=False):
                 "known": len(g_known),
                 "due": [(s.id, s.name) for s in queue if s.id in g_progress],
                 "fresh": [(s.id, s.name) for s in queue if s.id not in g_progress]}
+            if hsk_track:
+                # the drill bank writes these ahead (ahead.for_day)
+                today_ids = {s.id for s in queue}
+                state["grammar"]["upcoming"] = [
+                    s.id for s in order if s.id not in g_progress and s.id not in today_ids
+                ][:HSK_BANK_AHEAD]
         except Exception as e:
             logging.warning(f"[PLAN] grammar unavailable: {e}")
     if ok(hand):

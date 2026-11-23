@@ -3149,7 +3149,7 @@ def t_ahead():
     import ahead
     calls, real = [], ahead.write_grammar_set
 
-    def slow(user_id, sid):
+    def slow(user_id, sid, hsk=False):
         calls.append(sid)
         _t.sleep(0.3)
         return True
@@ -3904,6 +3904,49 @@ def t_gr_build():
     assert gdr.POINTS["correct"] == 1.0 and gdr.POINTS["wrong"] == 0.0
 
 
+@test("grammar transform stage: asked for on the HSK track only, checked like the rest")
+def t_gr_transform():
+    s = gcur.get("ba_basic")
+    assert "TRANSFORM" in gdr.build_prompt(s, GR_KNOWN, hsk=True)
+    plain = gdr.build_prompt(s, GR_KNOWN)
+    assert "TRANSFORM" not in plain and '"transform"' not in plain, "the original app's prompt"
+    assert "transform" in gdr.OPTIONAL and gdr.COUNTS["transform"] == (2, 4)
+    words = GR_KNOWN + ["门", "关", "上", "关上"]
+    payload = {"transform": [
+        {"instruction": "Use 把", "source_hanzi": "我关上门了。", "answer_hanzi": "我把门关上了。"},
+        {"instruction": "", "source_hanzi": "我关上门了。", "answer_hanzi": "我把门关上了。"},
+        {"instruction": "Use 把", "source_hanzi": "我把门关上了。", "answer_hanzi": "我把门关上了。"},
+        {"instruction": "Use 把", "source_hanzi": "我关上门了。", "answer_hanzi": "我关上门了吧。"}]}
+    good, problems, _ = gdr.check_items(payload, s, words)
+    assert len(good["transform"]) == 1, problems
+    assert any("missing instruction" in p for p in problems)
+    assert any("must change" in p for p in problems)
+    assert any("doesn't use the target structure" in p for p in problems)
+    assert "我把门关上了。" in gdr.sentences_in({"transform": good["transform"]})
+    assert gdr.flagged_items(["transform 1: unnatural"]) == {("transform", 1)}
+    # a set without transform items is still complete (Selina's, and older ones)
+    _p, probs = gdr.validate({}, s, words)
+    assert not any(p.startswith("transform") for p in probs)
+
+
+@test("drill bank: on the HSK track the day's structures and the next few are written ahead")
+def t_ahead_bank():
+    import ahead
+    calls = []
+    real = ahead.grammar
+    ahead.grammar = lambda uid, ids, hsk=False: calls.append((list(ids), hsk))
+    try:
+        day = [{"steps": [{"key": "grammar", "params": {"ids": ["a", "b"]}}]}]
+        ahead.for_day(1, day)
+        assert calls == [(["a"], False)], calls
+        calls.clear()
+        ahead.for_day(1, day, ["c", "d", "e"], hsk=True)
+        assert calls == [(["a", "b"], True), (["c", "d", "e"], True)], calls
+    finally:
+        ahead.grammar = real
+    assert tplan.HSK_BANK_AHEAD == 3
+
+
 @test("level test: fair options - four distinct meanings, none that could also be right")
 def t_pl_items():
     import random as _r
@@ -4026,7 +4069,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

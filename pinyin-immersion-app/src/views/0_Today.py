@@ -73,7 +73,10 @@ cur = tp.plan()
 if cur:
     state["done"] = set(state["done"]) | {f"{cur['slot']}:{k}" for k in cur["done"] + cur["skipped"]}
 day = tp.build_day(state, hsk_track=HSK)
-ahead.for_day(USER_ID, day)        # write later steps' grammar drills now, in the background
+# write later steps' grammar drills now, in the background - and on the HSK
+# track the next few structures too (the drill bank)
+ahead.for_day(USER_ID, day, (state.get("grammar") or {}).get("upcoming", ()) if HSK else (),
+              hsk=HSK)
 nxt = tp.next_session(day)
 now = clock.now()
 

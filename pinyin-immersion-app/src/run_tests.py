@@ -2356,7 +2356,11 @@ def t_gr_curriculum():
         assert not has_erhua(s.pattern) and not has_erhua(s.name), s.id
     order = gcur.learning_order()
     assert order[0].level == 1 and order[0].core
-    assert len(order) == len(ids) and len({s.id for s in order}) == len(ids)
+    original = [i for i in ids if i not in gcur.HSK_ONLY]
+    assert len(order) == len(original) and {s.id for s in order} == set(original), \
+        "the original app's order has everything but the HSK track's additions"
+    assert len(gcur.learning_order(hsk=True)) == len(ids)
+    order = gcur.learning_order(hsk=True)
     pos = {s.id: i for i, s in enumerate(order)}
     for s in order:
         if s.kind == "contrast":
@@ -3822,6 +3826,46 @@ def t_hsk_write_order():
     assert _hsk.write_info("名")["cue_word"] == "名字"
 
 
+@test("HSK grammar: every HSK 1 point drilled or explained, a card for every structure, HSK order")
+def t_hsk_grammar():
+    import hsk_grammar as hg
+    from dictionary_engine import has_erhua
+    for p in _hsk.grammar_points(1):
+        assert p["id"] in hg.MAP, p
+        assert hg.MAP[p["id"]] or p["id"] in hg.LEXICAL, ("undrilled point needs a reason", p)
+    sids = {s for v in hg.MAP.values() for s in v}
+    assert all(gcur.get(s) for s in sids), [s for s in sids if not gcur.get(s)]
+    assert sids == set(hg.LEARN), sids ^ set(hg.LEARN)
+    for sid, (how, trap) in hg.LEARN.items():
+        assert how and trap and len(how) < 260 and len(trap) < 160, sid
+        assert sid == "nali" or not has_erhua(how + trap), sid   # nali: "not 哪儿"
+    order = hg.learning_order(1)
+    assert {s.id for s in order} == sids and len(order) == len(sids)
+    pos = {s.id: i for i, s in enumerate(order)}
+    for s in order:
+        if s.kind == "contrast":
+            assert all(pos[c] < pos[s.id] for c in s.contrast if c in pos), s.id
+    assert order[0].id == "word_order"
+    assert pos["bu_neg"] < pos["mei_neg"] < pos["bu_vs_mei"]
+    assert hg.structure_level()["le_verb"] == 1 and hg.structure_level()["place_shi"] == 1
+    assert [s.id for s in hg.learning_order(2)][:len(order)] == [s.id for s in order]
+    # the eight structures HSK 1 needed that the app didn't have
+    for sid in ("noun_predicate", "numbers", "di_ordinal", "date_time", "money",
+                "lihe_verbs", "he_and", "dou_all"):
+        p = gdr.build_prompt(gcur.get(sid), GR_KNOWN)
+        assert gcur.get(sid).pattern in p, sid
+    # cards: official examples that show the structure, with pinyin and English
+    c = hg.card("dou_all")
+    assert c["hsk"] == 1 and c["examples"] and all("都" in e["chinese"] for e in c["examples"])
+    assert all(e["pinyin"] and e["english"] for e in c["examples"])
+    assert sum(1 for sid in sids if hg.examples(sid)) >= len(sids) - 8
+    assert hg.card("bei_basic") is None
+    assert hg.sentence_pinyin("前边是不是电影院？") == "qián biān shì bú shì diàn yǐng yuàn"
+    assert hg.sentence_pinyin("八点了，起床吧。") == "bā diǎn le qǐ chuáng ba"
+    assert hg.sentence_pinyin("我还要一杯。") == "wǒ hái yào yì bēi"
+    assert hg.sentence_pinyin("第一课") == "dì yī kè" and hg.sentence_pinyin("一个") == "yí gè"
+
+
 @test("level test: fair options - four distinct meanings, none that could also be right")
 def t_pl_items():
     import random as _r
@@ -3916,7 +3960,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_pl_items(); t_pl_flow(); t_hsk_track(); t_plan_hsk()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_pl_items(); t_pl_flow(); t_hsk_track(); t_plan_hsk()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

@@ -232,7 +232,7 @@ def last_finished(day):
 # ======================================================================
 # Reading the queues (database)
 # ======================================================================
-def gather_state(user_id, also=()):
+def gather_state(user_id, also=(), hsk_track=False):
     """Counts from every queue, for build_day. A queue that can't be read is
     left out of today's sessions rather than breaking the page. The reads
     don't depend on each other, so they go out at the same time: the page
@@ -240,7 +240,10 @@ def gather_state(user_id, also=()):
 
     `also` is more zero-argument reads to send in the same batch (the Today
     page's streak and nudges); with it the result is (state, their results),
-    None standing for one that failed."""
+    None standing for one that failed.
+
+    On the HSK track grammar comes in HSK order, up to the level studied by
+    ear (state["hsk_levels"], None until the level test or a choice)."""
     import db_manager as db
     import vocab_engine as ve
     today = clock.today()
@@ -268,7 +271,7 @@ def gather_state(user_id, also=()):
         return h
 
     (prog, due, introduced, recap, words, tone_prog, tone_new, g_progress, g_new, g_known,
-     hand, characters, *extra) = db.in_parallel(
+     hand, characters, hsk_levels, *extra) = db.in_parallel(
         safely("progress", lambda: db.day_progress(user_id)),
         safely("words", due_),
         safely("words", lambda: db.introduced_today(user_id)),
@@ -281,12 +284,15 @@ def gather_state(user_id, also=()):
         safely("grammar", lambda: db.grammar_known_vocab(user_id)),
         safely("handwriting", handwriting_),
         safely("reading", lambda: db.known_characters(user_id)),
+        safely("grammar", lambda: db.get_hsk_levels(user_id) if hsk_track else None),
         *[safely("extra", fn) for fn in also])
 
     def ok(*values):
         return all(v is not failed for v in values)
 
     state = {"done": set(), "finished": {}, "skipped": set()}
+    if hsk_track:
+        state["hsk_levels"] = hsk_levels if ok(hsk_levels) else None
     if ok(prog):
         state.update(done=prog["done"], finished=prog["finished"], skipped=prog["skipped"])
     if ok(due, introduced):
@@ -316,8 +322,13 @@ def gather_state(user_id, also=()):
         try:
             import grammar_curriculum as gc
             import grammar_drills as gd
-            queue = gd.todays_queue(gc.learning_order(), g_progress, today, g_new,
-                                    GRAMMAR_NEW_PER_DAY)
+            if hsk_track:
+                import hsk_grammar as hg
+                order = hg.learning_order(((hsk_levels if ok(hsk_levels) else None)
+                                           or {}).get("listen") or 1)
+            else:
+                order = gc.learning_order()
+            queue = gd.todays_queue(order, g_progress, today, g_new, GRAMMAR_NEW_PER_DAY)
             state["grammar"] = {
                 "known": len(g_known),
                 "due": [(s.id, s.name) for s in queue if s.id in g_progress],

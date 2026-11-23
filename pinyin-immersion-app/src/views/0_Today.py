@@ -30,12 +30,11 @@ st.title("今天 Today")
 # Everything the page shows is read at the same time (the database is far
 # from the app, so each read in a row would be its own wait).
 with st.spinner("Working out today's sessions…"):
-    state, (pending, streak, week, *more) = tp.gather_state(USER_ID, also=[
+    state, (pending, streak, week) = tp.gather_state(USER_ID, also=[
         lambda: db.unseen_nudges(USER_ID),
         lambda: db.activity_streak(USER_ID),
-        lambda: db.study_minutes(USER_ID, 7)]
-        + ([lambda: db.get_hsk_levels(USER_ID)] if HSK else []))
-levels = more[0] if more else None
+        lambda: db.study_minutes(USER_ID, 7)], hsk_track=HSK)
+levels = state.get("hsk_levels")
 
 if HSK:
     if levels:

@@ -24,12 +24,13 @@ import clock
 import db_manager as db
 import grammar_curriculum as gc
 import grammar_drills as gd
+import hsk_grammar as hg
 import session_store as store
 import today_plan as tp
 import quiz
 import word_content as wc
 from audio_engine import create_audio_file, warm
-from auth import require_login, sidebar_user_badge
+from auth import on_hsk_track, require_login, sidebar_user_badge
 from speech_engine import transcribe_audio
 from ai_prompter import _force_simplified
 from config import GRAMMAR_NEW_PER_DAY
@@ -42,10 +43,14 @@ USER = require_login()
 USER_ID = USER["id"]
 S = st.session_state
 
-known, progress, _new_today = db.in_parallel(          # one wait, not three
+HSK = on_hsk_track(USER)
+known, progress, _new_today, _levels = db.in_parallel(          # one wait, not four
     lambda: db.grammar_known_vocab(USER_ID), lambda: db.grammar_progress(USER_ID),
-    lambda: db.grammar_new_today(USER_ID))
-order = gc.learning_order()
+    lambda: db.grammar_new_today(USER_ID),
+    lambda: db.get_hsk_levels(USER_ID) if HSK else None)
+# the HSK track: HSK 1's structures first, up to the level studied by ear
+HSK_UPTO = ((_levels or {}).get("listen") or 1) if HSK else None
+order = hg.learning_order(HSK_UPTO) if HSK else gc.learning_order()
 queue = gd.todays_queue(order, progress, clock.today(), _new_today, GRAMMAR_NEW_PER_DAY)
 
 
@@ -72,8 +77,8 @@ with st.sidebar:
     sidebar_user_badge()
     tp.sidebar("grammar", reset_all)
     st.metric("Words to build from", len(known))
-    st.caption(f"{len(progress)} of {len(gc.STRUCTURES)} structures practised · "
-               f"{len(queue)} ready today")
+    st.caption(f"{sum(1 for s_ in order if s_.id in progress)} of {len(order)} structures "
+               f"practised{f' (HSK 1–{HSK_UPTO})' if HSK else ''} · {len(queue)} ready today")
 
 st.title("🧩 Grammar drills")
 store.notice()
@@ -198,11 +203,18 @@ if "gr_sid" not in S:
             start(queue[0].id)
             st.rerun()
     with st.expander("Choose a structure yourself", expanded=not queue):
-        sec = st.selectbox("Section", list(gc.SECTIONS),
-                           format_func=lambda n: f"{n}. {gc.SECTIONS[n]}")
-        options = gc.in_section(sec)
-        pick = st.selectbox("Structure", options,
-                            format_func=lambda s_: f"{s_.name}  ·  {s_.pattern}")
+        if HSK:
+            levels_ = hg.structure_level()
+            options = order
+            pick = st.selectbox("Structure", options,
+                                format_func=lambda s_: f"HSK {levels_.get(s_.id)} · "
+                                                       f"{s_.name}  ·  {s_.pattern}")
+        else:
+            sec = st.selectbox("Section", list(gc.SECTIONS),
+                               format_func=lambda n: f"{n}. {gc.SECTIONS[n]}")
+            options = gc.in_section(sec)
+            pick = st.selectbox("Structure", options,
+                                format_func=lambda s_: f"{s_.name}  ·  {s_.pattern}")
         p_ = progress.get(pick.id)
         st.caption("Not practised yet." if not p_ else
                    f"Practised {p_['review_count']}× · next review {p_['next_review_date']}")
@@ -212,6 +224,39 @@ if "gr_sid" not in S:
     st.stop()
 
 structure = gc.get(S.gr_sid)
+
+
+def learn_card(card):
+    """How the structure works, the usual mistake, and official HSK examples
+    with audio. Before the first drill it's the whole screen; after that a
+    tap away."""
+    st.markdown(f"**How it works.** {card['how']}")
+    st.markdown(f"**Watch out.** {card['trap']}")
+    for ex in card["examples"]:
+        with st.container(border=True):
+            st.markdown(f"<div style='font-size:1.4rem;line-height:1.5'>{ex['chinese']}</div>",
+                        unsafe_allow_html=True)
+            st.caption(f"{ex['pinyin']} — {ex['english']}")
+            play(ex["chinese"])
+    st.caption(f"HSK {card['hsk']}"
+               + (" · examples from the HSK syllabus" if card["examples"] else ""))
+
+
+# HSK track: a structure met for the first time is explained before it's drilled
+card_ = hg.card(structure.id) if HSK else None
+if card_ and structure.id not in progress and S.get("gr_learned") != structure.id:
+    ahead.grammar(USER_ID, [structure.id])      # its drills are written while you read
+    st.subheader(structure.name)
+    st.markdown(f"<div style='font-size:1.5rem'>{structure.pattern}</div>",
+                unsafe_allow_html=True)
+    st.caption(structure.purpose)
+    learn_card(card_)
+    if st.button("Got it — start the drills", type="primary", width="stretch",
+                 key="gr_learned_btn"):
+        S.gr_learned = structure.id
+        st.rerun()
+    st.stop()
+
 if "gr_set" not in S:
     payload = load_set(structure)
     # while this one is drilled, the next one's drills are written
@@ -249,6 +294,9 @@ st.subheader(structure.name)
 st.markdown(f"<div style='font-size:1.5rem'>{structure.pattern}</div>",
             unsafe_allow_html=True)
 st.caption(structure.purpose)
+if card_:
+    with st.expander("How it works"):
+        learn_card(card_)
 recycled = [w for w in S.setdefault("gr_recent", db.recent_words(USER_ID))
             if w in "".join(gd.sentences_in(payload))]
 if recycled:

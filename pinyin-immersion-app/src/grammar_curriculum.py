@@ -33,15 +33,17 @@ import grammar_data_3
 import grammar_data_4
 import grammar_data_5
 import grammar_data_6
+import grammar_data_hsk
 
 _PARTS = [grammar_data_1, grammar_data_2, grammar_data_3, grammar_data_4,
-          grammar_data_5, grammar_data_6]
+          grammar_data_5, grammar_data_6, grammar_data_hsk]
 
 SECTIONS, STRUCTURES, LISTED = {}, [], {}
 for _part in _PARTS:
     SECTIONS.update(_part.SECTIONS)
     STRUCTURES += _part.STRUCTURES
-    LISTED.update(_part.LISTED)
+    for _sec, _lines in _part.LISTED.items():
+        LISTED.setdefault(_sec, []).extend(_lines)
 
 BY_ID = {s.id: s for s in STRUCTURES}
 

@@ -143,7 +143,9 @@ def _evening(state, done):
         steps.append(_step("evening", "words", detail, 0.4 * max(n, 5),
                            {"recap": True, "cap": PLAN_RECAP_WORDS}, done))
     h = state.get("handwriting")
-    writing = bool(h and h["started"])
+    # the HSK app teaches writing from the start; the original waits until
+    # writing has been started from the Handwriting page
+    writing = bool(h and (h["started"] or state.get("hsk_track")))
     s = state.get("sentences")
     if s and s["words"] >= SENTENCES_MIN_WORDS:
         # no writing yet: more listening in its place
@@ -173,7 +175,16 @@ def _evening(state, done):
 BUILDERS = {"morning": _morning, "evening": _evening}
 
 
-def build_day(state):
+HSK_STEPS = ("grammar", "handwriting", "reading")
+HSK_SESSIONS = {
+    "morning": ("🌅", "Morning", "Learn",
+                "New grammar while you're fresh, and the structures due back."),
+    "evening": ("🌙", "Evening", "Use & keep",
+                "Writing, then reading - characters met in print after writing them."),
+}
+
+
+def build_day(state, hsk_track=False):
     """state (from gather_state) -> the day's sessions, in order:
     {slot, icon, title, theme, why, steps, minutes, done, skipped, finished_at}.
     Each step is {slot, key, icon, title, page, detail, minutes, params, done}.
@@ -184,8 +195,10 @@ def build_day(state):
     skipped = set(state.get("skipped") or ())
     day = []
     for slot in SLOTS:
-        icon, title, theme, why = SESSIONS[slot]
-        steps = BUILDERS[slot](state, done)
+        icon, title, theme, why = (HSK_SESSIONS if hsk_track else SESSIONS)[slot]
+        steps = BUILDERS[slot](dict(state, hsk_track=hsk_track), done)
+        if hsk_track:               # the HSK app: writing, grammar and reading only
+            steps = [s for s in steps if s["key"] in HSK_STEPS]
         left = [s for s in steps if not s["done"]]
         day.append({"slot": slot, "icon": icon, "title": title, "theme": theme, "why": why,
                     "steps": steps, "minutes": sum(s["minutes"] for s in left),

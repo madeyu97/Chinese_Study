@@ -69,7 +69,7 @@ def _login_screen():
                 st.error("Those don't match.")
             else:
                 db.set_user_pin(user["id"], new_pin)
-                st.session_state.user = {"id": user["id"],
+                st.session_state.user = {"id": user["id"], "username": user["username"],
                                          "display_name": user["display_name"]}
                 st.rerun()
     else:
@@ -77,7 +77,7 @@ def _login_screen():
         if st.button("Start studying", type="primary",
                      width="stretch"):
             if db.verify_user_pin(user["id"], pin):
-                st.session_state.user = {"id": user["id"],
+                st.session_state.user = {"id": user["id"], "username": user["username"],
                                          "display_name": user["display_name"]}
                 st.rerun()
             else:
@@ -96,7 +96,7 @@ def current_user():
     if pinned:
         for u in db.list_users():
             if u["username"].lower() == pinned.lower():
-                st.session_state.user = {"id": u["id"],
+                st.session_state.user = {"id": u["id"], "username": u["username"],
                                          "display_name": u["display_name"],
                                          "pinned": True}
                 return st.session_state.user
@@ -122,7 +122,7 @@ def require_login():
     if pinned:
         for u in db.list_users():
             if u["username"].lower() == pinned.lower():
-                st.session_state.user = {"id": u["id"],
+                st.session_state.user = {"id": u["id"], "username": u["username"],
                                          "display_name": u["display_name"],
                                          "pinned": True}
                 return st.session_state.user
@@ -152,3 +152,18 @@ def sidebar_user_badge():
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
+
+
+def on_hsk_track(user=None):
+    """Does this person use the HSK 1-4 app (Today · Write · Grammar · Read ·
+    Play)? Everyone else keeps the original app unchanged. See
+    config.HSK_TRACK_USERS."""
+    from config import HSK_TRACK_USERS
+    user = user or st.session_state.get("user")
+    if not user:
+        return False
+    name = user.get("username")
+    if name is None:
+        name = next((u["username"] for u in db.list_users() if u["id"] == user["id"]), "")
+        user["username"] = name
+    return name.lower() in HSK_TRACK_USERS

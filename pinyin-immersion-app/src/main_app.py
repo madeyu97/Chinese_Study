@@ -12,6 +12,13 @@ want it but never the first question.
               Handwriting · Reading
     Settings  Sentence bank & words
 
+On the HSK track (config.HSK_TRACK_USERS) the menu is the HSK 1-4 app
+instead:
+
+    Today · Play
+    Study     Write · Grammar · Read
+    Settings  HSK level test
+
 The page scripts live in views/, not pages/: Streamlit treats a folder named
 pages/ as an old-style menu, and on a freshly started server that made the
 first visit to a link like /play show "Page not found".
@@ -24,7 +31,7 @@ import streamlit as st
 
 st.set_page_config(page_title="华语 Study", page_icon="🎧", layout="centered")
 
-from auth import current_user, login_page  # noqa: E402  (page config must come first)
+from auth import current_user, login_page, on_hsk_track  # noqa: E402  (page config must come first)
 
 if current_user() is None:
     # the sign-in screen is the only page until someone has chosen who they are
@@ -54,4 +61,22 @@ PAGES = {
     ],
 }
 
-st.navigation(PAGES).run()
+# The HSK 1-4 app: four things - writing, grammar, reading, games - and a
+# level test. Anyone not on the HSK track keeps PAGES above, unchanged.
+HSK_PAGES = {
+    "": [
+        st.Page("views/0_Today.py", title="Today", icon="🏠", default=True),
+        st.Page("views/8_Games.py", title="Play", icon="🎮", url_path="play"),
+    ],
+    "Study": [
+        st.Page("views/2_Handwriting.py", title="Write", icon="✍️", url_path="handwriting"),
+        st.Page("views/7_Grammar.py", title="Grammar", icon="🧩", url_path="grammar"),
+        st.Page("views/6_Reading.py", title="Read", icon="📖", url_path="reading"),
+    ],
+    "Settings": [
+        st.Page("views/11_Level_test.py", title="HSK level test", icon="🎯",
+                url_path="level"),
+    ],
+}
+
+st.navigation(HSK_PAGES if on_hsk_track() else PAGES).run()

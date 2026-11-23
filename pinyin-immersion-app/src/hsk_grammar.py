@@ -426,7 +426,7 @@ def learning_order(upto=4):
     `upto`; within a level the curriculum's own order, with a contrast pair
     still waiting for both halves."""
     levels = structure_level()
-    base = gc.learning_order()
+    base = gc.learning_order(hsk=True)
     pos = {s.id: i for i, s in enumerate(base)}
     picked = [s for s in base if levels.get(s.id, 9) <= upto]
     ranked = sorted(picked, key=lambda s: (levels[s.id], pos[s.id]))

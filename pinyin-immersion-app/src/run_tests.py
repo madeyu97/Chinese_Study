@@ -2356,7 +2356,11 @@ def t_gr_curriculum():
         assert not has_erhua(s.pattern) and not has_erhua(s.name), s.id
     order = gcur.learning_order()
     assert order[0].level == 1 and order[0].core
-    assert len(order) == len(ids) and len({s.id for s in order}) == len(ids)
+    original = [i for i in ids if i not in gcur.HSK_ONLY]
+    assert len(order) == len(original) and {s.id for s in order} == set(original), \
+        "the original app's order has everything but the HSK track's additions"
+    assert len(gcur.learning_order(hsk=True)) == len(ids)
+    order = gcur.learning_order(hsk=True)
     pos = {s.id: i for i, s in enumerate(order)}
     for s in order:
         if s.kind == "contrast":

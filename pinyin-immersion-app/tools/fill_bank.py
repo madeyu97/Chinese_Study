@@ -5,7 +5,8 @@ it's needed (see src/drill_bank.py).
 For each person on the HSK track: the reviews coming due in the next few
 days and the next new structures in HSK order, most urgent first - each
 gets a drill set written, checked, reviewed and stored, unless a usable
-one is stored already.
+one is stored already. Then graded reading passages at their reading
+level, up to READING_STOCK unread.
 
     DATABASE_URL=... GROQ_API_KEY=... python tools/fill_bank.py [max_sets]
 
@@ -26,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 os.environ.setdefault("NO_BACKGROUND", "1")       # no app-side background jobs here
 
 MAX_MINUTES = 100
+READING_STOCK = 8       # unread reading passages to have ready each morning
 
 
 def main(max_sets=25):
@@ -35,7 +37,7 @@ def main(max_sets=25):
     import drill_bank
     import hsk
     import hsk_grammar as hg
-    from ahead import write_grammar_set
+    from ahead import write_grammar_set, write_passage
     from config import HSK_TRACK_USERS
 
     started, written, failed_in_row = time.time(), 0, 0
@@ -47,8 +49,8 @@ def main(max_sets=25):
         logging.info(f"{user['username']}: {len(todo)} structures to have ready")
         for sid in todo:
             if written >= max_sets or time.time() - started > MAX_MINUTES * 60:
-                logging.info("stopping: limit reached")
-                return written
+                logging.info("grammar: limit reached")
+                break
             t0 = time.time()
             known = db.grammar_known_vocab(uid)
             had = db.grammar_pick_set(uid, sid, len(known))
@@ -64,8 +66,18 @@ def main(max_sets=25):
                 failed_in_row += 1
                 logging.warning(f"  {sid}: not written")
                 if failed_in_row >= 3:
-                    logging.warning("stopping: three failures in a row (allowance used up?)")
-                    return written
+                    logging.warning("grammar: three failures in a row (allowance used up?)")
+                    break
+        # graded reading at the reading level: keep a stock of unread passages
+        level = (db.get_hsk_levels(uid) or {}).get("read") or 1
+        short = READING_STOCK - db.reading_passage_stats(uid, level)["unread"]
+        for _ in range(max(0, short)):
+            if time.time() - started > MAX_MINUTES * 60 or failed_in_row >= 3:
+                break
+            ok = write_passage(uid, level)
+            logging.info(f"  passage at HSK {level}: {'written' if ok else 'not written'}")
+            if not ok:
+                break
     logging.info(f"done: {written} sets written")
     return written
 

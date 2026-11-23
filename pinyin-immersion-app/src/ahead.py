@@ -13,6 +13,7 @@ database when the learner gets there.
     ahead.new_words(user_id, count)         write the next new words' content
     ahead.wait_grammar(user_id, sid)        if one is being written, wait for it
     ahead.for_day(user_id, day)             whatever today's sessions will need
+    ahead.reading(user_id, level)           keep graded passages in stock (HSK track)
 
 Jobs are keyed, so asking twice starts one job; a job that fails just means
 the page writes the set itself, as before.
@@ -107,6 +108,63 @@ def grammar(user_id, structure_ids, hsk=False):
     for sid in structure_ids or []:
         if _READY.get((user_id, sid)) != clock.today():
             _submit(("grammar", user_id, sid), _grammar_job, user_id, sid, hsk)
+
+
+# ----------------------------------------------------------------------
+# graded reading passages (HSK track)
+# ----------------------------------------------------------------------
+READING_STOCK = 4       # unread passages kept ready at the reading level
+
+
+def write_passage(user_id, level):
+    """Write, check, review and store one graded passage at the level, with
+    grammar the learner has studied and a title unlike the recent ones.
+    True if one was stored."""
+    import random
+    import db_manager as db
+    import grammar_curriculum as gc
+    import hsk_grammar as hg
+    import reading_hsk as rh
+    stats = db.reading_passage_stats(user_id, level)
+    studied = [gc.get(sid) for sid in db.grammar_progress(user_id)
+               if gc.get(sid) and hg.structure_level().get(sid, 9) <= level]
+    grammar_ = random.sample(studied, min(3, len(studied)))
+    payload = rh.generate(level, grammar_, random.choice(rh.TOPICS), stats["titles"])
+    if payload:
+        db.reading_passage_save(user_id, level, payload)
+        return True
+    return False
+
+
+def _reading_job(user_id, level, n):
+    for _ in range(n):
+        if not write_passage(user_id, level):
+            break
+
+
+def wait_reading(user_id, level, timeout=120):
+    """If passages are being written for this level right now, wait for that."""
+    job = running(("reading", user_id, level))
+    if job is None:
+        return False
+    try:
+        job.result(timeout=timeout)
+    except Exception:
+        pass
+    return True
+
+
+def reading(user_id, level, stock=READING_STOCK):
+    """Top up the unread passages at the level to `stock`, in the background."""
+    try:
+        import db_manager as db
+        short = stock - db.reading_passage_stats(user_id, level)["unread"]
+    except Exception as e:
+        logging.warning(f"[AHEAD] reading stock unknown: {e}")
+        return None
+    if short > 0:
+        return _submit(("reading", user_id, level), _reading_job, user_id, level, short)
+    return None
 
 
 def wait_grammar(user_id, structure_id, timeout=150):

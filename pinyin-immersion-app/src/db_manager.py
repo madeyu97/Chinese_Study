@@ -614,6 +614,20 @@ def _build_schema():
         )
     ''')
     cursor.execute("DROP TABLE IF EXISTS game_state")      # replaced by saved_sessions
+    # HSK track: graded reading passages, written ahead (reading_hsk.py)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reading_passages (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            level INTEGER NOT NULL,
+            payload JSONB NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            read_at TIMESTAMP,
+            correct BOOLEAN
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS reading_passages_unread "
+                   "ON reading_passages (user_id, level, read_at)")
     # every level test taken, for the history on the level-test page
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS placement_results (
@@ -922,6 +936,79 @@ def set_handwriting_source(user_id, source):
                    (source, user_id))
     conn.commit()
     conn.close()
+
+
+def reading_passage_save(user_id, level, payload):
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO reading_passages (user_id, level, payload) VALUES (%s, %s, %s) "
+                   "RETURNING id", (user_id, int(level), json.dumps(payload, ensure_ascii=False)))
+    pid = cursor.fetchone()[0]
+    conn.commit()
+    conn.close()
+    return pid
+
+
+def reading_passage_next(user_id, level):
+    """The oldest unread passage at the level, or None."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT id, level, payload FROM reading_passages WHERE user_id = %s "
+                   "AND level = %s AND read_at IS NULL ORDER BY created_at LIMIT 1",
+                   (user_id, int(level)))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    out = dict(row)
+    if isinstance(out["payload"], str):
+        out["payload"] = json.loads(out["payload"])
+    return out
+
+
+def reading_passage_done(passage_id, correct):
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE reading_passages SET read_at = NOW(), correct = %s WHERE id = %s",
+                   (correct, passage_id))
+    conn.commit()
+    conn.close()
+
+
+def reading_passage_stats(user_id, level):
+    """{"unread": at this level, "read": all levels, "right": answered right,
+    "titles": the last 30 titles (so new ones differ)}"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT COUNT(*) FILTER (WHERE read_at IS NULL AND level = %s),
+                             COUNT(*) FILTER (WHERE read_at IS NOT NULL),
+                             COUNT(*) FILTER (WHERE correct)
+                      FROM reading_passages WHERE user_id = %s""", (int(level), user_id))
+    unread, read, right = cursor.fetchone()
+    cursor.execute("SELECT payload->>'title' FROM reading_passages WHERE user_id = %s "
+                   "ORDER BY created_at DESC LIMIT 30", (user_id,))
+    titles = [r[0] for r in cursor.fetchall() if r[0]]
+    conn.close()
+    return {"unread": unread, "read": read, "right": right, "titles": titles}
+
+
+def reading_passage_new_words(user_id, limit=60):
+    """Words above the level met in passages read, newest first - for Anki."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT payload->'new_words' FROM reading_passages WHERE user_id = %s "
+                   "AND read_at IS NOT NULL ORDER BY read_at DESC LIMIT %s", (user_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    seen, out = set(), []
+    for (words,) in rows:
+        if isinstance(words, str):
+            words = json.loads(words)
+        for w in words or []:
+            if isinstance(w, dict) and w.get("hanzi") and w["hanzi"] not in seen:
+                seen.add(w["hanzi"])
+                out.append(w)
+    return out
 
 
 def get_hsk_levels(user_id):

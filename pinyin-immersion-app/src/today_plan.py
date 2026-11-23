@@ -167,7 +167,13 @@ def _evening(state, done):
             steps.append(_step("evening", "handwriting", " · ".join(parts) or "nothing due",
                                0.5 * due + 1.5 * new,
                                {"reviews": PLAN_HANDWRITING_REVIEWS, "new": new}, done))
-        if (state.get("reading") or {}).get("characters", 0) >= READING_MIN_CHARACTERS:
+        if state.get("hsk_track"):
+            # graded passages at the reading level: open from day one
+            steps.append(_step("evening", "reading",
+                               f"{_n(PLAN_READING_PASSAGES, 'graded passage')} at your level",
+                               4 * PLAN_READING_PASSAGES, {"passages": PLAN_READING_PASSAGES},
+                               done))
+        elif (state.get("reading") or {}).get("characters", 0) >= READING_MIN_CHARACTERS:
             steps.append(_step("evening", "reading",
                                f"{PLAN_READING_SENTENCES} sentences from characters you can write",
                                PLAN_READING_SENTENCES, {"sentences": PLAN_READING_SENTENCES},
@@ -179,6 +185,7 @@ BUILDERS = {"morning": _morning, "evening": _evening}
 
 
 HSK_STEPS = ("grammar", "handwriting", "reading")
+PLAN_READING_PASSAGES = 1
 HSK_BANK_AHEAD = 6      # new structures beyond today's whose drills the app writes ahead
 HSK_SESSIONS = {
     "morning": ("🌅", "Morning", "Learn",

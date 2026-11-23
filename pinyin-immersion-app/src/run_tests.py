@@ -3955,6 +3955,63 @@ def t_ahead_bank():
     assert drill_bank.targets({}, order, _d(2026, 11, 23), new_ahead=10) == order
 
 
+@test("graded reading: words checked against the level, passages checked, annotated once")
+def t_reading_hsk():
+    import reading_hsk as rh
+    text = ("今天早上我和妈妈去巴刹买菜。巴刹里人很多，菜也很便宜。妈妈买了很多水果，我买了一杯茶。"
+            "我们十点回家了。回家以后，妈妈做饭，我看书。")
+    a = rh.analyse(text, 1, ["巴刹"])
+    status = {x["w"]: x["status"] for x in a}
+    assert status["巴刹"] == "new" and status["一杯"] == "in" and status["买菜"] == "in"
+    assert rh.coverage(a) > 0.9
+    assert rh.analyse("我喝咖啡。", 1)[-2]["status"] == "out", "咖啡 is HSK 2"
+    good = {"title": "去巴刹", "text": text, "english": "This morning mum and I went to the market.",
+            "new_words": [{"hanzi": "巴刹", "pinyin": "bā shā", "english": "market"}],
+            "question": {"question": "Who went to the market?", "answer": 0,
+                         "options": ["Mum and me", "My brother", "Nobody"]}}
+    assert rh.check(good, 1) == [], rh.check(good, 1)
+    bad = dict(good, text=text.replace("茶", "咖啡"), new_words=[])
+    probs = rh.check(bad, 1)
+    assert any("巴刹" in p and "咖啡" in p for p in probs), probs
+    assert any("characters" in p for p in rh.check(dict(good, text="我很好。"), 1))
+    assert any("digits" in p for p in rh.check(dict(good, text=text + "我有2个。"), 1))
+    assert rh.check(dict(good, question={"question": "q", "options": ["a", "a", "b"],
+                                         "answer": 0}), 1)
+    words = rh.annotate(good, 1)
+    w = {x["w"]: x for x in words if not x.get("punct")}
+    assert w["巴刹"]["new"] and w["巴刹"]["en"] == "market" and w["巴刹"]["py"] == "bā shā"
+    assert w["妈妈"]["py"] == "mā ma" and w["妈妈"]["hsk"] == 1 and not w["妈妈"]["new"]
+    assert w["一杯"]["en"] == "one + cup", w["一杯"]
+    assert "".join(x["w"] for x in words) == text
+    p1, p4 = rh.build_prompt(1), rh.build_prompt(4)
+    assert "HSK 1" in p1 and "咖啡" not in p1.split("particles);")[1].split("Write ONE")[0]
+    assert len(p4) > len(p1)
+
+
+@test("graded reading page: words as tap-to-reveal tiles, escaped; plan step from day one")
+def t_reading_page():
+    stub = "db_manager" not in sys.modules and not os.environ.get("DATABASE_URL")
+    if stub:                     # the page imports the database module; no database here
+        sys.modules["db_manager"] = MagicMock()
+    try:
+        import reading_hsk_page as rp
+    finally:
+        if stub:
+            del sys.modules["db_manager"]
+    h = rp.passage_html([{"w": "<b>", "py": "x", "en": "y"}, {"w": "。", "punct": True},
+                         {"w": "巴刹", "py": "bā shā", "en": "market", "new": True}])
+    assert "&lt;b&gt;" in h and "<b>" not in h.split("</style>")[1]
+    assert 'class="new"' in h and "bā shā" in h and 'type="checkbox"' in h
+    assert "rp all" in rp.passage_html([], all_pinyin=True)
+    assert set(rp.MANDARIN_BEAN) == set(_hsk.LEVELS)
+    csv_ = rp.anki_csv([{"hanzi": "巴刹", "pinyin": "bā shā", "english": "market"}]).decode()
+    assert csv_.splitlines()[1] == "巴刹,bā shā,market"
+    day = tplan.build_day(_plan_state(), hsk_track=True)
+    ev = _sess(day)["evening"]
+    r = [s_ for s_ in ev["steps"] if s_["key"] == "reading"]
+    assert r and r[0]["params"] == {"passages": tplan.PLAN_READING_PASSAGES}
+
+
 @test("level test: fair options - four distinct meanings, none that could also be right")
 def t_pl_items():
     import random as _r
@@ -4077,7 +4134,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

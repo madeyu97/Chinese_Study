@@ -23,7 +23,7 @@ import streamlit as st
 import clock
 import db_manager as db
 import today_plan as tp
-from auth import require_login, sidebar_user_badge
+from auth import on_hsk_track, require_login, sidebar_user_badge
 from reading_engine import annotate, generate_sentence, analyse
 from config import GENERATION_MODEL
 
@@ -58,6 +58,14 @@ st.set_page_config(page_title="Reading", page_icon="📖", layout="centered")
 
 USER = require_login()
 USER_ID = USER["id"]
+
+# the HSK track reads graded passages instead (reading_hsk_page)
+if on_hsk_track(USER):
+    with st.sidebar:
+        sidebar_user_badge()
+    import reading_hsk_page
+    reading_hsk_page.run(USER)
+    st.stop()
 
 S = st.session_state
 if S.get("reading_plan") and S.reading_plan.get("date") != clock.today().isoformat():

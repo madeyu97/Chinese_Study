@@ -467,14 +467,45 @@ def learning_order(upto=4):
 _FOURTH = set("àèìòùǜ")
 
 
+_PLAIN = str.maketrans("āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ", "aaaaeeeeiiiioooouuuuüüüü")
+# doubled family words and the like: the second syllable is toneless
+_NEUTRAL_DOUBLES = set("妈爸哥姐弟妹爷奶星谢看想试说听走等")
+# a word's last syllable that is toneless: 我们, 桌子, 什么, 这么, 东西 …
+_NEUTRAL_ENDINGS = set("们么")
+_NEUTRAL_WORDS = {"东西": 1, "朋友": 1, "知道": 1, "衣服": 1, "时候": 1, "地方": 1,
+                  "喜欢": 1, "认识": 1, "觉得": 1, "休息": 1, "明白": 1, "便宜": 1,
+                  "漂亮": 1, "舒服": 1, "已经": None, "客气": 1, "意思": 1, "事情": 1,
+                  "名字": 1, "眼睛": 1, "关系": 1, "先生": 1, "学生": 1, "医生": None,
+                  "早上": 1, "晚上": 1, "孩子": 1, "桌子": 1, "椅子": 1, "儿子": 1,
+                  "妻子": None, "房子": 1, "饺子": 1, "包子": 1, "日子": 1, "杯子": 1}
+
+
+def _neutral_tones(text, syl):
+    """Make the toneless syllables toneless, in place: 妈妈 mā ma, 我们 wǒ men,
+    喜欢 xǐ huan, 东西 dōng xi. Words come from jieba."""
+    import jieba
+    i = 0
+    for w in jieba.lcut(text):
+        n = len(w)
+        if n >= 2 and i + n <= len(syl):
+            last = i + n - 1
+            if _NEUTRAL_WORDS.get(w) == 1 or (n == 2 and w[0] == w[1]
+                                              and w[0] in _NEUTRAL_DOUBLES) \
+                    or (w[-1] in _NEUTRAL_ENDINGS and w not in _NEUTRAL_WORDS):
+                syl[last] = syl[last].translate(_PLAIN)
+        i += n
+
+
 def sentence_pinyin(text):
     """Pinyin for a whole sentence, word by word (pypinyin's phrase list gets
-    了 as le, 还 as hái), with the written tone changes of 不 and 一 (不是
+    了 as le, 还 as hái), toneless syllables toneless (妈妈 mā ma, 喜欢 xǐ huan),
+    with the written tone changes of 不 and 一 (不是
     bú shì, 一个 yí gè, 一家 yì jiā - but 第一 dì yī, 十一 shí yī) and no
     punctuation."""
     from pypinyin import Style, lazy_pinyin
     chars = [c for c in text if is_cjk_char(c)]
     syl = lazy_pinyin("".join(chars), style=Style.TONE)
+    _neutral_tones("".join(chars), syl)
     out = list(syl)
     for i, (c, py) in enumerate(zip(chars, syl)):
         nxt = syl[i + 1] if i + 1 < len(syl) else ""

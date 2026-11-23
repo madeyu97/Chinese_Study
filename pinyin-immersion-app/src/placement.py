@@ -2,10 +2,12 @@
 """
 Level test: which HSK level to study at, by ear and by eye.
 
-Two short tests, each run level by level from HSK 1:
+Three short tests, each run level by level from HSK 1:
 
   listen   hear a word, pick its meaning   (what you know as spoken Mandarin)
   read     see a word, pick its meaning    (what you know in characters)
+  grammar  put an official HSK example sentence back in order, from its
+           words as tiles with pinyin, its English given (what you can build)
 
 Each level asks up to ITEMS words drawn from the words NEW at that level
 (HSK 3's 500, not HSK 1-3's 1,000), four meanings to choose from plus "I
@@ -15,9 +17,11 @@ first level not passed. So a beginner answers about ten questions and
 someone at HSK 4 about forty.
 
 The result is the highest level passed (0-4); the level to study is the
-one after it (at most 4). The two skills are kept apart because they
-drive different parts of the app: grammar (heard and said) goes by
-listening, reading and games by reading.
+one after it (at most 4). The skills are kept apart because they drive
+different parts of the app: grammar drills go up to the grammar level and
+build from the words of the listening level; reading and games go by
+reading. Grammar asks fewer questions (GRAMMAR_ITEMS, pass at
+GRAMMAR_PASS): each takes longer.
 
 Pure: the page (views/11_Level_test.py) keeps the state and plays audio.
 """
@@ -29,11 +33,19 @@ import hsk
 
 ITEMS = 10
 PASS = 8
+GRAMMAR_ITEMS = 6
+GRAMMAR_PASS = 5
 OPTIONS = 4
 SKILLS = {
     "listen": ("🎧", "Listening", "Hear a word, pick what it means."),
     "read": ("👁️", "Reading", "See a word in characters, pick what it means."),
+    "grammar": ("🧩", "Grammar", "Put the words in order to say the English."),
 }
+
+
+def size(skill):
+    """(questions per level, right answers to pass it)"""
+    return (GRAMMAR_ITEMS, GRAMMAR_PASS) if skill == "grammar" else (ITEMS, PASS)
 
 
 _STOP = {"to", "the", "an", "of", "and", "or", "for", "in", "on", "at", "sb", "sth", "etc",
@@ -114,11 +126,69 @@ def new_test(skill, seed=None):
             "answers": [], "passed": 0, "done": False, "log": []}
 
 
+def grammar_pool(level):
+    """Official HSK example sentences for the level's grammar points (the
+    ones drilled, not the vocabulary ones) that make a fair puzzle: 4-7
+    tiles (8 at HSK 4, whose examples run long), English given, no
+    Beijing 儿, one sentence."""
+    import hsk_grammar as hg
+    import grammar_build as gb
+    from dictionary_engine import has_erhua
+    import grammar_curriculum as gc
+    most = 8 if level == 4 else 7
+    out, seen = [], set()
+    for p in hsk.grammar_points(level):
+        if not hg.MAP.get(p["id"]):
+            continue
+        markers = [m for sid in hg.MAP[p["id"]] for m in gc.get(sid).markers]
+        for ex in p["examples"]:
+            zh = re.sub(r"（[^）]*）", "", ex["chinese"]).strip()
+            if (not ex["english"] or has_erhua(zh) or zh in seen
+                    # a list (英语、汉语、法语) could go in any order: left out
+                    or not re.search(r"[。？！]$", zh) or re.search(r"[，；、“”]", zh)):
+                continue
+            words = gb.tiles_of(zh, markers)
+            # a fronted topic (火车票你买到了没有) has a second right order
+            # (你买到火车票了没有): only sentences whose subject is up front
+            late = [i for i, w in enumerate(words or []) if w in gb.SUBJECTS]
+            if late and late[0] > 1:
+                continue
+            if words and 4 <= len(words) <= most:
+                seen.add(zh)
+                out.append({"hanzi": zh, "english": ex["english"], "answer": words,
+                            "point": p["id"]})
+    return out
+
+
+def make_grammar_item(ex, rng):
+    import grammar_build as gb
+    import hsk_grammar as hg
+    return {**ex, "word": ex["hanzi"], "level": int(ex["point"][1]),
+            "tiles": gb._shuffled(ex["answer"], rng.random()),
+            "pinyin": {w: hg.sentence_pinyin(w) for w in ex["answer"]},
+            "sentence_pinyin": hg.sentence_pinyin(ex["hanzi"])}
+
+
 def _level_items(state):
-    """The words for the current level, fixed by the test's seed."""
+    """The questions for the current level, fixed by the test's seed - and
+    for grammar, from as many different grammar points as possible."""
     rng = random.Random(f"{state['seed']}:{state['level']}")
+    n, _need = size(state["skill"])
+    if state["skill"] == "grammar":
+        pool = grammar_pool(state["level"])
+        rng.shuffle(pool)
+        by_point, picked = set(), []
+        for ex in pool + pool:              # one per point first, then any
+            if len(picked) == n:
+                break
+            if ex in picked or (ex["point"] in by_point and len(by_point) < len(
+                    {e["point"] for e in pool})):
+                continue
+            by_point.add(ex["point"])
+            picked.append(ex)
+        return [make_grammar_item(ex, rng) for ex in picked]
     pool = _pool(state["level"])
-    targets = rng.sample(pool, min(ITEMS, len(pool)))
+    targets = rng.sample(pool, min(n, len(pool)))
     return [make_item(t, pool, rng) for t in targets]
 
 
@@ -142,16 +212,22 @@ def settled(right, asked, items=ITEMS, need=PASS):
 
 
 def answer(state, choice):
-    """Record an answer (an option, or None for "I don't know") and move on."""
+    """Record an answer - an option, the tiles in the order tapped (grammar),
+    or None for "I don't know" - and move on."""
     item = current(state)
     if item is None:
         return state
-    ok = choice == item["answer"]
+    if state["skill"] == "grammar":
+        import grammar_build as gb
+        ok = choice is not None and gb.check(list(choice), item) == "correct"
+    else:
+        ok = choice == item["answer"]
     state["answers"].append(ok)
     state["log"].append({"level": state["level"], "word": item["word"], "ok": ok,
                          "dont_know": choice is None})
     right, asked = sum(state["answers"]), len(state["answers"])
-    outcome = settled(right, asked, len(state["items"]), min(PASS, len(state["items"])))
+    n, need = size(state["skill"])
+    outcome = settled(right, asked, len(state["items"]), min(need, len(state["items"])))
     if outcome == "pass":
         state["passed"] = state["level"]
         if state["level"] == hsk.LEVELS[-1]:

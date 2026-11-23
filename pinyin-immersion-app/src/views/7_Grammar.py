@@ -25,6 +25,7 @@ import db_manager as db
 import grammar_curriculum as gc
 import grammar_build as gb
 import grammar_drills as gd
+import hsk
 import hsk_grammar as hg
 import session_store as store
 import today_plan as tp
@@ -49,8 +50,9 @@ known, progress, _new_today, _levels = db.in_parallel(          # one wait, not 
     lambda: db.grammar_known_vocab(USER_ID), lambda: db.grammar_progress(USER_ID),
     lambda: db.grammar_new_today(USER_ID),
     lambda: db.get_hsk_levels(USER_ID) if HSK else None)
-# the HSK track: HSK 1's structures first, up to the level studied by ear
-HSK_UPTO = ((_levels or {}).get("listen") or 1) if HSK else None
+# the HSK track: HSK 1's structures first, up to the grammar level (or the
+# listening level before grammar was tested)
+HSK_UPTO = hsk.grammar_upto(_levels) if HSK else None
 order = hg.learning_order(HSK_UPTO) if HSK else gc.learning_order()
 queue = gd.todays_queue(order, progress, clock.today(), _new_today, GRAMMAR_NEW_PER_DAY)
 

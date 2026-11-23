@@ -3952,6 +3952,34 @@ def t_pl_flow():
     assert s["passed"] == 0 and _pl.study_level(0) == 1 and len(s["log"]) == 3
 
 
+@test("level test, grammar: official sentences as tiles, one grammar point each, 5 of 6")
+def t_pl_grammar():
+    for lv in _hsk.LEVELS:
+        pool = _pl.grammar_pool(lv)
+        assert len(pool) >= 40, (lv, len(pool))
+        assert all("".join(e["answer"]) + e["hanzi"][-1] == e["hanzi"] for e in pool)
+    s = _pl.new_test("grammar", seed=3)
+    it = _pl.current(s)
+    assert len(s["items"]) == _pl.GRAMMAR_ITEMS
+    assert len({i["point"] for i in s["items"]}) == _pl.GRAMMAR_ITEMS, "a different point each"
+    assert it["tiles"] != it["answer"] and sorted(it["tiles"]) == sorted(it["answer"])
+    assert all(it["pinyin"][w] for w in it["answer"]) and it["english"]
+    # knows HSK 1 grammar, not HSK 2
+    s = _pl.new_test("grammar", seed=1)
+    while (it := _pl.current(s)):
+        _pl.answer(s, it["answer"] if it["level"] == 1 else list(reversed(it["answer"])))
+    assert s["passed"] == 1 and _pl.score_by_level(s) == {1: (5, 5), 2: (0, 2)}, s["log"]
+    # one slip is allowed: 5 of 6
+    s = _pl.new_test("grammar", seed=2)
+    first = True
+    while (it := _pl.current(s)) and it["level"] == 1:
+        _pl.answer(s, None if first else it["answer"])
+        first = False
+    assert s["passed"] == 1
+    assert _hsk.grammar_upto(None) == 1 and _hsk.grammar_upto({"listen": 3, "read": 1}) == 3
+    assert _hsk.grammar_upto({"listen": 3, "read": 1, "grammar": 2}) == 2
+
+
 @test("HSK track: only the people named in config, and menus stay separate")
 def t_hsk_track():
     stub = "db_manager" not in sys.modules and not os.environ.get("DATABASE_URL")
@@ -3998,7 +4026,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_pl_items(); t_pl_flow(); t_hsk_track(); t_plan_hsk()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

@@ -324,8 +324,9 @@ def gather_state(user_id, also=(), hsk_track=False):
             import grammar_drills as gd
             if hsk_track:
                 import hsk_grammar as hg
-                order = hg.learning_order(((hsk_levels if ok(hsk_levels) else None)
-                                           or {}).get("listen") or 1)
+                import hsk
+                order = hg.learning_order(hsk.grammar_upto(hsk_levels if ok(hsk_levels)
+                                                           else None))
             else:
                 order = gc.learning_order()
             queue = gd.todays_queue(order, g_progress, today, g_new, GRAMMAR_NEW_PER_DAY)

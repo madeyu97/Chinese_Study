@@ -71,7 +71,7 @@ if "gr_sid" in S and not ("gr_stages" in S and S.gr_stage >= len(S.gr_stages)):
 with st.sidebar:
     sidebar_user_badge()
     tp.sidebar("grammar", reset_all)
-    st.metric("Well-studied words to build from", len(known))
+    st.metric("Words to build from", len(known))
     st.caption(f"{len(progress)} of {len(gc.STRUCTURES)} structures practised · "
                f"{len(queue)} ready today")
 

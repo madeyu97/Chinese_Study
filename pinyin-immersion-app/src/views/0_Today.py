@@ -12,13 +12,15 @@ import ahead
 import clock
 import db_manager as db
 import today_plan as tp
-from auth import require_login, sidebar_user_badge
+from auth import on_hsk_track, require_login, sidebar_user_badge
 from config import SESSION_GAP_HOURS
 
 st.set_page_config(page_title="Today", page_icon="🏠", layout="centered")
 USER = require_login()
 USER_ID = USER["id"]
 S = st.session_state
+HSK = on_hsk_track(USER)
+LEVEL_TEST_PAGE = "views/11_Level_test.py"
 
 with st.sidebar:
     sidebar_user_badge()
@@ -28,10 +30,24 @@ st.title("今天 Today")
 # Everything the page shows is read at the same time (the database is far
 # from the app, so each read in a row would be its own wait).
 with st.spinner("Working out today's sessions…"):
-    state, (pending, streak, week) = tp.gather_state(USER_ID, also=[
+    state, (pending, streak, week, *more) = tp.gather_state(USER_ID, also=[
         lambda: db.unseen_nudges(USER_ID),
         lambda: db.activity_streak(USER_ID),
-        lambda: db.study_minutes(USER_ID, 7)])
+        lambda: db.study_minutes(USER_ID, 7)]
+        + ([lambda: db.get_hsk_levels(USER_ID)] if HSK else []))
+levels = more[0] if more else None
+
+if HSK:
+    if levels:
+        st.caption(f"🎯 Studying **HSK {levels['listen']}** by ear · "
+                   f"**HSK {levels['read']}** in characters")
+    else:
+        with st.container(border=True):
+            st.markdown("🎯 **Find your HSK level first** — about five minutes. Grammar, "
+                        "reading and games then start at the right level.")
+            if st.button("Take the level test", type="primary", width="stretch",
+                         key="tp_level"):
+                st.switch_page(LEVEL_TEST_PAGE)
 
 # A nudge from the other person shows the moment you open the app.
 if pending:
@@ -55,7 +71,7 @@ if bits:
 cur = tp.plan()
 if cur:
     state["done"] = set(state["done"]) | {f"{cur['slot']}:{k}" for k in cur["done"] + cur["skipped"]}
-day = tp.build_day(state)
+day = tp.build_day(state, hsk_track=HSK)
 ahead.for_day(USER_ID, day)        # write later steps' grammar drills now, in the background
 nxt = tp.next_session(day)
 now = clock.now()
@@ -72,8 +88,12 @@ def step_line(n, s_):
     st.markdown(f"{mark} {s_['icon']} **{s_['title']}** — {detail}")
 
 
-st.caption("Two sessions a day. Splitting it is the point: the morning's new words come "
-           "back in the evening, hours later, when remembering them takes real effort.")
+if HSK:
+    st.caption("Two sessions a day. Splitting it is the point: what you learn in the morning "
+               "comes back in the evening, hours later, when remembering it takes real effort.")
+else:
+    st.caption("Two sessions a day. Splitting it is the point: the morning's new words come "
+               "back in the evening, hours later, when remembering them takes real effort.")
 
 for sess in day:
     head = f"{sess['icon']} **{sess['title']}** · {sess['theme']}"
@@ -134,5 +154,9 @@ st.caption("Picture games with your words — five minutes here beats five minut
            "and every round still links a word to its meaning.")
 if st.button("🎮 Play a game", width="stretch", key="tp_play"):
     st.switch_page(tp.GAMES_PAGE)
-st.caption("Want something specific? Words, grammar, reading and the rest are in the "
-           "**Library** in the menu.")
+if HSK:
+    st.caption("Want something specific? Writing, grammar and reading are under **Study** "
+               "in the menu.")
+else:
+    st.caption("Want something specific? Words, grammar, reading and the rest are in the "
+               "**Library** in the menu.")

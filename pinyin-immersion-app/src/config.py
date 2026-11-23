@@ -177,3 +177,11 @@ PLAN_SENTENCES_LISTEN = 4
 PLAN_SENTENCES_SPEAK = 4
 PLAN_RECAP_WORDS = 15            # evening: today's new and missed words, once more
 PLAN_READING_SENTENCES = 4
+
+
+# ======================================================================
+# HSK TRACK
+# ======================================================================
+# People on the HSK 1-4 app: Today · Write · Grammar · Read · Play.
+# Anyone else (Selina's deployment) keeps the original app, unchanged.
+HSK_TRACK_USERS = {"matt"}

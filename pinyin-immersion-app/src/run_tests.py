@@ -3500,6 +3500,19 @@ def t_plan_day():
     assert sum(s_["minutes"] for s_ in day) <= 62
 
 
+@test("plan, HSK track: grammar in the morning, writing and reading at night - writing from day one")
+def t_plan_hsk():
+    day = tplan.build_day(_plan_state(handwriting={"started": False, "due": 0, "new_room": 5,
+                                                   "new_available": 9}), hsk_track=True)
+    m, e = (_sess(day)[k] for k in ("morning", "evening"))
+    assert _keys(m) == ["grammar"], _keys(m)
+    assert _keys(e) == ["handwriting", "reading"], _keys(e)
+    assert e["steps"][0]["params"]["new"] == 3, "new characters offered before writing is started"
+    assert day[0]["why"] == tplan.HSK_SESSIONS["morning"][3]
+    # the original app is untouched
+    assert _keys(_sess(tplan.build_day(_plan_state()))["morning"]) == ["words", "tones", "grammar"]
+
+
 @test("plan: no handwriting yet means more listening at night; recap planned before the morning's words exist")
 def t_plan_evening():
     e = _sess(tplan.build_day(_plan_state(handwriting={"started": False, "due": 0, "new_room": 5,
@@ -3756,6 +3769,105 @@ def t_format_pinyin():
 
 
 # ======================================================================
+# ======================================================================
+# HSK 1-4 SYLLABUS AND LEVEL TEST
+# ======================================================================
+import hsk as _hsk
+import placement as _pl
+
+
+@test("HSK data: 2025 syllabus sizes for levels 1-4")
+def t_hsk_data():
+    c = _hsk.counts()
+    assert c["recognise"] == {1: 246, 2: 125, 3: 284, 4: 441}, c["recognise"]
+    assert c["write"] == {2: 100, 3: 150, 4: 150}, c["write"]
+    assert c["grammar"] == {1: 70, 2: 78, 3: 96, 4: 95}, c["grammar"]
+    assert 1950 <= sum(c["words"].values()) <= 2000, c["words"]
+    assert c["words"][1] == 300
+    assert len(_hsk.write_chars(2)) == 100 and len(_hsk.write_chars()) == 400
+    assert len(set(_hsk.write_chars())) == 400, "no character written twice"
+    assert _hsk.level_of("学校") == 1 and _hsk.word("学校")["pinyin"] == "xué xiào"
+    assert all(w["english"] for w in _hsk.words_upto(4)[:50])
+    assert sum(len(g["examples"]) for g in _hsk.grammar_points()) > 1000
+    # Malaysian Mandarin: Beijing 儿 words are left out unless asked for
+    assert "哪儿" not in {w["word"] for w in _hsk.words(1)}
+    assert "哪儿" in {w["word"] for w in _hsk.words(1, include_erhua=True)}
+    assert "女儿" in {w["word"] for w in _hsk.words(1)}
+    # grammar builds from the syllabus on the HSK track (vocabulary is in Anki)
+    k1 = _hsk.known_words("matt", None)
+    assert 280 <= len(k1) <= 300 and "学校" in k1 and "哪儿" not in k1
+    assert len(_hsk.known_words("matt", '{"listen": 3, "read": 1}')) > 900
+    assert _hsk.known_words("selina", {"listen": 3}) == [] and _hsk.known_words(None, None) == []
+
+
+@test("level test: fair options - four distinct meanings, none that could also be right")
+def t_pl_items():
+    import random as _r
+    rng = _r.Random(7)
+    for lv in _hsk.LEVELS:
+        pool = _pl._pool(lv)
+        for target in rng.sample(pool, 40):
+            item = _pl.make_item(target, pool, rng)
+            assert len(set(item["options"])) == _pl.OPTIONS, item
+            assert item["answer"] in item["options"]
+            others = [o for o in item["options"] if o != item["answer"]]
+            assert not any(_pl._clash({"english": o}, {"english": item["answer"]})
+                           for o in others), item
+            assert not any("\u4e00" <= ch <= "\u9fff" for o in item["options"] for ch in o), \
+                "no Chinese hints in the meanings"
+    assert _pl._clash({"english": "some / somewhat"}, {"english": "some / a few"})
+    assert _pl.show("to drive a car (Malaysia: 驾车 jià chē)") == "to drive a car"
+
+
+@test("level test: stops as soon as a level is settled, at the first level not passed")
+def t_pl_flow():
+    assert _pl.settled(8, 8) == "pass" and _pl.settled(7, 10) == "fail"
+    assert _pl.settled(5, 7) is None and _pl.settled(7, 9) is None
+    assert _pl.settled(6, 9) == "fail", "3 wrong of 10: 8 can't be reached"
+    # knows HSK 1 and 2, not 3
+    s = _pl.new_test("read", seed=1)
+    asked = 0
+    while (it := _pl.current(s)):
+        asked += 1
+        _pl.answer(s, it["answer"] if it["level"] <= 2 else None)
+    assert s["done"] and s["passed"] == 2 and _pl.study_level(2) == 3
+    assert asked == 8 + 8 + 3, asked
+    assert _pl.score_by_level(s) == {1: (8, 8), 2: (8, 8), 3: (0, 3)}
+    # same seed, same questions
+    a, b = _pl.new_test("listen", seed=5), _pl.new_test("listen", seed=5)
+    assert _pl.current(a) == _pl.current(b)
+    # everything right: all four levels, and HSK 4 is the most it suggests
+    s = _pl.new_test("listen", seed=2)
+    while (it := _pl.current(s)):
+        _pl.answer(s, it["answer"])
+    assert s["passed"] == 4 and _pl.study_level(4) == 4
+    # nothing known
+    s = _pl.new_test("listen", seed=3)
+    while (it := _pl.current(s)):
+        _pl.answer(s, None)
+    assert s["passed"] == 0 and _pl.study_level(0) == 1 and len(s["log"]) == 3
+
+
+@test("HSK track: only the people named in config, and menus stay separate")
+def t_hsk_track():
+    stub = "db_manager" not in sys.modules and not os.environ.get("DATABASE_URL")
+    if stub:                     # auth imports the database module; no database here
+        sys.modules["db_manager"] = MagicMock()
+    try:
+        import auth as _auth
+    finally:
+        if stub:
+            del sys.modules["db_manager"]
+    from config import HSK_TRACK_USERS
+    assert HSK_TRACK_USERS == {"matt"}
+    assert _auth.on_hsk_track({"id": 1, "username": "Matt"})
+    assert not _auth.on_hsk_track({"id": 2, "username": "selina"})
+    src = open(os.path.join(os.path.dirname(__file__), "main_app.py"), encoding="utf-8").read()
+    assert "HSK_PAGES if on_hsk_track() else PAGES" in src
+    for page in ("0_Today", "8_Games", "2_Handwriting", "7_Grammar", "6_Reading", "11_Level_test"):
+        assert os.path.exists(os.path.join(os.path.dirname(__file__), "views", page + ".py"))
+
+
 if __name__ == "__main__":
     print("Dictionary engine:")
     t_pinyin(); t_numerals(); t_numeral_gloss(); t_classifier()
@@ -3781,6 +3893,8 @@ if __name__ == "__main__":
     t_plan_day(); t_plan_evening(); t_plan_progress(); t_plan_opens(); t_plan_gates(); t_clock()
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
+    print("HSK 1-4:")
+    t_hsk_data(); t_pl_items(); t_pl_flow(); t_hsk_track(); t_plan_hsk()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

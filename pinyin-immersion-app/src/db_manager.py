@@ -422,6 +422,9 @@ def _build_schema():
     # 'frequency' - the 500 most common characters, in frequency order
     cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
                    "handwriting_source TEXT DEFAULT 'vocab'")
+    # HSK track: the level to study at, per skill - {"listen": 2, "read": 1,
+    # "by": "test" | "you", "at": ISO time}. NULL until a level test or a choice.
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS hsk_levels JSONB")
     # Vocabulary CONTENT is shared by everyone studying on this deployment.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vocab (
@@ -611,6 +614,17 @@ def _build_schema():
         )
     ''')
     cursor.execute("DROP TABLE IF EXISTS game_state")      # replaced by saved_sessions
+    # every level test taken, for the history on the level-test page
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS placement_results (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            skill TEXT NOT NULL,
+            passed INTEGER NOT NULL,
+            detail JSONB,
+            taken_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_scores (
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -903,6 +917,51 @@ def set_handwriting_source(user_id, source):
                    (source, user_id))
     conn.commit()
     conn.close()
+
+
+def get_hsk_levels(user_id):
+    """{"listen": n, "read": n, "by": ..., "at": ...} or None if never set."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT hsk_levels FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    value = row[0] if row else None
+    if isinstance(value, str):
+        value = json.loads(value)
+    return value or None
+
+
+def set_hsk_levels(user_id, listen, read, by):
+    value = {"listen": int(listen), "read": int(read), "by": by,
+             "at": clock.now().isoformat(timespec="minutes")}
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET hsk_levels = %s WHERE id = %s",
+                   (json.dumps(value), user_id))
+    conn.commit()
+    conn.close()
+    return value
+
+
+def save_placement(user_id, skill, passed, detail):
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO placement_results (user_id, skill, passed, detail) "
+                   "VALUES (%s, %s, %s, %s)",
+                   (user_id, skill, int(passed), json.dumps(detail, ensure_ascii=False)))
+    conn.commit()
+    conn.close()
+
+
+def placement_history(user_id, limit=10):
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT skill, passed, taken_at FROM placement_results "
+                   "WHERE user_id = %s ORDER BY taken_at DESC LIMIT %s", (user_id, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
 
 
 def get_session_mode(user_id):
@@ -3177,8 +3236,11 @@ def grammar_known_vocab(user_id):
     if len(words) < GRAMMAR_KNOWN_FLOOR:
         cursor.execute(query, (user_id, 1, 0, GRAMMAR_VOCAB_CAP))
         words = [r[0] for r in cursor.fetchall()]
+    cursor.execute("SELECT username, hsk_levels FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
     conn.close()
-    return list(dict.fromkeys(words))
+    import hsk
+    return list(dict.fromkeys(words + hsk.known_words(*(row or (None, None)))))
 
 
 def grammar_china_pairs():

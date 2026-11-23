@@ -3872,6 +3872,38 @@ def t_hsk_grammar():
     assert hg.sentence_pinyin("第一课") == "dì yī kè" and hg.sentence_pinyin("一个") == "yí gè"
 
 
+@test("grammar Build stage: tiles rebuild the sentence, grammar words on their own tiles")
+def t_gr_build():
+    import grammar_build as gb
+    t = lambda sent, sid: gb.tiles_of(sent, gcur.get(sid).markers)   # noqa: E731
+    assert t("他把门关上了。", "ba_basic") == ["他", "把", "门", "关上", "了"]
+    assert t("我们明天在家看书。", "time_place_order") == ["我们", "明天", "在", "家", "看书"]
+    assert t("我从来没去过日本。", "conglai_mei") == ["我", "从来", "没", "去", "过", "日本"]
+    assert t("这家店不错，不过有点贵。", "buguo")[2:4] == ["不错", "不过"], "real words stay whole"
+    assert t("好。", "word_order") is None, "too short to be a puzzle"
+    for sent in ("我昨天在巴刹买的那个大榴莲很好吃。", "他一边吃饭一边看手机。"):
+        tl = gb.tiles_of(sent)
+        assert tl is None or (gb.MIN_TILES <= len(tl) <= gb.MAX_TILES
+                              and "".join(tl) == gb.core(sent))
+    payload = {"identify": [
+        {"hanzi": "今天我去巴刹买菜。", "pinyin": "jīn tiān wǒ qù bā shā mǎi cài",
+         "english": "I'm going to the market today."},
+        {"hanzi": "我们都去。", "english": "We're all going."},          # no time word
+        {"hanzi": "今天我去巴刹买菜。", "english": "repeat"}]}
+    items = gb.items(payload, gcur.get("dou_all"))
+    assert [i["hanzi"] for i in items] == ["我们都去。"], "only sentences that use the structure"
+    items = gb.items(payload, gcur.get("time_before_verb"))
+    assert len(items) == 2, "repeats left out"
+    it = items[0]
+    assert it["tiles"] != it["answer"] and sorted(it["tiles"]) == sorted(it["answer"])
+    assert gb.items(payload, gcur.get("time_before_verb"))[0]["tiles"] == it["tiles"], "stable"
+    a = it["answer"]
+    assert gb.check(a, it) == "correct"
+    assert gb.check([a[1], a[0]] + a[2:], it) == "correct", "我今天… is as right as 今天我…"
+    assert gb.check(list(reversed(a)), it) == "wrong"
+    assert gdr.POINTS["correct"] == 1.0 and gdr.POINTS["wrong"] == 0.0
+
+
 @test("level test: fair options - four distinct meanings, none that could also be right")
 def t_pl_items():
     import random as _r
@@ -3966,7 +3998,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_pl_items(); t_pl_flow(); t_hsk_track(); t_plan_hsk()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_pl_items(); t_pl_flow(); t_hsk_track(); t_plan_hsk()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

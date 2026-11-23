@@ -89,6 +89,32 @@ def write_band(ch):
 
 
 @functools.lru_cache(maxsize=1)
+def write_order():
+    """The 400 characters to write in teaching order: band 2 (HSK 1-2), then
+    3, then 4; within a band, parts before the characters built from them
+    (女 before 好), commonest first. Each: char, band, order, strokes, the HSK
+    word that cues it (cue_word / cue_pinyin / cue_english) and builds_on,
+    the earlier characters it is made from."""
+    return [{"char": r["char"], "band": int(r["band"]), "order": int(r["order"]),
+             "strokes": int(r["strokes"]) if r["strokes"] else None,
+             "cue_word": r["cue_word"], "cue_pinyin": r["cue_pinyin"],
+             "cue_english": r["cue_english"], "builds_on": r["builds_on"]}
+            for r in _read("write_order.csv")]
+
+
+@functools.lru_cache(maxsize=1)
+def _write_info():
+    return {r["char"]: r for r in write_order()}
+
+
+def write_info(ch):
+    return _write_info().get(ch)
+
+
+BAND_NAMES = {2: "HSK 1–2", 3: "HSK 3", 4: "HSK 4"}
+
+
+@functools.lru_cache(maxsize=1)
 def _grammar():
     examples = {}
     for r in _read("grammar_examples.csv"):

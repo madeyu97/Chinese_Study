@@ -1,0 +1,401 @@
+char,band,order,strokes,cue_word,cue_pinyin,cue_english,builds_on
+的,2,1,8,有的,yǒu de,(there are) some (who are...) / some (exist),
+一,2,2,1,一下,yí xià,(after a verb) briefly / a bit,
+不,2,3,4,不要,bú yào,don't / don't want,
+了,2,4,2,了,le,(particle) completed action or change of state (Malaysian: often said 'liao'),
+在,2,5,6,现在,xiàn zài,now / at present,
+人,2,6,2,家人,jiā rén,household / (one's) family,
+我,2,7,7,我们,wǒ men,we / us,
+个,2,8,3,这个,zhè ge,this / this one,人
+们,2,9,5,我们,wǒ men,we / us,
+来,2,10,7,来,lái,to come,
+上,2,11,3,上学,shàng xué,to go to school / to attend school,一
+大,2,12,3,大家,dà jiā,everyone / influential family,人一
+为,2,13,4,因为,yīn wèi,because / owing to,
+国,2,14,8,中国,zhōng guó,China,
+以,2,15,4,可以,kě yǐ,can / may,人
+说,2,16,9,说话,shuō huà,to speak / to say,
+会,2,17,6,会,huì,can (know how to) / will,人
+也,2,18,3,也,yě,also / too,
+他,2,19,5,他们,tā men,they,也
+地,2,20,6,地铁,dì tiě,subway / metro,也
+你,2,21,7,你们,nǐ men,you (plural),
+对,2,22,5,对,duì,right / correct,
+生,2,23,5,学生,xué shēng,student / schoolchild,
+子,2,24,3,儿子,ér zi,son,了一
+那,2,25,6,那个,nà ge,that one / that thing,
+下,2,26,3,一下,yí xià,(after a verb) briefly / a bit,一
+年,2,27,6,去年,qù nián,last year,
+过,2,28,6,过来,guò lái,to come over / to manage,
+后,2,29,6,后,hòu,after / behind,
+作,2,30,7,工作,gōng zuò,to work / job,
+家,2,31,10,家人,jiā rén,household / (one's) family,
+多,2,32,6,多少,duō shao,how much? / how many?,
+么,2,33,3,什么,shén me,what? / something,
+去,2,34,5,去年,qù nián,last year,
+学,2,35,8,中学,zhōng xué,middle school,子
+同,2,36,6,同学,tóng xué,to study at the same school / fellow student,
+现,2,37,8,现在,xiàn zài,now / at present,
+没,2,38,7,没有,méi yǒu,don't have / there isn't,
+天,2,39,4,明天,míng tiān,tomorrow,一大
+还,2,40,7,还,hái,still / also,不
+长,2,41,4,长,cháng,long / length,一
+十,2,42,2,十,shí,ten / 10,一
+工,2,43,3,工作,gōng zuò,to work / job,一
+点,2,44,9,点,diǎn,o'clock / dot,
+两,2,45,7,两,liǎng,two (before a measure word) / both,一
+很,2,46,9,很,hěn,(adverb of degree) / quite,
+文,2,47,4,中文,zhōng wén,Chinese language,
+这,2,48,7,这个,zhè ge,this / this one,文
+什,2,49,4,什么,shén me,what? / something,十
+二,2,50,2,二,èr,two / 2,一
+三,2,51,3,三,sān,three / 3,一二
+月,2,52,4,月,yuè,month / moon,二
+有,2,53,6,有的,yǒu de,(there are) some (who are...) / some (exist),月
+儿,2,54,2,儿子,ér zi,son,
+比,2,55,4,比,bǐ,than / to compare,
+几,2,56,2,几,jǐ,how many / a few,
+口,2,57,3,口,kǒu,"mouth / (measure word for family members, bites)",
+中,2,58,4,中国,zhōng guó,China,口
+和,2,59,8,和,hé,and / together with,口
+可,2,60,5,可以,kě yǐ,can / may,口
+日,2,61,4,日,rì,day / sun,口一
+是,2,62,9,是,shì,to be / is,日
+时,2,63,7,小时,xiǎo shí,hour,日
+间,2,64,7,时间,shí jiān,time / period,日
+名,2,65,6,名字,míng zi,name (of a person or thing),口
+打,2,66,5,打电话,dǎ diàn huà,to make a telephone call,
+女,2,67,3,女儿,nǚ ér,daughter,
+要,2,68,9,不要,bú yào,don't / don't want,女
+好,2,69,6,你好,nǐ hǎo,hello / hi,女子
+她,2,70,6,她们,tā men,they / them (for females),女也
+四,2,71,5,四,sì,four / 4,儿
+五,2,72,4,五,wǔ,five / 5,一
+书,2,73,4,读书,dú shū,to read a book / to study,
+边,2,74,5,这边,zhè biān,this side / here,
+今,2,75,4,今年,jīn nián,this year,
+叫,2,76,5,叫,jiào,to call / to be called,口
+字,2,77,6,名字,míng zi,name (of a person or thing),子
+爱,2,78,10,爱,ài,to love / to be fond of,
+百,2,79,6,百,bǎi,hundred,一
+九,2,80,2,九,jiǔ,nine / 9,
+写,2,81,5,写,xiě,to write,
+八,2,82,2,八,bā,eight / 8,
+分,2,83,4,分钟,fēn zhōng,minute,八
+小,2,84,3,小时,xiǎo shí,hour,八
+少,2,85,4,多少,duō shao,how much? / how many?,小
+吗,2,86,6,吗,ma,(question particle for yes-no questions),口
+六,2,87,4,六,liù,six / 6,八
+语,2,88,9,汉语,hàn yǔ,Chinese language,
+半,2,89,5,一半,yí bàn,half,
+七,2,90,2,七,qī,seven / 7,一
+男,2,91,7,男,nán,male / man,
+习,2,92,3,学习,xué xí,to learn / to study,
+汉,2,93,5,汉字,hàn zì,Chinese character(s),
+妈,2,94,6,妈妈,mā ma,mama / mommy,女
+岁,2,95,6,岁,suì,years old,
+哥,2,96,10,哥哥,gē ge,older brother,可
+姐,2,97,8,姐姐,jiě jie,older sister,女
+午,2,98,4,中午,zhōng wǔ,noon / midday,
+爸,2,99,8,爸爸,bà ba,(informal) father,
+茶,2,100,9,茶,chá,tea / tea plant,
+而,3,101,6,而且,ér qiě,(not only ...) but also / moreover,
+用,3,102,5,不用,bú yòng,no need / don't have to,
+行,3,103,6,不行,bù xíng,no way / not OK,
+种,3,104,9,种,zhǒng,kind / type (measure word),中
+成,3,105,6,变成,biàn chéng,to change into / to turn into,
+方,3,106,4,地方,dì fang,area / place,
+法,3,107,8,方法,fāng fǎ,method / way,去
+如,3,108,6,如果,rú guǒ,if / in case,女口
+当,3,109,6,当然,dāng rán,of course,
+定,3,110,8,一定,yí dìng,surely / certainly,
+其,3,111,8,其他,qí tā,other,
+主,3,112,5,主要,zhǔ yào,main / principal,
+心,3,113,4,心里,xīn lǐ,in one's heart / in one's mind,
+实,3,114,8,其实,qí shí,actually,
+者,3,115,8,或者,huò zhě,or / possibly,日
+力,3,116,2,努力,nǔ lì,great effort / to strive,
+把,3,117,7,把,bǎ,(marks the object before the verb),
+全,3,118,6,安全,ān quán,safe / secure,人
+又,3,119,2,又,yòu,(once) again / also,
+发,3,120,5,出发,chū fā,to set off / to start (on a journey),又
+业,3,121,5,作业,zuò yè,school assignment / homework,一
+重,3,122,9,重要,zhòng yào,important,
+物,3,123,8,动物,dòng wù,animal,
+应,3,124,7,应该,yīng gāi,should / probably,
+向,3,125,6,方向,fāng xiàng,direction / orientation,口
+被,3,126,10,被,bèi,(passive marker) by,
+或,3,127,8,或者,huò zhě,or / possibly,一
+加,3,128,5,参加,cān jiā,to take part in / to attend,力口
+合,3,129,6,合适,hé shì,suitable / fitting,口
+特,3,130,10,特别,tè bié,especially / special,
+化,3,131,4,文化,wén huà,culture / civilization,
+海,3,132,10,海,hǎi,sea / ocean,
+声,3,133,7,声音,shēng yīn,voice / sound,
+处,3,134,5,到处,dào chù,everywhere,
+活,3,135,9,生活,shēng huó,life / activity,
+更,3,136,7,更,gèng,more / even more,一
+变,3,137,8,变成,biàn chéng,to change into / to turn into,又
+总,3,138,9,总是,zǒng shì,always,心
+安,3,139,6,安全,ān quán,safe / secure,女
+报,3,140,7,报纸,bào zhǐ,newspaper / newsprint,
+才,3,141,3,刚才,gāng cái,just now / a moment ago,
+结,3,142,9,结婚,jié hūn,to marry / to get married,
+受,3,143,8,受到,shòu dào,to receive / to be subjected to,又
+目,3,144,5,节目,jié mù,program / item (on a program),口二
+相,3,145,9,相机,xiàng jī,camera,目
+务,3,146,5,服务,fú wù,to serve / service,力
+必,3,147,5,必须,bì xū,must / have to,心
+直,3,148,8,一直,yì zhí,always / continuously,十
+山,3,149,3,山,shān,mountain / hill,
+区,3,150,4,小区,xiǎo qū,housing estate / community,
+空,3,151,8,空调,kōng tiáo,air conditioning,工
+马,3,152,3,马上,mǎ shàng,at once / right away,一
+放,3,153,8,放学,fàng xué,to dismiss students at the end of the school day,方
+难,3,154,10,难过,nán guò,to feel sad / to feel unwell,又
+且,3,155,5,而且,ér qiě,(not only ...) but also / moreover,月一
+南,3,156,9,南方,nán fāng,south / the southern part of the country,十
+求,3,157,7,要求,yāo qiú,to ask / to demand,
+北,3,158,5,北方,běi fāng,north / the northern part a country,
+张,3,159,7,张,zhāng,to open,长
+该,3,160,8,应该,yīng gāi,should / probably,
+共,3,161,6,一共,yí gòng,altogether,八
+带,3,162,9,带,dài,to bring / to take along,
+风,3,163,4,风,fēng,wind,几
+收,3,164,6,收到,shōu dào,to receive,
+干,3,165,3,干净,gān jìng,clean / neat,一十
+于,3,166,3,关于,guān yú,about / concerning,干
+平,3,167,5,平时,píng shí,ordinarily / in normal times,干
+言,3,168,7,语言,yǔ yán,language,
+信,3,169,9,相信,xiāng xìn,to believe / to trust,言
+办,3,170,4,办法,bàn fǎ,means / method,力八
+单,3,171,8,名单,míng dān,list of names,
+调,3,172,10,空调,kōng tiáo,air conditioning,
+城,3,173,9,城市,chéng shì,city / town,成
+级,3,174,6,年级,nián jí,"grade / year (in school, college etc)",
+复,3,175,9,复习,fù xí,to review / revision,
+片,3,176,4,照片,zhào piàn,photograph / picture,
+查,3,177,9,检查,jiǎn chá,inspection / to examine,
+轻,3,178,9,年轻,nián qīng,young,
+除,3,179,9,除了,chú le,besides / apart from (... also...),
+李,3,180,7,行李,xíng li,luggage,子
+选,3,181,9,选择,xuǎn zé,to choose / choice,
+响,3,182,9,影响,yǐng xiǎng,influence / effect,口向
+参,3,183,8,参加,cān jiā,to take part in / to attend,
+节,3,184,5,过节,guò jié,to celebrate a festival,
+护,3,185,7,护照,hù zhào,passport,
+音,3,186,9,声音,shēng yīn,voice / sound,日
+讲,3,187,6,讲,jiǎng,to speak / to explain,
+答,3,188,12,回答,huí dá,to reply / to answer,合
+段,3,189,9,段,duàn,section / passage,
+故,3,190,9,故事,gù shi,narrative / story,
+河,3,191,8,河,hé,river,可
+助,3,192,7,帮助,bāng zhù,assistance / aid,且力
+育,3,193,8,体育,tǐ yù,sports / physical education,月
+刻,3,194,8,刻,kè,quarter (hour) / moment,
+刚,3,195,6,刚才,gāng cái,just now / a moment ago,
+毛,3,196,4,毛,máo,hair / fur,
+般,3,197,10,一般,yì bān,ordinary / usually,
+怕,3,198,8,害怕,hài pà,to be afraid / to be scared,
+假,3,199,11,假期,jià qī,vacation,
+久,3,200,3,不久,bù jiǔ,not long (after) / before too long,
+阳,3,201,6,太阳,tài yáng,sun,日
+急,3,202,9,着急,zháo jí,to worry / to feel anxious,心
+适,3,203,9,合适,hé shì,suitable / fitting,
+树,3,204,9,树,shù,tree,对
+层,3,205,7,层,céng,floor / storey,
+句,3,206,5,句子,jù zi,sentence,口
+卡,3,207,5,卡,kǎ,card / to get stuck,上
+角,3,208,7,角,jiǎo,corner / angle,用
+香,3,209,9,香蕉,xiāng jiāo,banana,日
+草,3,210,9,草地,cǎo dì,lawn / meadow,
+换,3,211,10,换,huàn,to change / to exchange,
+耳,3,212,6,耳机,ěr jī,headphones / earphones,二
+闻,3,213,9,新闻,xīn wén,news,耳
+春,3,214,9,春天,chūn tiān,spring (season),日
+礼,3,215,5,礼物,lǐ wù,gift / present,
+板,3,216,8,黑板,hēi bǎn,blackboard,
+借,3,217,10,借,jiè,to lend / to borrow,
+牙,3,218,4,牙刷,yá shuā,toothbrush,
+练,3,219,8,练习,liàn xí,to practice / exercise,
+纸,3,220,7,报纸,bào zhǐ,newspaper / newsprint,
+典,3,221,8,字典,zì diǎn,dictionary,八
+冰,3,222,6,冰箱,bīng xiāng,refrigerator / fridge,
+努,3,223,7,努力,nǔ lì,great effort / to strive,力
+灯,3,224,6,灯,dēng,lamp / light,
+夏,3,225,10,夏天,xià tiān,summer,
+页,3,226,6,页,yè,page,
+须,3,227,9,必须,bì xū,must / have to,页
+秋,3,228,9,秋天,qiū tiān,autumn,
+汽,3,229,7,汽车,qì chē,car / automobile,
+哭,3,230,10,哭,kū,to cry / to weep,
+咱,3,231,9,咱们,zán men,we / us (including the listener),口
+羊,3,232,6,羊,yáng,sheep / goat,
+差,3,233,9,差,chà,bad / poor quality,羊工
+养,3,234,9,养,yǎng,"to raise (children, animals) / to keep (a pet)",羊八
+净,3,235,8,干净,gān jìng,clean / neat,
+冬,3,236,5,冬天,dōng tiān,winter,
+图,3,237,8,地图,dì tú,map,冬
+挺,3,238,9,挺,tǐng,quite / rather,
+饮,3,239,7,饮料,yǐn liào,drink / beverage,
+凉,3,240,10,凉快,liáng kuai,nice and cold / pleasantly cool,
+丢,3,241,6,丢,diū,to lose / to put aside,
+瓶,3,242,10,瓶子,píng zi,bottle,
+瓜,3,243,5,西瓜,xī guā,watermelon,
+斤,3,244,4,公斤,gōng jīn,kilogram (kg),
+胖,3,245,9,胖,pàng,fat / plump,月半
+渴,3,246,12,渴,kě,thirsty,
+饱,3,247,8,饱,bǎo,full (after eating),
+伞,3,248,6,伞,sǎn,umbrella / parasol,人
+勺,3,249,3,勺子,sháo zi,scoop / ladle,
+饺,3,250,9,饺子,jiǎo zi,dumpling / pot-sticker,
+之,4,251,3,之中,zhī zhōng,inside / among,
+部,4,252,10,部分,bù fen,part / section,
+无,4,253,4,无法,wú fǎ,unable to / no way to,一
+与,4,254,3,与,yǔ,and / with,一
+民,4,255,5,民族,mín zú,nationality / ethnic group,
+使,4,256,8,使用,shǐ yòng,to use / to employ,
+性,4,257,8,性别,xìng bié,gender / sex,生
+将,4,258,9,将来,jiāng lái,in the future / future,
+由,4,259,5,由于,yóu yú,due to / as a result of,
+并,4,260,6,并且,bìng qiě,and / besides,
+美,4,261,9,美好,měi hǎo,wonderful / fine,羊大
+利,4,262,7,流利,liú lì,fluent,
+内,4,263,4,以内,yǐn èi,within / less than,人
+度,4,264,9,态度,tài dù,manner / bearing,又
+任,4,265,6,任何,rèn hé,any / whatever,
+通,4,266,10,通过,tōng guò,"to pass through / to pass (an exam, an inspection)",
+及,4,267,3,及时,jí shí,in time / promptly,
+论,4,268,6,不论,bú lùn,"whatever / no matter what (who, how etc)",
+各,4,269,6,各个,gè gè,every / various,口
+入,4,270,2,入学,rù xué,to enter a school or college / to go to school for the first time as a child,人
+反,4,271,4,反对,fǎn duì,to fight against / to oppose,又
+量,4,272,12,大量,dà liàng,great amount / large quantity,日
+建,4,273,8,建议,jiàn yì,to suggest / suggestion,
+计,4,274,4,计划,jì huà,plan / project,十
+管,4,275,14,不管,bù guǎn,not to be concerned / regardless of,
+资,4,276,10,工资,gōng zī,wages / pay,
+金,4,277,8,现金,xiàn jīn,cash,全
+指,4,278,9,指出,zhǐ chū,to indicate / to point out,
+克,4,279,7,千克,qiān kè,kilogram,儿
+许,4,280,6,也许,yě xǔ,perhaps / maybe,午
+保,4,281,9,保证,bǎo zhèng,to promise / to guarantee,
+队,4,282,4,队长,duì zhǎng,captain / team leader,人
+科,4,283,9,科学,kē xué,science / scientific knowledge,
+达,4,284,6,达到,dá dào,to reach / to achieve,大
+强,4,285,12,加强,jiā qiáng,to reinforce / to strengthen,
+象,4,286,11,印象,yìn xiàng,impression,
+式,4,287,6,方式,fāng shì,way / manner,工
+品,4,288,9,作品,zuò pǐn,work (of art) / opus,口
+程,4,289,12,过程,guò chéng,course of events / process,
+取,4,290,8,取得,qǔ dé,to acquire / to get,耳又
+拉,4,291,8,拉,lā,to pull,
+术,4,292,5,技术,jì shù,technology / technique,
+确,4,293,12,确实,què shí,indeed / really,角
+观,4,294,6,观看,guān kàn,to watch / to view,又
+导,4,295,6,导游,dǎo yóu,tour guide / guidebook,
+改,4,296,7,改变,gǎi biàn,to change / to alter,
+联,4,297,12,联系,lián xì,to contact / connection,耳
+组,4,298,8,小组,xiǎo zǔ,group,且
+济,4,299,9,经济,jīng jì,economy / economic,
+台,4,300,5,台,tái,(measure word for machines) / platform,口
+流,4,301,10,流行,liú xíng,(of a contagious disease etc) to spread / to propagate,
+连,4,302,7,连,lián,even / to connect,
+深,4,303,11,深,shēn,deep / dark (colour),
+亚,4,304,6,亚洲,yà zhōu,Asia,一业
+约,4,305,6,大约,dà yuē,approximately / probably,勺
+示,4,306,5,表示,biǎo shì,to express / to show,二小
+际,4,307,7,国际,guó jì,international,示
+究,4,308,7,研究,yán jiū,research / to study,九
+线,4,309,8,线上,xiàn shàng,online,
+断,4,310,11,不断,bú duàn,unceasing / uninterrupted,斤
+支,4,311,4,支持,zhī chí,to support,十又
+技,4,312,7,科技,kē jì,science and technology,支
+研,4,313,9,研究,yán jiū,research / to study,
+农,4,314,6,农村,nóng cūn,rural area / village,
+装,4,315,12,装,zhuāng,adornment / to adorn,
+标,4,316,9,目标,mù biāo,target / goal,示
+谈,4,317,10,谈,tán,to talk,
+专,4,318,4,专业,zhuān yè,specialty / specialized field,
+转,4,319,8,转发,zhuǎn fā,"to transmit / to forward (mail, SMS, packets of data)",专
+另,4,320,5,另外,lìng wài,in addition / another,口力
+青,4,321,8,青年,qīng nián,youth / youthful years,月
+随,4,322,11,随着,suí zhe,along with / in the wake of,
+推,4,323,11,推出,tuī chū,to push out / to release,
+众,4,324,6,听众,tīng zhòng,audience / listeners,人
+土,4,325,3,土,tǔ,earth / dust,十一
+至,4,326,6,至少,zhì shǎo,at least,土
+社,4,327,7,社会,shè huì,society,土
+基,4,328,11,基本,jī běn,basic / fundamental,其土
+增,4,329,15,增长,zēng zhǎng,to grow / to increase,土
+划,4,330,6,计划,jì huà,plan / project,
+态,4,331,8,态度,tài dù,manner / bearing,心
+验,4,332,10,经验,jīng yàn,experience / to experience,马
+够,4,333,11,不够,bú gòu,not enough / insufficient,句多
+章,4,334,11,文章,wén zhāng,article / essay,
+志,4,335,7,杂志,zá zhì,magazine,心
+巴,4,336,4,大巴,dà bā,(coll.) large bus / coach,
+例,4,337,8,例子,lì zi,case / (for) instance,
+京,4,338,8,京剧,jīng jù,Beijing opera,小
+江,4,339,6,江,jiāng,river / (bound form) Yangtze River,工
+举,4,340,9,举行,jǔ xíng,"to hold (a meeting, ceremony etc)",
+父,4,341,4,父子,fù zǐ,father and son,八
+低,4,342,7,低于,dī yú,to be lower than,
+止,4,343,4,停止,tíng zhǐ,to stop / to halt,
+此,4,344,6,因此,yīn cǐ,thus / consequently,止
+倒,4,345,10,倒,dào,to fall over / to collapse,
+否,4,346,7,是否,shì fǒu,whether,不口
+普,4,347,12,普通,pǔ tōng,common / ordinary,日
+印,4,348,5,打印,dǎ yìn,to affix a seal / to stamp,
+血,4,349,6,血,xiě,blood / colloquial pr.,
+夜,4,350,8,夜晚,yè wǎn,night,
+省,4,351,9,省,shěng,to save / province,少目
+食,4,352,9,食物,shí wù,food,
+排,4,353,11,安排,ān pái,to arrange / to plan,
+云,4,354,4,云,yún,cloud,二
+停,4,355,11,停车,tíng chē,to pull up (stop one's vehicle) / to park,
+村,4,356,7,农村,nóng cūn,rural area / village,
+痛,4,357,12,头痛,tóu tòng,to have a headache,
+份,4,358,6,月份,yuè fèn,month,
+背,4,359,9,背包,bēi bāo,knapsack / rucksack,北月
+敢,4,360,11,勇敢,yǒng gǎn,brave / courageous,
+讨,4,361,5,讨论,tǎo lùn,to discuss / to talk over,
+永,4,362,5,永远,yǒng yuǎn,forever / eternal,
+味,4,363,8,味道,wèi dào,flavor / smell,口
+掉,4,364,11,掉,diào,to fall / to drop,
+误,4,365,9,误会,wù huì,to misunderstand / to mistake,
+温,4,366,12,高温,gāo wēn,high temperature,
+困,4,367,7,困难,kùn nan,difficult / challenging,
+忽,4,368,8,忽然,hū rán,suddenly / all of a sudden,心
+顺,4,369,9,顺利,shùn lì,smoothly / without a hitch,页
+输,4,370,13,输,shū,to lose / to transport,
+油,4,371,8,加油,jiā yóu,come on! / go for it!,由
+厂,4,372,2,工厂,gōng chǎng,factory,
+产,4,373,6,产生,chǎn shēng,to arise / to come into being,厂
+原,4,374,10,原来,yuán lái,so it turns out / original,厂
+广,4,375,3,广告,guǎng gào,to advertise / a commercial,厂
+压,4,376,6,压力,yā lì,pressure,厂
+座,4,377,10,座位,zuò wèi,seat,广
+庭,4,378,9,家庭,jiā tíng,family / household,广
+堂,4,379,11,食堂,shí táng,dining hall / cafeteria,土
+篇,4,380,15,篇,piān,sheet / piece of writing,
+熟,4,381,15,熟悉,shú xi,to be familiar with / to know well,
+弄,4,382,7,弄,nòng,to do / to manage,
+刀,4,383,2,刀,dāo,knife / blade,
+虎,4,384,8,老虎,lǎo hǔ,tiger,几
+兄,4,385,5,兄弟,xiōng dì,brother / buddy,口儿
+况,4,386,7,情况,qíng kuàng,circumstances / state of affairs,兄
+套,4,387,10,外套,wài tào,coat / jacket,大
+麻,4,388,11,麻烦,má fan,inconvenient / troublesome,广
+抱,4,389,8,抱歉,bào qiàn,sorry,
+喊,4,390,12,喊,hǎn,to yell / to shout,口
+挂,4,391,9,挂,guà,to hang,
+烦,4,392,10,麻烦,má fan,inconvenient / troublesome,页
+牌,4,393,12,牌子,pái zi,sign / trademark,片
+晨,4,394,11,早晨,zǎo chen,early morning,日
+吹,4,395,7,吹,chuī,to blow / to play a wind instrument,口
+餐,4,396,16,中餐,zhōng cān,lunch / Chinese meal,食
+俩,4,397,9,俩,liǎ,two (people) / both,两
+寄,4,398,11,寄,jì,to send / to mail,
+汤,4,399,6,汤,tāng,soup,
+扔,4,400,5,扔,rēng,to throw / to throw away,

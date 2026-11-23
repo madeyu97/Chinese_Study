@@ -30,7 +30,7 @@ import time
 from datetime import datetime, timedelta
 
 import clock
-from config import (GRAMMAR_NEW_PER_DAY, PLAN_GRAMMAR_STRUCTURES, PLAN_HANDWRITING_REVIEWS,
+from config import (GRAMMAR_NEW_PER_DAY, HANDWRITING_NEW_PER_DAY, PLAN_GRAMMAR_STRUCTURES, PLAN_HANDWRITING_REVIEWS,
                     PLAN_READING_SENTENCES, PLAN_RECAP_WORDS, PLAN_SENTENCES_LISTEN,
                     PLAN_SENTENCES_SPEAK, SESSION_GAP_HOURS, SESSION_OPENS, SOUND_NEW_PER_DAY,
                     VOCAB_BACKLOG_SOFT, VOCAB_NEW_PER_DAY, VOCAB_NEW_PER_SESSION,
@@ -156,7 +156,10 @@ def _evening(state, done):
                            "today's new words first", listen + 1.5 * speak,
                            {"listen": listen, "speak": speak}, done))
     if writing:
-        new = min(3, h["new_room"], h["new_available"])
+        # the HSK track has 400 characters to get through: the whole daily
+        # allowance in the evening, not three of it
+        new = min(HANDWRITING_NEW_PER_DAY if state.get("hsk_track") else 3,
+                  h["new_room"], h["new_available"])
         due = min(h["due"], PLAN_HANDWRITING_REVIEWS)
         if due or new or "evening:handwriting" in done:
             parts = [_n(due, "character") + " to review"] if due else []

@@ -5,7 +5,9 @@ Run once from pinyin-immersion-app/, pointing at two checkouts:
 
     git clone --depth 1 https://github.com/RyanGibb/anki-hsk3   /tmp/anki-hsk3
     git clone --depth 1 https://github.com/krmanik/HSK-3.0      /tmp/HSK-3.0
-    python tools/build_hsk_data.py /tmp/anki-hsk3 /tmp/HSK-3.0
+    (cd /tmp && npm pack hanzi-writer-data@2.0.1 && mkdir -p hwd &&
+     tar xzf hanzi-writer-data-2.0.1.tgz -C hwd)          # stroke data
+    python tools/build_hsk_data.py /tmp/anki-hsk3 /tmp/HSK-3.0 /tmp/hwd/package
 
 Writes, for levels 1-4 only:
 
@@ -15,6 +17,11 @@ Writes, for levels 1-4 only:
                                        band 2 = the syllabus's "HSK 1-2" list
   grammar.csv     id, level, point, type, category, detail
   grammar_examples.csv  grammar_id, chinese, english
+  write_order.csv the 400 writing characters in teaching order: band by
+                  band, and within a band parts before the characters built
+                  from them (女 before 好 and 妈), commonest first.
+                  Each with its stroke count, the HSK word that cues it and
+                  the parts it builds on.
 
 See data/hsk/SOURCES.md for where each comes from.
 """
@@ -70,13 +77,18 @@ def build_words(anki):
     for r in tsv(anki / "data/raw/punpuf_hsk_word_list.tsv"):
         if r["level"] not in LEVELS:
             continue
-        word, level = r["word"], int(r["level"])
+        # homographs are numbered in the syllabus (会1 can, 会2 meeting): one
+        # word for the app, at its lowest level
+        word, level = re.sub(r"\d+$", "", r["word"]), int(r["level"])
         if word in seen:                     # 真 at 1 (adverb) and 4 (adjective): keep the first
             seen[word]["pos"] = "、".join(dict.fromkeys(
                 seen[word]["pos"].split("、") + [p for p in r["part_of_speech"].split("、") if p]))
             continue
         pinyin = de.format_pinyin(r["pinyin"])
         english = house.get(word) or short_gloss(r["definition_cc-cedict"])
+        if "[" in english or re.search(r"\bsee\b", english.split("/")[0]):
+            english = short_gloss(english) or short_gloss(r["definition_cc-cedict"])
+        english = re.sub(r"\s*\((Taiwan|also) pr\.[^)]*\)", "", english).strip()
         row = {"word": word, "level": level, "pinyin": pinyin,
                "pos": r["part_of_speech"], "english": english,
                "erhua": int(de.has_erhua(word, pinyin) and word not in ("儿子", "女儿"))}
@@ -131,6 +143,64 @@ def build_grammar(anki):
     return points, examples
 
 
+def _rank(ch):
+    return de.character_info(ch)["rank"] or 10 ** 6
+
+
+def _cue(ch, words, band):
+    """The HSK word to cue a character with: one from the lowest level that
+    has it, two characters long if possible (the other character shows, the
+    target is blanked), the commonest of those."""
+    have = [w for w in words if ch in w["word"] and not w["erhua"]]
+    if not have:
+        return {"word": ch, "pinyin": de.derive_pinyin(ch), "english": ""}
+
+    def key(w):
+        size = 0 if len(w["word"]) == 2 else 1 if len(w["word"]) == 1 else 2
+        return (w["level"], size, _rank(w["word"][0]) + _rank(w["word"][-1]))
+    best = min(have, key=key)
+    # no Chinese in the meaning: 开车's 'to drive a car (Malaysia: 驾车)' would
+    # show the very character being asked for
+    from placement import show
+    return {"word": best["word"], "pinyin": best["pinyin"],
+            "english": show(best["english"]) or best["english"]}
+
+
+def build_write_order(write_rows, words, strokes_dir):
+    import radical_engine as re_
+    chars = [r["char"] for r in write_rows]
+    band_of = {r["char"]: r["band"] for r in write_rows}
+
+    def strokes(ch):
+        if not strokes_dir:
+            return ""
+        import json
+        path = Path(strokes_dir) / f"{ch}.json"
+        return len(json.loads(path.read_text(encoding="utf-8"))["strokes"]) if path.exists() else ""
+
+    parts = {ch: [c["component"] for c in re_.decompose(ch)["components"]
+                  if c["component"] in band_of and c["component"] != ch] for ch in chars}
+    order, placed = [], set()
+    for band in (2, 3, 4):
+        todo = sorted((c for c in chars if band_of[c] == band),
+                      key=lambda c: (_rank(c), strokes(c) or 99))
+        while todo:
+            # the commonest character whose parts (in this band) are all placed
+            nxt = next((c for c in todo if all(p in placed or band_of[p] > band
+                                               for p in parts[c])), todo[0])
+            todo.remove(nxt)
+            placed.add(nxt)
+            order.append(nxt)
+    rows = []
+    for i, ch in enumerate(order, 1):
+        cue = _cue(ch, words, band_of[ch])
+        rows.append({"char": ch, "band": band_of[ch], "order": i, "strokes": strokes(ch),
+                     "cue_word": cue["word"], "cue_pinyin": cue["pinyin"],
+                     "cue_english": cue["english"],
+                     "builds_on": "".join(p for p in parts[ch] if order.index(p) < i - 1)})
+    return rows
+
+
 def write(name, rows, fields):
     OUT.mkdir(parents=True, exist_ok=True)
     with open(OUT / name, "w", encoding="utf-8", newline="") as f:
@@ -140,18 +210,22 @@ def write(name, rows, fields):
     print(f"{name}: {len(rows)} rows")
 
 
-def main(anki, hsk3):
+def main(anki, hsk3, strokes_dir=None):
     anki, hsk3 = Path(anki), Path(hsk3)
-    write("words.csv", build_words(anki),
-          ["word", "level", "pinyin", "pos", "english", "erhua"])
+    words = build_words(anki)
+    write("words.csv", words, ["word", "level", "pinyin", "pos", "english", "erhua"])
     write("recognise.csv", build_recognise(hsk3), ["char", "level"])
-    write("write.csv", build_write(anki), ["char", "band"])
+    write_rows = build_write(anki)
+    write("write.csv", write_rows, ["char", "band"])
+    write("write_order.csv", build_write_order(write_rows, words, strokes_dir),
+          ["char", "band", "order", "strokes", "cue_word", "cue_pinyin", "cue_english",
+           "builds_on"])
     points, examples = build_grammar(anki)
     write("grammar.csv", points, ["id", "level", "point", "type", "category", "detail"])
     write("grammar_examples.csv", examples, ["grammar_id", "chinese", "english"])
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         sys.exit(__doc__)
-    main(sys.argv[1], sys.argv[2])
+    main(*sys.argv[1:])

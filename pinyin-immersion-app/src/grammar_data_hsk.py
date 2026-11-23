@@ -107,6 +107,114 @@ STRUCTURES = [
              "for there or what someone said. Drill surprise at prices and distances, "
              "showing how to do things.",
        markers=("这么", "那么", "这样", "那样"), level=2),
+    # ---- HSK 3 ----
+    _S("zongshi", 7, "总 / 总是 — always", "他总是迟到。/ 一到冬天就总生病。",
+       "Say something always (or keeps on) happening.",
+       notes="总是 / 总 + verb, often with a hint of complaint: 他总是迟到. Contrast 常常 "
+             "(often) - 总是 is every time. Negative: 他总是不吃早餐 (always skips it); 不总是 "
+             "= not always. Drill habits and complaints.",
+       markers=("总是", "总"), level=3, core=True),
+    _S("yi_mw_ye_bu", 17, "一 + measure word + 也 / 都 + 不 / 没 — not a single one",
+       "我一个人也不认识。/ 他一块钱都没有。/ 一句也听不懂",
+       "Say not even one: not a single person, word, ringgit.",
+       notes="一 + measure word (+ noun) + 也 / 都 + 不 / 没 + verb: 我一句华语也不会说, 我一"
+             "口都没吃. The 'one' thing goes before the verb, never after (我不认识一个人 means "
+             "something else). 一点也不 + adjective is its own structure (yidian_bu).",
+       contrast=("yidian_bu",), markers=("也不", "也没", "都不", "都没"), level=3, core=True,
+       requires=((r"一[^也都]{1,4}(也|都)(不|没)", "needs 一 + measure word + 也 / 都 + 不 / 没"),)),
+    _S("buyong", 2, "不用 / 不必 — no need to", "不用谢。/ 你不用来。/ 不必担心。",
+       "Say something isn't necessary.",
+       notes="不用 + verb (spoken) / 不必 + verb (a bit more formal): 你不用来 (you needn't "
+             "come). It's the negative of 要 / 得 / 必须 for 'have to': 我得去 → 你不用去. "
+             "Contrast 别 / 不要 (don't!): 不用 is relief, not a ban. Malaysians also say "
+             "不用紧 (it's fine).",
+       contrast=("bie",), markers=("不用", "不必"), level=3),
+    _S("approx_adjacent", 4, "Two numbers side by side — about", "七八个人 / 十五六分钟 / 三四天",
+       "Give a rough number by saying two neighbouring numbers.",
+       notes="Two neighbouring numbers = roughly: 两三个 (two or three), 七八个人, 十五六岁, "
+             "三四天. Always neighbours, smaller first; never with 九十 (that's 90). Contrast "
+             "多 (二十多) and 左右 / 大概.",
+       markers=("一两", "两三", "三四", "四五", "五六", "六七", "七八", "八九"), level=3),
+    _S("bu_a_bu_b", 14, "不 A 不 B — just right", "不大不小 / 不冷不热 / 不多不少",
+       "Say something is just right: neither too big nor too small.",
+       notes="不 + adjective + 不 + its opposite = just right: 不大不小, 不冷不热, 不早不晚. "
+             "Usually followed by 刚好 / 正好 / 很舒服. Only with pairs of opposites.",
+       markers=("不大不小", "不冷不热", "不多不少", "不早不晚", "不高不矮", "不长不短",
+                "不胖不瘦", "不远不近", "不贵不便宜"), level=3),
+    _S("x_shenme_a", 28, "X 什么(啊) — what do you mean, X?", "贵什么啊! / 急什么? / 方便什么啊",
+       "Brush off or contradict what someone said.",
+       notes="Verb / adjective + 什么(啊) rejects it: 贵什么啊，才十块 (expensive? it's only ten), "
+             "急什么 (what's the hurry?). Not a question about 'what'. Friendly but blunt; "
+             "usually followed by the reason.",
+       markers=("什么啊", "什么呀", "什么?", "什么？", "什么!", "什么！"), level=3,
+       requires=((r"[\u4e00-\u9fff](什么)(啊|呀|？|\?|!|！|，|,)", "X 什么 must follow a verb or "
+                  "adjective it rejects"),)),
+    _S("gai_le", 16, "该……了 — it's time to", "该走了。/ 八点了，该上课了。/ 该你了。",
+       "Say it's time for something, or someone's turn.",
+       notes="该 + verb + 了 = it's time to: 该睡觉了, 该吃饭了. 该 + person + 了 = your turn: "
+             "该你了. Different from 应该 (should).",
+       contrast=("yinggai",), markers=("该",), level=3,
+       requires=((r"该.{1,8}了", "该 … 了 needs the 了"),)),
+    _S("zai_shang_xia", 23, "在……上 / 下 / 中 — in terms of, under, during",
+       "在工作上 / 在老师的帮助下 / 在学习中",
+       "Say in which area, under whose influence, or in the course of what.",
+       notes="在 + topic + 上 = as far as … goes: 在工作上很认真. 在 + 的帮助 / 影响 / 情况 + 下 "
+             "= with the help / influence of: 在朋友的帮助下. 在 + process + 中 = in the "
+             "course of: 在学习中. Goes at the start or before the verb.",
+       markers=("上", "下", "中"), level=3,
+       requires=((r"在[^。，,]{1,10}(上|下|中)", "needs 在 … 上 / 下 / 中"),)),
+    _S("verb_subject", 1, "A verb or clause as the subject", "哭没有用。/ 多运动对身体好。/ 你来也可以。",
+       "Make an action the topic: 'crying won't help'.",
+       notes="An action, with no 'to' or '-ing', can be the subject: 哭没有用 (crying is no "
+             "use), 学华语很有意思, 早点睡比较好. A whole clause can be too: 你来也可以 (you "
+             "coming is fine too). Drill opinions about activities.",
+       markers=("没有用", "很好", "比较好", "最重要", "有意思", "也可以", "不好", "很难",
+                "很容易", "对身体"), level=3),
+    _S("mw_redup", 4, "Doubled measure words — every one / one by one", "个个都很大 / 一步一步地做",
+       "Say every single one, or do something one at a time.",
+       notes="Measure word doubled + 都 = every one: 个个都好吃, 天天 (every day), 张张都漂亮. "
+             "一 + MW + 一 + MW (+ 地) + verb = one by one: 一个一个地来, 一步一步地学.",
+       markers=("个个", "天天", "人人", "张张", "件件", "本本", "一步一步", "一个一个",
+                "一句一句", "一天一天", "一点一点"), level=3),
+    _S("time_since", 7, "Event + 已经 + time + 了 — it's been … since",
+       "他走了已经三天了。/ 开学已经两个星期了。/ 我来马来西亚五年了。",
+       "Say how long it has been since something happened.",
+       notes="Event (verb that happens once: 来, 走, 毕业, 结婚) + (已经) + length of time + 了 = "
+             "it's been that long since: 他来了三年了, 我们结婚十年了. Contrast duration of an "
+             "activity (我学了两年 = studied for two years). Ask: 你来马来西亚多久了？",
+       contrast=("le_le",), markers=("了",), level=3,
+       requires=((r"(年|天|个月|个星期|个礼拜|个钟头|小时|分钟|多久)(多)?了", "needs a length of "
+                  "time + 了 at the end"),)),
+    _S("appear_disappear", 21, "Place + verb + 了 + someone / something — appeared, left",
+       "前面开过来一辆车。/ 楼上搬来了一家人。/ 树上飞走了三只鸟。",
+       "Say someone or something appeared at or left a place.",
+       notes="Place first, then verb + direction / result + (了) + amount + thing: 前面走过来"
+             "一个人 (someone came walking over), 家里来了客人, 店里少了一个人. The thing is new "
+             "information, so it comes after the verb, usually with a number. Contrast "
+             "place + 有 and place + verb + 着.",
+       contrast=("zhe_scene", "place_you"), markers=("来", "走", "了"), level=3,
+       requires=((r"(来|去|走|出|进|过来|过去|掉)了?(一|两|三|几|很多)", "needs verb + 来 / 走 … + "
+                  "an amount + the new person or thing"),)),
+    _S("yihui_yihui", 19, "一会……一会…… — now … now …", "一会进来，一会出去 / 天气一会冷，一会热",
+       "Say something keeps switching between two things.",
+       notes="一会 + A，一会 + B: he keeps going in and out, the weather keeps changing. "
+             "Often with a little complaint. (Mainland writes 一会儿; Malaysians say 一会.)",
+       markers=("一会",), level=3,
+       requires=((r"一会.+一会", "needs 一会 twice"),)),
+    _S("le_jiu", 16, "Verb + 了 + … + 就 + … — as soon as / after … then",
+       "我下了班就去。/ 他吃了药就好多了。/ 你到了就打电话给我。",
+       "Say one thing happens straight after another is done.",
+       notes="First action + 了 (+ object), then 就 + second action: 我下了班就回家 (I go home "
+             "once I finish work). Works for future and past; the 了 marks 'once done', not "
+             "past. Close to 一……就 but less instant.",
+       contrast=("yi_jiu",), markers=("就",), level=3,
+       requires=((r"了.{0,8}就", "needs verb + 了 … 就"),)),
+    _S("bu_bi", 13, "A 不比 B + adjective — no more … than", "我不比他高。/ 这个不比那个贵。",
+       "Say A is not more … than B (they're about the same).",
+       notes="A 不比 B + adjective means A is no more … than B, often 'about the same' or "
+             "contradicting: 我不比他高 (I'm not taller than him - we're about the same). It "
+             "is NOT the usual 'less than' - that's A 没有 B (那么) + adjective.",
+       contrast=("meiyou_name", "bi_adj"), markers=("不比",), level=3),
     _S("dou_all", 18, "都 — all, both (after the group)", "我们都去。/ 他们都是老师。/ 这些都很贵。",
        "Say everyone or everything in a group does or is something.",
        notes="都 goes after the group and before the verb: 我们都喜欢 (not 都我们喜欢). The "
@@ -118,16 +226,31 @@ STRUCTURES = [
 
 LISTED = {
     1: [("No 是 before dates, ages, prices — HSK 1 (added)", "noun_predicate"),
-        ("Topic + subject + adjective (她个子很高) — HSK 2 (added)", "double_subject")],
+        ("Topic + subject + adjective (她个子很高) — HSK 2 (added)", "double_subject"),
+        ("A verb or clause as the subject — HSK 3 (added)", "verb_subject")],
     4: [("Numbers: 两 / 二, 零, 百, 千 — HSK 1 (added)", "numbers"),
         ("第 + number — HSK 1 (added)", "di_ordinal"),
-        ("Prices: 块 / 元 — HSK 1 (added)", "money")],
+        ("Prices: 块 / 元 — HSK 1 (added)", "money"),
+        ("Two neighbouring numbers — about — HSK 3 (added)", "approx_adjacent"),
+        ("Doubled measure words — HSK 3 (added)", "mw_redup")],
     6: [("Dates and clock times — HSK 1 (added)", "date_time")],
     15: [("和 joining nouns — HSK 1 (added)", "he_and")],
     18: [("都 — all, both — HSK 1 (added)", "dou_all")],
     25: [("Verb-object words (睡觉, 上班) — HSK 1 (added)", "lihe_verbs"),
          ("请 / 叫 / 让 + person + verb — HSK 2 (added)", "jianyu_causative")],
     29: [("……什么的 — HSK 2 (added)", "shenmede")],
-    13: [("有 + amount / 有…那么 — HSK 2 (added)", "you_reach")],
-    14: [("这么 / 那么 / 这样 — HSK 2 (added)", "zheme_name")],
+    28: [("X 什么(啊) — HSK 3 (added)", "x_shenme_a")],
+    13: [("有 + amount / 有…那么 — HSK 2 (added)", "you_reach"),
+         ("A 不比 B — HSK 3 (added)", "bu_bi")],
+    2: [("不用 / 不必 — HSK 3 (added)", "buyong")],
+    7: [("总 / 总是 — HSK 3 (added)", "zongshi"),
+        ("Event + time + 了 — it's been … since — HSK 3 (added)", "time_since")],
+    17: [("一 + MW + 也 / 都 + 不 / 没 — HSK 3 (added)", "yi_mw_ye_bu")],
+    16: [("该……了 — HSK 3 (added)", "gai_le"),
+         ("Verb + 了 … 就 — HSK 3 (added)", "le_jiu")],
+    19: [("一会……一会…… — HSK 3 (added)", "yihui_yihui")],
+    21: [("Place + verb + 了 + new thing — HSK 3 (added)", "appear_disappear")],
+    23: [("在……上 / 下 / 中 — HSK 3 (added)", "zai_shang_xia")],
+    14: [("这么 / 那么 / 这样 — HSK 2 (added)", "zheme_name"),
+         ("不 A 不 B — HSK 3 (added)", "bu_a_bu_b")],
 }

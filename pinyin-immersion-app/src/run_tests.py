@@ -3944,7 +3944,15 @@ def t_ahead_bank():
         assert calls == [(["a", "b"], True), (["c", "d", "e"], True)], calls
     finally:
         ahead.grammar = real
-    assert tplan.HSK_BANK_AHEAD == 3
+    assert tplan.HSK_BANK_AHEAD == 6
+    import drill_bank
+    from datetime import date as _d
+    order = ["a", "b", "c", "d", "e"]
+    progress = {"a": {"next_review_date": "2026-11-30"}, "b": {"next_review_date": "2026-11-24"},
+                "zz": {"next_review_date": "2026-11-20"}}       # not in the order
+    t = drill_bank.targets(progress, order, _d(2026, 11, 23), days=3, new_ahead=2)
+    assert t == ["b", "c", "d"], t      # due within 3 days first, then the next new ones
+    assert drill_bank.targets({}, order, _d(2026, 11, 23), new_ahead=10) == order
 
 
 @test("level test: fair options - four distinct meanings, none that could also be right")

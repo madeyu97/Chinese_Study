@@ -106,6 +106,31 @@ def coverage(analysis):
     return sum(a["status"] == "in" for a in words) / len(words) if words else 0.0
 
 
+def auto_declare(payload, level):
+    """Declare the draft's few above-level words itself (with pinyin and a
+    meaning), when that keeps it within MAX_NEW: the live runs failed again
+    and again on one or two words (等, 送) the writer hadn't listed."""
+    if not isinstance(payload, dict):
+        return payload
+    from dictionary_engine import cedict_gloss
+    from pinyin_hsk import sentence_pinyin
+    new = [w for w in payload.get("new_words") or [] if isinstance(w, dict) and w.get("hanzi")]
+    q = payload.get("question") if isinstance(payload.get("question"), dict) else {}
+    text = str(payload.get("text") or "") + "。" + str(q.get("question") or "") + "。" + \
+        "。".join(map(str, q.get("options") or []))
+    out = list(dict.fromkeys(x["w"] for x in analyse(text, level, [w["hanzi"] for w in new])
+                             if x["status"] == "out"))
+    if not out or len(new) + len(out) > MAX_NEW:
+        return payload
+    for w in out:
+        info = hsk.word(w)
+        english = (info or {}).get("english") or (cedict_gloss(w)[0] or "").split(" / ")[0] \
+            or _parts_gloss(w, {})
+        new.append({"hanzi": w, "pinyin": sentence_pinyin(w), "english": english, "auto": True})
+    payload["new_words"] = new
+    return payload
+
+
 def check(payload, level):
     """What's wrong with a drafted passage ([] if nothing)."""
     from dictionary_engine import has_erhua
@@ -296,7 +321,7 @@ def generate(level, grammar=(), topic="", avoid=(), attempts=3):
             logging.warning(f"[READ HSK] attempt {attempt}: {e}")
             feedback = "- the reply was not valid JSON"
             continue
-        problems = check(draft, level)
+        problems = check(auto_declare(draft, level), level)
         if not problems:
             ok, review_problems, reviewed = _review(draft, level)
             if ok:

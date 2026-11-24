@@ -19,7 +19,6 @@ the separate herb game); the picture games here still run, over HSK words
 only and without the TCM topics, when picked from that list.
 """
 
-import random
 import time
 import uuid
 

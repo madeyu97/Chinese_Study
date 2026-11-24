@@ -15,7 +15,6 @@ saved as you go, so leaving the app picks up at the same item.
 """
 
 import time
-from datetime import date
 
 import streamlit as st
 
@@ -80,8 +79,9 @@ with st.sidebar:
     sidebar_user_badge()
     tp.sidebar("grammar", reset_all)
     st.metric("Words to build from", len(known))
+    span = "" if not HSK else f" (HSK {HSK_UPTO})" if HSK_UPTO == 1 else f" (HSK 1–{HSK_UPTO})"
     st.caption(f"{sum(1 for s_ in order if s_.id in progress)} of {len(order)} structures "
-               f"practised{f' (HSK 1–{HSK_UPTO})' if HSK else ''} · {len(queue)} ready today")
+               f"practised{span} · {len(queue)} ready today")
 
 st.title("🧩 Grammar drills")
 store.notice()

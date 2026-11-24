@@ -13,7 +13,6 @@ from dictionary_engine import (
     derive_pinyin as _derive_pinyin,
     parse_cn_numeral as _parse_cn_numeral,
     CN_NUMERAL_CHARS as _CN_NUMERAL_CHARS,
-    is_cjk_char as _is_cjk_char,
     build_breakdown,
     has_erhua,
 )
@@ -225,24 +224,6 @@ def _fix_numeral_gloss(item_hanzi, item_english):
             f"-> corrected to '{corrected}'")
         return corrected
     return item_english
-
-def _verify_breakdown(word_breakdown, sentence):
-    """Drop confabulated breakdown entries, re-derive their pinyin, and fix
-    numeral glosses. Every surviving entry is guaranteed to (a) appear in
-    the sentence, (b) have pinyin matching its own characters."""
-    verified = []
-    for item in word_breakdown:
-        hz = item.get("chinese", "")
-        if not hz:
-            continue
-        if all(_is_cjk_char(c) for c in hz) and hz not in sentence:
-            logging.warning(f"[BREAKDOWN] Dropping '{hz}' — not in sentence.")
-            continue
-        item["pinyin"] = _derive_pinyin(hz)
-        item["english"] = _fix_numeral_gloss(hz, item.get("english", ""))
-        verified.append(item)
-    return verified
-
 
 # ======================================================================
 # PRONOUN NORMALISATION — now IDEMPOTENT

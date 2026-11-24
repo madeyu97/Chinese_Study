@@ -1,8 +1,8 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
-data/user_progress.db
-data/current_audio.mp3
-data/audio/
+# Chinese study (pinyin-immersion-app/): audio is cached at run time
+pinyin-immersion-app/data/current_audio.mp3
+pinyin-immersion-app/data/audio/
 
 # Bahasa Study (bahasa-app/)
 .env

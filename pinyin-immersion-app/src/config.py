@@ -17,7 +17,6 @@ VOCAB_CSV_PATH = DATA_DIR / "vocab_export.csv"
 # covers ~44,000 words so anything you add to vocab_export.csv gets a rank.
 FREQUENCY_CSV_PATH = DATA_DIR / "frequency_words.csv"
 FREQUENCY_RANKS_PATH = DATA_DIR / "frequency_ranks.csv"
-DB_PATH = DATA_DIR / "user_progress.db"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 

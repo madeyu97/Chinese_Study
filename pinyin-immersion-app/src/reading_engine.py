@@ -24,7 +24,6 @@ itself to a character set will not reliably do so.
 
 import json
 import logging
-import re
 
 from dictionary_engine import derive_pinyin, cedict_gloss, is_cjk_char
 
@@ -116,22 +115,6 @@ RULES:
 Return ONLY raw JSON:
 {{"chinese": "<the sentence>", "english": "<natural translation>"}}
 """.strip()
-
-
-def segments_ok(sentence):
-    """Retired.
-
-    This tried to spot gibberish by checking whether jieba found real
-    multi-character words. Measured against actual cases it was wrong in
-    both directions: jieba happily segments 我天, 不个 and 水天 as "words"
-    (so nonsense passed), while a perfectly natural short sentence like
-    你有水吗？ contains no multi-character word at all (so it failed).
-
-    Judging whether a sentence means anything needs a language model, not a
-    segmentation heuristic - review_sentence does that job. Kept as a
-    no-op so callers and tests stay valid.
-    """
-    return True, ""
 
 
 def review_sentence(client, model, sentence, english):

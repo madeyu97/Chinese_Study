@@ -67,6 +67,19 @@ const CARDS = [
   check("a new game replaces the old board; dark theme followed",
         !w2.cards()[0].classList.contains("matched") && w2.document.body.classList.contains("dark"));
 
+  // HSK memory: characters matched to meanings (a "text" face)
+  const w3 = board();
+  const TEXT = [
+    { pair: "雨", face: "word", img: "", zh: "雨", py: "yǔ", en: "rain" },
+    { pair: "雨", face: "text", img: "", zh: "雨", py: "yǔ", en: "rain" },
+  ];
+  w3.render({ sid: "t1", cards: TEXT, show_pinyin: false, state: { matched: [], moves: 0 } });
+  const t = w3.cards();
+  t[0].click(); t[1].click();
+  check("meaning face shows the English, not the characters",
+        t[1].querySelector(".face").textContent === "rain" && t[1].getAttribute("aria-label").includes("rain"));
+  check("a word and its meaning are a pair", JSON.stringify(w3.values().pop().matched) === "[0,1]");
+
   console.log(failed ? `${failed} failed` : "all passed");
   process.exit(failed ? 1 : 0);
 })();

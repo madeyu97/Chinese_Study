@@ -23,7 +23,7 @@ Everything here is pure logic; db_manager supplies the data.
 
 import random
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 
 import clock
 

@@ -157,16 +157,6 @@ def describe_word(word):
     return {"word": word, "characters": per_char, "summary": summary}
 
 
-def shares_component(ch, component):
-    """Other characters built from the same component, for spotting
-    families like 茯 苓 芍 荆 - all 艹, all plants."""
-    try:
-        found = _get_decomposer().get_characters_with_component(component)
-        return [c for c in (found or []) if c != ch][:12]
-    except Exception:
-        return []
-
-
 def warm_up():
     """Preload the decomposition tables in the background (they take a
     couple of seconds to compile)."""

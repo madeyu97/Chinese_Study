@@ -8,7 +8,6 @@ import unicodedata
 import threading
 import time
 import pandas as pd
-from datetime import datetime, date
 import logging
 import psycopg2
 import psycopg2.extras
@@ -24,7 +23,6 @@ from config import (
     FREQUENCY_CSV_PATH,
     FREQUENCY_RANKS_PATH,
     MAX_REVIEWS_PER_DAY,
-    NEW_WORDS_PER_DAY,
     RANDOM_BREADTH_PCT,
 )
 from handwriting_engine import (precision_for, precision_level,
@@ -1089,16 +1087,6 @@ def verify_user_pin(user_id, pin):
     return row[0] == _pin_hash(str(pin))
 
 
-def get_user(user_id):
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("SELECT id, username, display_name, session_mode "
-                   "FROM users WHERE id = %s", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
 # ==========================================
 # ONE-TIME MIGRATION TO MULTI-USER
 # Splits the old combined vocab_progress table into shared `vocab` content
@@ -1652,15 +1640,6 @@ def _pinyin_key(pinyin):
     """Pinyin with case, spacing, apostrophes and hyphens ignored."""
     p = unicodedata.normalize("NFC", str(pinyin)).lower()
     return re.sub(r"[\s'’\-]", "", p)
-
-
-def _ensure_progress(cursor, user_id, vocab_id):
-    """Create this user's progress row for a word if they've not met it yet."""
-    cursor.execute("""
-        INSERT INTO vocab_progress (user_id, vocab_id, next_review_date)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (user_id, vocab_id) DO NOTHING
-    """, (user_id, vocab_id, clock.today().isoformat()))
 
 
 # ======================================================================
@@ -3286,19 +3265,6 @@ def recent_characters(user_id, limit=12):
                                id DESC
                       LIMIT %s""", (user_id, limit))
     chars = [r[0] for r in cursor.fetchall()]
-    conn.close()
-    return chars
-
-
-def due_characters(user_id):
-    """Characters whose handwriting review is due - worth seeing in print."""
-    today_str = clock.today().isoformat()
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""SELECT character FROM handwriting_progress
-                      WHERE user_id = %s AND next_review_date <= %s""",
-                   (user_id, today_str))
-    chars = {r[0] for r in cursor.fetchall()}
     conn.close()
     return chars
 

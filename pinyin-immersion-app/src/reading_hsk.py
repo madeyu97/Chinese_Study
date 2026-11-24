@@ -19,7 +19,6 @@ while you wait unless the stock has run out.
     generate(level, ...)         write, check, review -> payload or None
 """
 
-import json
 import logging
 import re
 
@@ -269,5 +268,3 @@ def generate(level, grammar=(), topic="", avoid=(), attempts=3):
     return None
 
 
-def to_json(payload):
-    return json.dumps(payload, ensure_ascii=False)

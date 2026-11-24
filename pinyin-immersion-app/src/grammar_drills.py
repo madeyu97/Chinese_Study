@@ -28,7 +28,7 @@ import json
 import logging
 import re
 import time
-from datetime import date, timedelta
+from datetime import timedelta
 
 import jieba
 
@@ -372,12 +372,6 @@ def mcq_problem(item):
     if min(rest) >= 4 and min(rest) >= 2 * sizes[ans]:
         return "the right option is much shorter than the others - make them all about the same length"
     return None
-
-
-def _check_mcq(item, where, problems):
-    problem = mcq_problem(item)
-    if problem:
-        problems.append(f"{where}: {problem}")
 
 
 def structure_problem(hanzi, structure):

@@ -84,6 +84,9 @@ AI_FALLBACKS = {
     "qwen/qwen3.8-27b": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
     "openai/gpt-oss-20b": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
 }
+# models only the learner's own waiting calls may fall back to (their Chinese
+# is weaker): drills written ahead wait for a strong model instead
+AI_WEAK_MODELS = {"openai/gpt-oss-20b"}
 # known words listed in an AI prompt (all of them still count as known when
 # the result is checked): the full list was 1,600 tokens of every call
 PROMPT_KNOWN_WORDS = 300

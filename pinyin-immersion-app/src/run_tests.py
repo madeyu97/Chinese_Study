@@ -3192,6 +3192,27 @@ def t_ai_budget():
         sched.lock.notify_all()
     t.join(6)
     assert got and got[0][0] == big
+    # work done ahead never moves to the small model: it waits for a strong one
+    sched = ab.Scheduler()
+    sched.model(big).used.append((sched.clock(), 7900))
+    sched.model(qwen).used.append((sched.clock(), 7900))
+    got = []
+    t = threading.Thread(target=lambda: got.append(sched.acquire(big, 2000, lambda: True)))
+    t.start()
+    time.sleep(0.4)
+    assert got == [], "the 20b model had room, but background work waits"
+    with sched.lock:
+        sched.model(qwen).used.clear()
+        sched.lock.notify_all()
+    t.join(6)
+    assert got and got[0][0] == qwen, got
+    os.environ["AI_STRONG_ONLY"] = "1"                               # the nightly job
+    try:
+        sched = ab.Scheduler()
+        sched.model(big).used.append((sched.clock(), 7900))
+        assert sched.acquire(big, 2000)[0] == qwen
+    finally:
+        del os.environ["AI_STRONG_ONLY"]
     with ab.background():
         assert ab.priority()()
     assert not ab.priority()()
@@ -3996,6 +4017,15 @@ def t_gr_hsk_writer():
     assert out["identify"][0]["pinyin"] == "tā gāo xìng de shuō"
     assert out["rapid"][0]["answer_pinyin"] == "zhè zhī māo hěn cháng"
     assert out["contrast"]["items"][0]["pinyin"] == "wǒ děi zǒu le"
+    # a question structure: the question carries it in conversation, the reply needn't
+    ma = gcur.get("ma_question")
+    conv = {"question_hanzi": "你忙吗？", "sample_hanzi": "不忙。", "cue": "Say you're not busy"}
+    probs = gdr._item_problems("conversation", dict(conv), ma, {"你", "忙", "不"}, [])
+    assert not any("target structure" in p for p in probs), probs
+    probs = gdr._item_problems("conversation", dict(conv, question_hanzi="你忙不忙？"), ma,
+                               {"你", "忙", "不"}, [])
+    assert any("target structure" in p for p in probs), probs
+    assert "MAKES QUESTIONS" in gdr.build_prompt(ma, ["你"], hsk=True)
 
 
 @test("grammar cards: every Chinese example in a card's own words has its English")

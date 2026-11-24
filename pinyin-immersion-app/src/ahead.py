@@ -129,7 +129,7 @@ def write_passage(user_id, level):
     studied = [gc.get(sid) for sid in db.grammar_progress(user_id)
                if gc.get(sid) and hg.structure_level().get(sid, 9) <= level]
     grammar_ = random.sample(studied, min(3, len(studied)))
-    payload = rh.generate(level, grammar_, random.choice(rh.TOPICS), stats["titles"])
+    payload = rh.generate(level, grammar_, rh.topic_for(level), stats["titles"])
     if payload:
         db.reading_passage_save(user_id, level, payload)
         return True

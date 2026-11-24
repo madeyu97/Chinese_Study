@@ -261,9 +261,18 @@ def build_prompt(structure, known_words, china_pairs=(), contrasts=(),
     kind_note = ("This is a CONTRAST DRILL: every stage should make the learner choose "
                  "between the structures listed below (use each of them across the items), "
                  "not just use one." if structure.kind == "contrast" else "")
+    learner = ("""You write grammar drills for an adult preparing for the HSK exams (2025
+syllabus) who lives in Malaysia: natural, everyday, conversational Mandarin,
+in standard vocabulary - the HSK word where Malaysians say it differently
+(出租车 not 德士, 星期 not 礼拜, 工作 not 做工). Malaysian places and food are
+fine as settings.""" if hsk else """You write grammar drills for an adult learning MALAYSIAN Mandarin (the Mandarin
+spoken by Chinese Malaysians: natural, everyday, conversational).""")
+    usage = ("STANDARD USAGE: no Beijing 儿 (一点 not 一点儿, 哪里 not 哪儿, 这里 not 这儿)."
+             if hsk else
+             "MALAYSIAN USAGE: no Beijing 儿 at all (一点 not 一点儿, 哪里 not 哪儿, 这里 not 这儿).\n"
+             f"Prefer the words Malaysians use: {china or '(none)'}.")
     return f"""
-You write grammar drills for an adult learning MALAYSIAN Mandarin (the Mandarin
-spoken by Chinese Malaysians: natural, everyday, conversational).
+{learner}
 
 TARGET STRUCTURE: {structure.name}
 PATTERN: {structure.pattern}
@@ -282,8 +291,7 @@ If a sentence is impossible without another word, use the simplest common word
 and list it in "introduced_words" (at most {MAX_INTRODUCED}). Do not use any other
 unlisted word.
 
-MALAYSIAN USAGE: no Beijing 儿 at all (一点 not 一点儿, 哪里 not 哪儿, 这里 not 这儿).
-Prefer the words Malaysians use: {china or "(none)"}.
+{usage}
 
 PRINCIPLES
 - Train recognition and spontaneous use, not explanation. Explanations are one
@@ -339,6 +347,22 @@ Return ONLY a JSON object:
 # ======================================================================
 # Mechanical validation
 # ======================================================================
+def repinyin(payload):
+    """HSK track: every sentence's pinyin from pinyin_hsk (checked against the
+    HSK deck's hand-written pinyin), not the writer's own."""
+    from pinyin_hsk import sentence_pinyin
+    if not isinstance(payload, dict):
+        return payload
+    for stage, fields in FIELDS.items():
+        items = (payload.get("contrast") or {}).get("items", []) if stage == "contrast" \
+            else payload.get(stage) or []
+        for it in items:
+            for hz_key, py_key, _ in fields:
+                if isinstance(it, dict) and it.get(hz_key):
+                    it[py_key] = sentence_pinyin(it[hz_key])
+    return payload
+
+
 def _fix_pinyin(hanzi, pinyin):
     """Keep the writer's pinyin when it has one syllable per character;
     otherwise derive it, so characters and pinyin never disagree."""
@@ -707,6 +731,8 @@ def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), 
     those that pass are kept from draft to draft, and a later draft only
     has to supply what is still missing. Items the reviewer flags are
     dropped; the set is accepted once every stage still has its share."""
+    if hsk:
+        china_pairs = ()            # the HSK word, not the Malaysian one
     bank = {stage: [] for stage in STAGES}
     keys = {stage: set() for stage in STAGES}
     introduced, contrast_with, feedback = [], None, ""
@@ -750,7 +776,7 @@ def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), 
             ok, review_problems, reviewed = review(candidate, structure)
             if ok:
                 candidate["reviewed"] = reviewed
-                return candidate
+                return repinyin(candidate) if hsk else candidate
             flagged = flagged_items(review_problems)
             if flagged is not None:
                 # drop what the reviewer flagged; the rest it judged sound
@@ -763,7 +789,7 @@ def generate(structure, known_words, china_pairs=(), contrasts=(), previous=(), 
                 if not _shortfall(bank):
                     candidate = _assemble(bank, contrast_with, introduced, structure)
                     candidate["reviewed"] = reviewed
-                    return candidate
+                    return repinyin(candidate) if hsk else candidate
             problems = review_problems
             short = _shortfall(bank)
         if recycle and not short:

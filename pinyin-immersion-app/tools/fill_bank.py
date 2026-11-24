@@ -32,6 +32,11 @@ READING_STOCK = 8       # unread reading passages to have ready each morning
 
 def main(max_sets=25):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    missing = [k for k in ("DATABASE_URL", "GROQ_API_KEY") if not os.environ.get(k)]
+    if missing:
+        sys.exit(f"Missing {' and '.join(missing)}. Add {'them' if len(missing) > 1 else 'it'} as "
+                 "repository secrets (GitHub: Settings → Secrets and variables → Actions → "
+                 "New repository secret), with the same values as the Streamlit app's secrets.")
     import clock
     import db_manager as db
     import drill_bank

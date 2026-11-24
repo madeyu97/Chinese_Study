@@ -72,9 +72,12 @@ lesson opens straight away:
 - In the app: opening Today queues the drills for today's and the next few
   days' structures (`ahead.py`, `drill_bank.py`).
 - Nightly: `.github/workflows/fill-drill-bank.yml` runs `tools/fill_bank.py`
-  at 02:00 Malaysia time, before Groq's daily allowance resets. It needs the
-  repository secrets `DATABASE_URL` and `GROQ_API_KEY`, the same values the
-  app uses.
+  at 02:00 Malaysia time, before Groq's daily allowance resets: up to 12
+  drill sets for the coming mornings, then reading passages. It waits for
+  the strong models (gpt-oss-120b, Qwen) rather than use the small one. It
+  needs the repository secrets `DATABASE_URL` and `GROQ_API_KEY`, the same
+  values the app uses. Its log (Actions tab) says what it wrote and why
+  anything was rejected.
 
 ## Configuration
 

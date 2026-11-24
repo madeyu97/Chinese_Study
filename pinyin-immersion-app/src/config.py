@@ -79,9 +79,11 @@ WHISPER_MODEL = "whisper-large-v3"
 # call goes when its model's allowance is used up - each model has its own,
 # so a full one needn't mean waiting. See ai_budget.py.
 AI_TOKENS_PER_MINUTE = {"*": 8000}
+# (the strong model first: Groq's daily allowance is 200k tokens for 120b but
+# 2M for Qwen, so when 120b's day is spent Qwen carries on at full strength)
 AI_FALLBACKS = {
-    "openai/gpt-oss-120b": ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
-    "qwen/qwen3.8-27b": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    "openai/gpt-oss-120b": ["qwen/qwen3.8-27b", "openai/gpt-oss-20b"],
+    "qwen/qwen3.8-27b": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "openai/gpt-oss-20b": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
 }
 # models only the learner's own waiting calls may fall back to (their Chinese

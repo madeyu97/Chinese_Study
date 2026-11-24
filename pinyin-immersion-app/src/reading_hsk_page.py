@@ -141,26 +141,37 @@ def run(user):
         S.rh_cur = cur
     p = cur["payload"]
 
+    q = p["question"]
+    ans = S.get("rh_answer")
+    # listening first (HSK 4's listening paper is a third of the exam): the
+    # question is answered by ear, then the text is there to read
+    c1, c2 = st.columns(2)
+    listen = c1.toggle("🎧 Listen first", value=True, key="rh_listen")
+    all_py = c2.toggle("Show all pinyin", key="rh_all_py")
+    hidden = listen and ans is None and S.get("rh_shown") != cur["id"]
     st.subheader(p.get("title", ""))
     audio = create_audio_file(p["text"])
     if audio:
         st.audio(audio, format="audio/mp3")
-    all_py = st.toggle("Show all pinyin", key="rh_all_py")
-    st.html(passage_html(p.get("words") or [], all_py))
-    st.caption("Tap a word for its pinyin and meaning. 🟡 Gold words are above HSK "
-               f"{level} — their pinyin shows.")
-    with st.expander("Words"):
-        seen = set()
-        for w in p.get("words") or []:
-            if w.get("punct") or w["w"] in seen:
-                continue
-            seen.add(w["w"])
-            tag = "🟡 " if w.get("new") else ""
-            lv = f" · HSK {w['hsk']}" if w.get("hsk") else ""
-            st.markdown(f"{tag}**{w['w']}** {w.get('py', '')} — {w.get('en', '')}{lv}")
+    if hidden:
+        st.caption("Listen — twice if you need — and answer the question. Then read it.")
+        if st.button("📄 Show the text", key=f"rh_show_{cur['id']}"):
+            S.rh_shown = cur["id"]
+            st.rerun()
+    else:
+        st.html(passage_html(p.get("words") or [], all_py))
+        st.caption("Tap a word for its pinyin and meaning. 🟡 Gold words are above HSK "
+                   f"{level} — their pinyin shows.")
+        with st.expander("Words"):
+            seen = set()
+            for w in p.get("words") or []:
+                if w.get("punct") or w["w"] in seen:
+                    continue
+                seen.add(w["w"])
+                tag = "🟡 " if w.get("new") else ""
+                lv = f" · HSK {w['hsk']}" if w.get("hsk") else ""
+                st.markdown(f"{tag}**{w['w']}** {w.get('py', '')} — {w.get('en', '')}{lv}")
 
-    q = p["question"]
-    ans = S.get("rh_answer")
     with st.container(border=True):
         st.markdown(f"**{q['question']}**")
         if ans is None:

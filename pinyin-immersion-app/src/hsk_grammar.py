@@ -549,3 +549,54 @@ def card(sid):
     return {"how": how, "trap": trap, "examples": examples(sid),
             "hsk": structure_level().get(sid),
             "points": [p["point"] for p in points_for(sid)]}
+
+
+# ----------------------------------------------------------------------
+# how much of a drill set a session uses (HSK track)
+# ----------------------------------------------------------------------
+# new    met for the first time (or failed last time): the learn card, then
+#        a trimmed full set
+# check  new, but below your tested grammar level: a quick check; pass it
+#        and it is treated as known (next seen in a week), fail it and it
+#        becomes a full lesson next time
+# quick  a review: a few items, mostly said aloud
+LESSON_ITEMS = {
+    "new": {"identify": 3, "build": 2, "transform": 2, "produce": 3, "contrast": 2,
+            "rapid": 4, "conversation": 2},
+    "check": {"build": 1, "rapid": 3, "produce": 2},
+    "quick": {"build": 1, "rapid": 3, "produce": 2},
+}
+LESSON_MINUTES = {"new": 7, "check": 2, "quick": 2}
+
+
+def lesson_mode(sid, progress, upto):
+    """new / check / quick for a structure today (see LESSON_ITEMS)."""
+    p = (progress or {}).get(sid)
+    if p:
+        return "quick" if (p.get("interval") or 0) > 0 else "new"
+    return "check" if structure_level().get(sid, upto) < upto else "new"
+
+
+def plan_lessons(due, fresh, progress, upto, minutes, new_max, checks_max):
+    """The morning's structures: reviews first, then new ones in learning
+    order, within the minutes. At least one if there is anything at all.
+    due and fresh are structure ids, best first. Returns [(sid, mode)]."""
+    picked, left, full, checks = [], minutes, 0, 0
+    for sid in due:
+        mode = lesson_mode(sid, progress, upto)
+        cost = LESSON_MINUTES[mode]
+        if cost > left and picked:
+            break
+        picked.append((sid, mode))
+        left -= cost
+    for sid in fresh:
+        mode = lesson_mode(sid, progress, upto)
+        if (mode == "new" and full >= new_max) or (mode == "check" and checks >= checks_max):
+            break
+        if LESSON_MINUTES[mode] > left and picked:
+            break
+        picked.append((sid, mode))
+        left -= LESSON_MINUTES[mode]
+        full += mode == "new"
+        checks += mode == "check"
+    return picked

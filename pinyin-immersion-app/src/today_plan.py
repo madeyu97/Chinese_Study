@@ -30,7 +30,8 @@ import time
 from datetime import datetime, timedelta
 
 import clock
-from config import (GRAMMAR_NEW_PER_DAY, HANDWRITING_NEW_PER_DAY, PLAN_GRAMMAR_STRUCTURES, PLAN_HANDWRITING_REVIEWS,
+from config import (GRAMMAR_NEW_PER_DAY, HANDWRITING_NEW_PER_DAY, HSK_GRAMMAR_CHECKS_MAX,
+                    HSK_GRAMMAR_MINUTES, HSK_GRAMMAR_NEW_MAX, PLAN_GRAMMAR_STRUCTURES, PLAN_HANDWRITING_REVIEWS,
                     PLAN_READING_SENTENCES, PLAN_RECAP_WORDS, PLAN_SENTENCES_LISTEN,
                     PLAN_SENTENCES_SPEAK, SESSION_GAP_HOURS, SESSION_OPENS, SOUND_NEW_PER_DAY,
                     VOCAB_BACKLOG_SOFT, VOCAB_NEW_PER_DAY, VOCAB_NEW_PER_SESSION,
@@ -108,10 +109,32 @@ def _tones(state, done):
                   0.8 * (due + new), {"new": new}, done)]
 
 
+def _grammar_hsk(g, done):
+    """HSK track: reviews first, then new structures, in about
+    HSK_GRAMMAR_MINUTES (hsk_grammar.plan_lessons)."""
+    import hsk_grammar as hg
+    names = dict(g["due"] + g["fresh"])
+    picked = hg.plan_lessons([sid for sid, _ in g["due"]], [sid for sid, _ in g["fresh"]],
+                             g.get("progress", {}), g.get("upto", 1), HSK_GRAMMAR_MINUTES,
+                             HSK_GRAMMAR_NEW_MAX, HSK_GRAMMAR_CHECKS_MAX)
+    if not (picked or "morning:grammar" in done):
+        return []
+    modes = [m for _, m in picked]
+    parts = [_n(modes.count("quick"), "review")] if "quick" in modes else []
+    news = [names[sid] for sid, m in picked if m == "new"]
+    parts += [f"new: {', '.join(news)}"] if news else []
+    parts += [_n(modes.count("check"), "quick check")] if "check" in modes else []
+    return [_step("morning", "grammar", " · ".join(parts) or "nothing due",
+                  sum(hg.LESSON_MINUTES[m] for m in modes),
+                  {"ids": [sid for sid, _ in picked], "modes": modes}, done)]
+
+
 def _grammar(state, done):
     g = state.get("grammar")
     if not (g and g["known"] >= GRAMMAR_MIN_KNOWN):
         return []
+    if state.get("hsk_track"):
+        return _grammar_hsk(g, done)
     if len(g["due"]) >= PLAN_GRAMMAR_STRUCTURES:            # catching up: reviews only
         picked = [(sid, name, "review") for sid, name in g["due"][:PLAN_GRAMMAR_STRUCTURES]]
     elif g["due"]:
@@ -337,12 +360,17 @@ def gather_state(user_id, also=(), hsk_track=False):
                                                            else None))
             else:
                 order = gc.learning_order()
-            queue = gd.todays_queue(order, g_progress, today, g_new, GRAMMAR_NEW_PER_DAY)
+            queue = gd.todays_queue(order, g_progress, today, g_new,
+                                    HSK_GRAMMAR_NEW_MAX + HSK_GRAMMAR_CHECKS_MAX if hsk_track
+                                    else GRAMMAR_NEW_PER_DAY)
             state["grammar"] = {
                 "known": len(g_known),
                 "due": [(s.id, s.name) for s in queue if s.id in g_progress],
                 "fresh": [(s.id, s.name) for s in queue if s.id not in g_progress]}
             if hsk_track:
+                state["grammar"]["upto"] = hsk.grammar_upto(hsk_levels if ok(hsk_levels) else None)
+                state["grammar"]["progress"] = {sid: {"interval": g_progress[sid].get("interval")}
+                                                for sid, _ in state["grammar"]["due"]}
                 # the drill bank writes these ahead (ahead.for_day): reviews
                 # due in the next few days, then the next new structures
                 import drill_bank

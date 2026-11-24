@@ -215,6 +215,21 @@ with st.expander("Set my level myself"):
         db.set_hsk_levels(USER_ID, listen, read, by="you", grammar=grammar)
         st.rerun()
 
+st.divider()
+st.markdown("**📚 Anki**")
+anki = db.get_anki_words(USER_ID)
+st.caption("Grammar drills are built from words you know. Say roughly how many HSK words "
+           "you've learnt in Anki (HSK 1 is 300 words, 1–2 is 500, 1–3 is 1,000, 1–4 is "
+           "2,000), and update it now and then.")
+c1, c2 = st.columns([2, 1])
+n = c1.number_input("HSK words learnt in Anki", 0, 2000, value=anki or 0, step=50)
+if c2.button("Save", key="anki_save", width="stretch"):
+    db.set_anki_words(USER_ID, n)
+    st.rerun()
+if anki:
+    st.caption(f"{anki:,} words cover {len(hsk.recognised_chars(anki)):,} of the "
+               f"{len(hsk.recognise_chars(4)):,} characters HSK 1–4 asks you to recognise.")
+
 history = db.placement_history(USER_ID)
 if history:
     st.divider()

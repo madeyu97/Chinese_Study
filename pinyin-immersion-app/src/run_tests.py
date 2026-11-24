@@ -1886,7 +1886,9 @@ def db_tests():
             for n in (1, 2):
                 ex, _audio = futures[n].result(timeout=30)
                 assert cards[n]["word"]["chinese"] in ex["chinese"]
-            assert asked[:3] == [c["word"]["chinese"] for c in cards[:3]]
+            # this card first; the next two are written side by side, in either order
+            assert asked[0] == cards[0]["word"]["chinese"]
+            assert sorted(asked[1:3]) == sorted(c["word"]["chinese"] for c in cards[1:3])
             assert at.session_state["sn_ex"]["chinese"] == f"我说{cards[0]['word']['chinese']}。"
             db.flush_background()
         finally:
@@ -2130,6 +2132,50 @@ def db_tests():
             (db.bank_get, audio_engine.create_audio_file, db.grammar_known_vocab,
              db.grammar_pick_set, db.grammar_mark_served, gdr.grade_answer) = real
 
+    @test("HSK grammar: a quick check below your level - no lesson card, a few items, a week's gap when passed")
+    def t_grammar_hsk_modes():
+        import audio_engine
+        import hsk_grammar as _hg
+        from streamlit.testing.v1 import AppTest
+        uid = _fresh_learner()
+        db.set_hsk_levels(uid, 3, 3, "test", grammar=3)
+        real = (audio_engine.create_audio_file, db.grammar_known_vocab, db.grammar_pick_set,
+                db.grammar_mark_served)
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        db.grammar_known_vocab = lambda user_id: GR_KNOWN * 2
+        db.grammar_pick_set = lambda user_id, sid, n: {"id": 0, "payload": _gr_payload()}
+        db.grammar_mark_served = lambda set_id: None
+
+        def page():
+            at = AppTest.from_file("views/7_Grammar.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "matt", "display_name": "M"}
+            return at
+        try:
+            at = page(); at.run()
+            assert not at.exception, at.exception
+            next(b for b in at.button if b.label == "▶️ Start").click().run()
+            sid = at.session_state["gr_sid"]
+            assert _hg.structure_level()[sid] < 3 and at.session_state["gr_mode"] == "check"
+            assert "Got it — start the drills" not in [b.label for b in at.button], "no lesson card"
+            stages = at.session_state["gr_stages"]
+            assert set(stages) <= set(_hg.LESSON_ITEMS["check"]) and "rapid" in stages, stages
+            assert any("Quick check" in c.value for c in at.caption)
+            at.session_state["gr_results"] = ["correct"] * 6
+            at.session_state["gr_stage"] = len(stages)
+            at.run()
+            assert not at.exception, at.exception
+            p_ = db.grammar_progress(uid)[sid]
+            assert p_["interval"] >= 7, p_
+            # a review of it later is quick, a miss turns it back into a lesson
+            assert _hg.lesson_mode(sid, db.grammar_progress(uid), 3) == "quick"
+            # Anki progress is kept, and drills then build from those words
+            assert db.get_anki_words(uid) is None
+            db.set_anki_words(uid, 450)
+            assert db.get_anki_words(uid) == 450
+        finally:
+            (audio_engine.create_audio_file, db.grammar_known_vocab, db.grammar_pick_set,
+             db.grammar_mark_served) = real
+
     @test("I don't know: on every quiz it shows the answer and counts as a miss, never as a pick")
     def t_dont_know():
         import audio_engine
@@ -2301,6 +2347,7 @@ def db_tests():
     t_words_resume()
     t_pages_resume()
     t_dont_know()
+    t_grammar_hsk_modes()
     t_pages_smoke()
 
 
@@ -3524,6 +3571,61 @@ def t_plan_hsk():
     assert _keys(_sess(tplan.build_day(_plan_state()))["morning"]) == ["words", "tones", "grammar"]
 
 
+@test("HSK grammar pace: reviews first and short, then new ones - all 344 in under a year")
+def t_grammar_pace():
+    import hsk_grammar as _hg
+    from datetime import date as _d, timedelta as _td
+    lv = _hg.structure_level()
+    order = [s_.id for s_ in _hg.learning_order(4)]
+    h1 = [i for i in order if lv[i] == 1]
+    h3 = [i for i in order if lv[i] == 3]
+    # modes: new / check below the grammar level / quick review / relearn after a miss
+    assert _hg.lesson_mode(h3[0], {}, 3) == "new" and _hg.lesson_mode(h1[0], {}, 3) == "check"
+    assert _hg.lesson_mode(h1[0], {}, 1) == "new"
+    assert _hg.lesson_mode(h3[0], {h3[0]: {"interval": 3}}, 3) == "quick"
+    assert _hg.lesson_mode(h3[0], {h3[0]: {"interval": 0}}, 3) == "new"
+    assert sum(_hg.LESSON_ITEMS["quick"].values()) <= 8 < sum(_hg.LESSON_ITEMS["new"].values())
+    # a morning: reviews, then two new lessons at most, within the minutes
+    prog = {i: {"interval": 5} for i in h3[:4]}
+    picked = _hg.plan_lessons(h3[:4], h3[4:12], prog, 3, 25, 2, 6)
+    assert [m for _, m in picked] == ["quick"] * 4 + ["new", "new"], picked
+    assert sum(_hg.LESSON_MINUTES[m] for _, m in picked) <= 25
+    many = {i: {"interval": 5} for i in h3[:40]}
+    picked = _hg.plan_lessons(h3[:40], h3[40:], many, 3, 25, 2, 6)
+    assert all(m == "quick" for _, m in picked) and len(picked) == 25 // _hg.LESSON_MINUTES["quick"]
+    checks = _hg.plan_lessons([], h1[:10], {}, 3, 25, 2, 6)
+    assert [m for _, m in checks] == ["check"] * 6, "checks of known levels are cheap, capped"
+    assert _hg.plan_lessons(["x"], [], {"x": {"interval": 0}}, 1, 1, 2, 6) == [("x", "new")], \
+        "always at least one"
+    # the plan: an HSK morning names what it holds
+    g = {"known": 300, "due": [(i, i) for i in h3[:3]], "fresh": [(i, i) for i in h3[3:9]],
+         "progress": {i: {"interval": 4} for i in h3[:3]}, "upto": 3}
+    step = _sess(tplan.build_day(_plan_state(grammar=g), hsk_track=True))["morning"]["steps"][0]
+    assert step["params"]["ids"] == h3[:5] and step["params"]["modes"].count("new") == 2, step
+    assert step["detail"].startswith("3 reviews · new: "), step["detail"]
+    # simulated with the real spacing: every structure learnt well within a year
+    prog, learned, today, end = {}, 0, _d(2027, 1, 1), None
+    for day in range(365):
+        due = sorted((i for i, p in prog.items() if p["next"] <= today), key=lambda i: prog[i]["next"])
+        fresh = order[learned:learned + 8]
+        for sid, mode in _hg.plan_lessons(due, fresh, prog, 1, 25, 2, 6):
+            p = prog.setdefault(sid, {"interval": 0, "ease": 2.5})
+            learned += sid in fresh
+            p["interval"], p["ease"], nxt = gdr.schedule(p["interval"], p["ease"], 2, today=today,
+                                                        core_cap=45)
+            p["next"] = _d.fromisoformat(nxt)
+        if learned >= len(order) and end is None:
+            end = day
+        today += _td(days=1)
+    assert end is not None and end < 330, (learned, end)
+    # Anki: what you've learnt there is what drills build from
+    kw = _hsk.known_words("matt", {"listen": 3}, 400)
+    assert 390 <= len(kw) <= 400 and set(kw) <= set(_hsk.anki_known(400)) and "爱" in kw
+    assert len(_hsk.known_words("matt", {"listen": 3}, 20)) >= _hsk.ANKI_FLOOR - 5
+    assert len(_hsk.recognised_chars(2000)) == 1096 and len(_hsk.recognised_chars(300)) < 300
+    assert _hsk.known_words("selina", {"listen": 3}, 400) == []
+
+
 @test("plan: no handwriting yet means more listening at night; recap planned before the morning's words exist")
 def t_plan_evening():
     e = _sess(tplan.build_day(_plan_state(handwriting={"started": False, "due": 0, "new_room": 5,
@@ -4214,7 +4316,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs(); t_grammar_pace()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

@@ -15,6 +15,7 @@ saved as you go, so leaving the app picks up at the same item.
 """
 
 import time
+from datetime import timedelta
 
 import streamlit as st
 
@@ -34,7 +35,8 @@ from audio_engine import create_audio_file, warm
 from auth import on_hsk_track, require_login, sidebar_user_badge
 from speech_engine import transcribe_audio
 from ai_prompter import _force_simplified
-from config import GRAMMAR_NEW_PER_DAY
+from config import (GRAMMAR_NEW_PER_DAY, HSK_GRAMMAR_CHECKS_MAX, HSK_GRAMMAR_CORE_CAP,
+                    HSK_GRAMMAR_NEW_MAX)
 
 MIN_KNOWN = tp.GRAMMAR_MIN_KNOWN
 PINYIN_GOES = 2          # practised this many times: pinyin waits behind a tap
@@ -53,12 +55,13 @@ known, progress, _new_today, _levels = db.in_parallel(          # one wait, not 
 # listening level before grammar was tested)
 HSK_UPTO = hsk.grammar_upto(_levels) if HSK else None
 order = hg.learning_order(HSK_UPTO) if HSK else gc.learning_order()
-queue = gd.todays_queue(order, progress, clock.today(), _new_today, GRAMMAR_NEW_PER_DAY)
+queue = gd.todays_queue(order, progress, clock.today(), _new_today,
+                        HSK_GRAMMAR_NEW_MAX + HSK_GRAMMAR_CHECKS_MAX if HSK else GRAMMAR_NEW_PER_DAY)
 
 
 SAVED = ("gr_sid", "gr_set", "gr_stages", "gr_stage", "gr_item", "gr_results", "gr_ans",
          "gr_saved", "gr_fresh", "gr_pinyin_open", "gr_plan", "gr_plan_logged", "gr_adopted",
-         "gr_recent")
+         "gr_recent", "gr_mode")
 
 
 def reset_all():
@@ -117,10 +120,13 @@ def big(hanzi, pinyin=""):
                     unsafe_allow_html=True)
 
 
-def start(structure_id):
+def start(structure_id, mode=None):
+    """mode (HSK track): new / check / quick from hg.lesson_mode, or "again"
+    for another full round; how much of the drill set is used (hg.LESSON_ITEMS)."""
     for k in [k for k in S if k.startswith("gr_") and k not in ("gr_audio", "gr_plan")]:
         del S[k]
     S.gr_sid, S.gr_t0 = structure_id, time.time()
+    S.gr_mode = (mode or hg.lesson_mode(structure_id, progress, HSK_UPTO)) if HSK else None
     S.gr_pinyin_open = (progress.get(structure_id) or {}).get("review_count", 0) < PINYIN_GOES
 
 
@@ -165,13 +171,14 @@ def stages_of(payload):
 def items_of(payload, stage):
     items = (payload.get("contrast") or {}).get("items", []) if stage == "contrast" \
         else payload.get(stage, [])
+    cap = hg.LESSON_ITEMS.get("new" if S.get("gr_mode") == "again" else S.get("gr_mode"))
     if stage in ("identify", "contrast"):    # a stored set may predate the option checks
         items = [it for it in items or [] if gd.mcq_problem(it) is None]
     if stage == "conversation":
         # questions written before each came with a cue were often answered
         # with a reply that didn't fit them: those are left out
         items = [it for it in items or [] if str(it.get("cue") or "").strip()]
-    return items or []
+    return (items or [])[:cap.get(stage, 0)] if cap else (items or [])
 
 
 def record(result):
@@ -256,7 +263,7 @@ def learn_card(card):
 
 # HSK track: a structure met for the first time is explained before it's drilled
 card_ = hg.card(structure.id) if HSK else None
-if card_ and structure.id not in progress and S.get("gr_learned") != structure.id:
+if card_ and S.get("gr_mode") == "new" and S.get("gr_learned") != structure.id:
     ahead.grammar(USER_ID, [structure.id], hsk=True)   # its drills are written while you read
     st.subheader(structure.name)
     st.markdown(f"<div style='font-size:1.5rem'>{structure.pattern}</div>",
@@ -308,6 +315,11 @@ st.subheader(structure.name)
 st.markdown(f"<div style='font-size:1.5rem'>{structure.pattern}</div>",
             unsafe_allow_html=True)
 st.caption(structure.purpose)
+if S.get("gr_mode") == "quick":
+    st.caption("🔁 Quick review: a few items, mostly said aloud.")
+elif S.get("gr_mode") == "check":
+    st.caption("⚡ Quick check: this is below your grammar level. Pass it and it counts as "
+               "known; miss it and it becomes a full lesson tomorrow.")
 if card_:
     with st.expander("How it works"):
         learn_card(card_)
@@ -327,9 +339,20 @@ if S.gr_stage >= len(S.gr_stages):
     if "gr_saved" not in S:
         grade, score = gd.session_grade(S.gr_results)
         prev = progress.get(structure.id) or {}
-        interval, ease, nxt = gd.schedule(prev.get("interval") or 0,
-                                          prev.get("ease_factor") or 2.5,
-                                          grade, core=structure.core)
+        mode = S.get("gr_mode")
+        if mode == "check" and grade >= 2:
+            # known already: straight to a week's gap, as if learnt and reviewed twice
+            interval, ease, nxt = gd.schedule(3, 2.5, grade, core=structure.core,
+                                              core_cap=HSK_GRAMMAR_CORE_CAP)
+        elif mode == "check":
+            # not known after all: a full lesson tomorrow
+            interval, ease = 0, 2.5
+            nxt = (clock.today() + timedelta(days=1)).isoformat()
+        else:
+            interval, ease, nxt = gd.schedule(prev.get("interval") or 0,
+                                              prev.get("ease_factor") or 2.5,
+                                              grade, core=structure.core,
+                                              core_cap=HSK_GRAMMAR_CORE_CAP if HSK else 21)
         db.grammar_save_progress(USER_ID, structure.id, nxt, interval, ease, score)
         db.background(db.log_activity, USER_ID, "grammar", structure.id, grade)
         S.gr_saved = (score, nxt)
@@ -371,7 +394,7 @@ if S.gr_stage >= len(S.gr_stages):
             del S["gr_sid"]
         st.rerun()
     if c2.button("🔁 Again, new sentences", width="stretch"):
-        start(structure.id)
+        start(structure.id, "again")
         S.gr_fresh = True          # skip stored sets and write a new one
         st.rerun()
     st.stop()

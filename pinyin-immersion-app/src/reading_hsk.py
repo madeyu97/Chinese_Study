@@ -307,9 +307,11 @@ def topic_for(level, rng=None):
     return (rng or random).choice(EASY_TOPICS if level <= 2 else TOPICS)
 
 
-def generate(level, grammar=(), topic="", avoid=(), attempts=3):
+def generate(level, grammar=(), topic="", avoid=(), attempts=None):
     """Write, check and review a passage. Returns the payload (with "words"
-    annotated) or None."""
+    annotated) or None. HSK 1-2 get more drafts: with a few hundred words,
+    natural writing that the reviewer passes takes more revising."""
+    attempts = attempts or (5 if level <= 2 else 3)
     from config import GENERATION_MODEL
     from grammar_drills import _chat_json
     feedback = ""

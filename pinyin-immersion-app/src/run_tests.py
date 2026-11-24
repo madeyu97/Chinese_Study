@@ -4202,6 +4202,12 @@ def t_reading_hsk():
     # the question is in Chinese at the level, with its English
     assert any("question_english" in p for p in rh.check(dict(good, question={
         "question": "谁去了？", "options": ["我", "你", "他"], "answer": 0}), 1))
+    # one or two undeclared words are declared for the writer, with pinyin and meaning
+    slip = dict(good, text=text.replace("我看书", "我等妈妈"), new_words=list(good["new_words"]))
+    assert any("等" in p for p in rh.check(dict(slip, new_words=list(good["new_words"])), 1))
+    fixed = rh.auto_declare(slip, 1)
+    assert rh.check(fixed, 1) == [] and any(w["hanzi"] == "等" and w["pinyin"] == "děng"
+                                            for w in fixed["new_words"]), fixed["new_words"]
     hard_q = dict(good["question"], question="谁去巴刹购物了？")
     assert any("question uses words above" in p and "购物" in p
                for p in rh.check(dict(good, question=hard_q), 1))

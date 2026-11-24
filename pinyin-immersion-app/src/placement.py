@@ -156,17 +156,19 @@ def grammar_pool(level):
             if words and 4 <= len(words) <= most:
                 seen.add(zh)
                 out.append({"hanzi": zh, "english": ex["english"], "answer": words,
-                            "point": p["id"]})
+                            "point": p["id"],
+                            "pinyin": ex.get("pinyin") if zh == ex["chinese"] else ""})
     return out
 
 
 def make_grammar_item(ex, rng):
     import grammar_build as gb
     import hsk_grammar as hg
+    from pinyin_hsk import word_pinyin
     return {**ex, "word": ex["hanzi"], "level": int(ex["point"][1]),
             "tiles": gb._shuffled(ex["answer"], rng.random()),
-            "pinyin": {w: hg.sentence_pinyin(w) for w in ex["answer"]},
-            "sentence_pinyin": hg.sentence_pinyin(ex["hanzi"])}
+            "pinyin": dict(zip(ex["answer"], word_pinyin(ex["answer"]))),
+            "sentence_pinyin": ex.get("pinyin") or hg.sentence_pinyin(ex["hanzi"])}
 
 
 def _level_items(state):

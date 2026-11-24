@@ -17,7 +17,7 @@ Writes, for levels 1-4 only:
   write.csv       char, band           characters to write by hand (手写字);
                                        band 2 = the syllabus's "HSK 1-2" list
   grammar.csv     id, level, point, type, category, detail
-  grammar_examples.csv  grammar_id, chinese, english
+  grammar_examples.csv  grammar_id, chinese, pinyin, english
   write_order.csv the 400 writing characters in teaching order: band by
                   band, and within a band parts before the characters built
                   from them (女 before 好 and 妈), commonest first.
@@ -86,6 +86,31 @@ def measure_words(cedict):
     return out
 
 
+# CC-CEDICT senses that mislead a learner (slang, old senses, notes), and gaps
+GLOSS_FIX = {
+    "二": "two / 2", "本子": "notebook", "绿茶": "green tea", "踢": "to kick / to play (football)",
+    "药": "medicine / drug", "北": "north", "后天": "the day after tomorrow", "鸡": "chicken",
+    "开机": "to switch on / to boot up", "啤酒": "beer", "沙发": "sofa",
+    "外卖": "takeaway (food) / delivery", "以为": "to think (often wrongly) / to assume",
+    "安检": "security check", "大巴": "coach / large bus", "动车": "high-speed train",
+    "高考": "college entrance exam", "汗": "sweat", "江": "river", "体检": "physical check-up",
+    "厉害": "terrible / intense / amazing", "母子": "mother and child",
+    "篇": "(measure word for articles and essays) / a piece of writing",
+    "巧克力": "chocolate (Malaysia: 朱古力 zhū gǔ lì)", "幽默": "humour / humorous",
+    "奶奶": "grandma (father's mother)", "难听": "unpleasant to hear / rude",
+    "开学": "school starts / start of term", "过节": "to celebrate a festival",
+    "出来": "to come out; (after a verb) out, or figured out: 想出来 = think of",
+    "说明书": "instruction manual", "起到": "to have (an effect) / to play (a role)",
+    "普通话": "Mandarin (standard Chinese)", "词语": "word / expression",
+    "点名": "to take the register / to name someone", "电动车": "electric bike / electric vehicle",
+    "打工": "to work a casual or part-time job", "自习": "to study on your own (outside class)",
+    "填写": "to fill in (a form)", "出行": "to go on a trip / to travel", "入学": "to start school",
+    "交警": "traffic police", "背": "to carry on your back",
+    "面条儿": "noodles", "一点儿": "a little / a bit", "一块儿": "together", "差点儿": "almost",
+    "干活儿": "to work (manual work)", "好玩儿": "fun", "小孩儿": "child", "聊天儿": "to chat",
+}
+
+
 def build_words(anki):
     house = house_glosses()
     rows, seen = [], {}
@@ -104,12 +129,18 @@ def build_words(anki):
         if "[" in english or re.search(r"\bsee\b", english.split("/")[0]):
             english = short_gloss(english) or short_gloss(r["definition_cc-cedict"])
         english = re.sub(r"\s*\((Taiwan|also) pr\.[^)]*\)", "", english).strip()
+        english = GLOSS_FIX.get(word, english)
         row = {"word": word, "level": level, "pinyin": pinyin,
                "pos": r["part_of_speech"], "english": english,
                "erhua": int(de.has_erhua(word, pinyin) and word not in ("儿子", "女儿")),
                "measure": "、".join(measure_words(r["definition_cc-cedict"]))}
         seen[word] = row
         rows.append(row)
+    # 儿 words take the meaning of the word without 儿 (面条儿 = 面条)
+    plain = {r["word"]: r["english"] for r in rows}
+    for r in rows:
+        if r["english"].startswith("erhua variant of") or not r["english"]:
+            r["english"] = plain.get(r["word"].removesuffix("儿")) or GLOSS_FIX.get(r["word"], "")
     return rows
 
 
@@ -138,10 +169,14 @@ def build_grammar(anki):
     with open(anki / "data/grammar-fixes.csv", encoding="utf-8") as f:
         for r in csv.DictReader(f):
             fixes[r["wrong"]] = r["right"]
-    english = {}
+    english, pinyin = {}, {}
     with open(anki / "data/grammar-translations.csv", encoding="utf-8") as f:
         for r in csv.DictReader(f):
             english[r["chinese"]] = r["english"]
+    # the deck's hand-checked pinyin (GB/T 16159 word spacing, 一/不 changes written)
+    with open(anki / "data/grammar-pinyin.csv", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            pinyin[r["chinese"]] = r["pinyin"]
     points, examples = [], []
     for r in tsv(anki / "data/raw/official_grammar.tsv"):
         level = r["examLevelId"].replace("HSK", "")
@@ -154,7 +189,10 @@ def build_grammar(anki):
                        "detail": r["grammarDetail"]})
         for case in filter(None, (c.strip() for c in r["cases"].split("|"))):
             case = fixes.get(case, case)
-            examples.append({"grammar_id": gid, "chinese": case,
+            # the syllabus numbers the senses of 呢 and 才 (呢1, 才2): not part of the sentence
+            clean = re.sub(r"(?<=[呢才])[1-9](?=[^0-9年月日号点])", "", case)
+            examples.append({"grammar_id": gid, "chinese": clean,
+                             "pinyin": re.sub(r"\s+", " ", pinyin.get(case, "")).strip(),
                              "english": english.get(case, "")})
     return points, examples
 
@@ -295,7 +333,7 @@ def main(anki, hsk3, strokes_dir=None):
            "builds_on"])
     points, examples = build_grammar(anki)
     write("grammar.csv", points, ["id", "level", "point", "type", "category", "detail"])
-    write("grammar_examples.csv", examples, ["grammar_id", "chinese", "english"])
+    write("grammar_examples.csv", examples, ["grammar_id", "chinese", "pinyin", "english"])
 
 
 if __name__ == "__main__":

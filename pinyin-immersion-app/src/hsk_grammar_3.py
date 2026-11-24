@@ -148,13 +148,13 @@ LEARN = {
         "The question word goes before 都 and the verb."),
     "shenme_dou_bu": (
         "什么都不 / 什么都没 + verb = nothing at all: 我什么都不想吃, 他什么都没说.",
-        "Not 我不吃什么 for 'I eat nothing' — that means 'there's nothing much I don't eat'."),
+        "我不吃什么 is vaguer — 'I don't eat much' — not 'I eat nothing'."),
     "shei_dou_bu": (
         "谁都不 + verb = nobody: 谁都不知道 (nobody knows).",
         "谁 goes first, before 都."),
     "nali_dou_bu": (
         "哪里都不 / 没 + 去 = nowhere: 我哪里都不想去 (I don't want to go anywhere).",
-        "Not 我不去哪里 ✗."),
+        "我不去哪里 is only 'not going anywhere in particular'; 哪里都不去 is 'nowhere at all'."),
     "qword_indefinite": (
         "Question words can mean some- / any-: 想吃点什么 (want something to eat?), 我好像在"
         "哪里见过她 (I've seen her somewhere).",
@@ -417,7 +417,7 @@ LEARN = {
         "不会听 is 'can't listen' — not the same."),
     "pot_kan_jian": (
         "看得见 / 看不到 = can / can't see; 听不到 = can't hear.",
-        "Not 不能看到 — that's 'not allowed to see'."),
+        "Say 看不到; 不能看到 sounds like it isn't allowed or possible."),
     "deg_dehen": (
         "Adjective + 得很 = very (emphatic): 好得很, 贵得很.",
         "Stronger than 很 + adjective, and comes after."),

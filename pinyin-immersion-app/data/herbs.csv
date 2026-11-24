@@ -48,7 +48,7 @@
 桔梗,Jié Gěng,"platycodon root - Opens and disseminates lung qi, expels phlegm",huatan,1,Platycodonis Radix,
 瓜蔞,Guā Lóu,"trichosanthes fruit - Clears heat, transforms phlegm",huatan,1,Trichosanthis Fructus,瓜蒌
 川貝母,Chuān Bèi Mǔ,"Sichuan fritillary bulb - Transforms phlegm, moistens the lung, stops cough",huatan,1,Fritillariae Cirrhosae Bulbus,川贝母
-苦杏仁,Xìng Rén,"bitter apricot kernel - Stops cough, calms wheezing",huatan,1,Armeniacae Semen Amarum,
+苦杏仁,Kǔ Xìng Rén,"bitter apricot kernel - Stops cough, calms wheezing",huatan,1,Armeniacae Semen Amarum,
 酸棗仁,Suān Zǎo Rén,"sour jujube seed - Nourishes heart and liver, calms the spirit",anshen,1,Ziziphi Spinosae Semen,酸枣仁
 龍骨,Lóng Gǔ,fossilised bone - Heavily settles and calms the spirit,anshen,1,Fossilia Ossis Mastodi,龙骨
 牡蠣,Mǔ Lì,oyster shell - Settles and calms the spirit,pinggan,1,Ostreae Concha,牡蛎
@@ -72,7 +72,7 @@
 蟬蛻,Chán Tuì,"cicada moulting - Disperses wind-heat, benefits throat and voice",jiebiao,2,Cicadae Periostracum,蝉蜕
 升麻,Shēng Má,"cimicifuga - Vents rashes, resolves fire toxin",jiebiao,2,Cimicifugae Rhizoma,
 夏枯草,Xià Kū Cǎo,"selfheal spike - Clears the liver, brightens the eyes",qingre,2,Prunellae Spica,
-龍膽,Lóng Dǎn Cǎo,Chinese gentian - Clears damp-heat of liver and gallbladder,qingre,2,Gentianae Radix et Rhizoma,龙胆
+龍膽,Lóng Dǎn,Chinese gentian - Clears damp-heat of liver and gallbladder,qingre,2,Gentianae Radix et Rhizoma,龙胆
 蒲公英,Pú Gōng Yīng,"dandelion - Clears heat, resolves toxin, dissipates clumps",qingre,2,Taraxaci Herba,
 板藍根,Bǎn Lán Gēn,"isatis root - Clears heat, resolves toxin, cools blood, benefits the throat",qingre,2,Isatidis Radix,板蓝根
 玄參,Xuán Shēn,"figwort root - Clears heat, cools the blood",qingre,2,Scrophulariae Radix,玄参
@@ -87,7 +87,7 @@
 砂仁,Shā Rén,"amomum fruit - Transforms damp, moves qi",huashi,2,Amomi Fructus,
 豬苓,Zhū Líng,"polyporus sclerotium - Promotes urination, percolates dampness",lishui,2,Polyporus,猪苓
 車前子,Chē Qián Zǐ,"plantago seed - Promotes urination, unblocks lin",lishui,2,Plantaginis Semen,车前子
-茵陳,Yīn Chén Hāo,"virgate wormwood - Clears damp-heat, retreats jaundice",lishui,2,Artemisiae Scopariae Herba,茵陈
+茵陳,Yīn Chén,"virgate wormwood - Clears damp-heat, retreats jaundice",lishui,2,Artemisiae Scopariae Herba,茵陈
 吳茱萸,Wú Zhū Yú,"evodia fruit - Warms the liver channel, scatters cold, relieves pain",wenli,2,Euodiae Fructus,吴茱萸
 青皮,Qīng Pí,"green tangerine peel - Breaks qi stagnation, soothes the liver",liqi,2,Citri Reticulatae Pericarpium Viride,
 木香,Mù Xiāng,"costus root - Moves qi, relieves pain",liqi,2,Aucklandiae Radix,
@@ -130,7 +130,7 @@
 黃精,Huáng Jīng,"siberian solomon's seal - Tonifies qi and nourishes yin of spleen, lung and kidney",buxu,3,Polygonati Rhizoma,黄精
 女貞子,Nǚ Zhēn Zǐ,privet fruit - Tonifies liver and kidney yin,buxu,3,Ligustri Lucidi Fructus,女贞子
 墨旱蓮,Mò Hàn Lián,eclipta - Nourishes liver and kidney yin,buxu,3,Ecliptae Herba,墨旱莲
-龜甲,Guī Bǎn,"tortoise shell - Nourishes yin, subdues yang",buxu,3,Testudinis Carapax et Plastrum,龟甲
+龜甲,Guī Jiǎ,"tortoise shell - Nourishes yin, subdues yang",buxu,3,Testudinis Carapax et Plastrum,龟甲
 鱉甲,Biē Jiǎ,"soft-shelled turtle shell - Nourishes yin, subdues yang",buxu,3,Trionycis Carapax,鳖甲
 乳香,Rǔ Xiāng,"frankincense - Invigorates blood, moves qi, relieves pain",huoxue,3,Olibanum,
 沒藥,Mò Yào,"myrrh - Invigorates blood, dispels stasis, relieves pain",huoxue,3,Myrrha,没药

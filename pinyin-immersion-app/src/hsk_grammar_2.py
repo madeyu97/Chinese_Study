@@ -341,7 +341,7 @@ LEARN = {
         "One 了 = it lasted that long and stopped; two 了 = still going."),
     "dur_verb_obj": (
         "With an object, say the verb twice: 他学华语学了两年 (he studied Chinese for two years).",
-        "他学了华语两年 ✗."),
+        "他学了华语两年 ✗ — or put the time before the object: 他学了两年华语."),
     "bi_quantity": (
         "A 比 B + adjective + amount = more … by: 他比我大三岁 (he's three years older), 贵十块.",
         "The amount goes last: 他比我三岁大 ✗."),

@@ -47,7 +47,7 @@ word,level,pinyin,pos,english,erhua,measure
 多,1,duō,形、动、代、数、副,many / much / (after a number) and a bit more: 九点多 = a little past nine,0,
 多少,1,duō shao,代,how much? / how many?,0,
 儿子,1,ér zi,名,son,0,
-二,1,èr,数,two / 2 / (Beijing dialect) stupid,0,
+二,1,èr,数,two / 2,0,
 饭,1,fàn,名,cooked rice / meal,0,碗、顿
 饭店,1,fàn diàn,名,restaurant / hotel,0,家、个
 房间,1,fáng jiān,名,room,0,间、个
@@ -73,7 +73,7 @@ word,level,pinyin,pos,english,erhua,measure
 好吃,1,hǎo chī,形,tasty / delicious,0,
 好看,1,hǎo kàn,形,good-looking / nice-looking,0,
 好听,1,hǎo tīng,形,pleasant to hear,0,
-好玩儿,1,hǎo wánr,形,erhua variant of 好玩,1,
+好玩儿,1,hǎo wánr,形,fun,1,
 号,1,hào,名、量,date (day of the month) / number,0,
 喝,1,hē,动,to drink,0,
 和,1,hé,介、连,and / together with / with,0,
@@ -125,7 +125,7 @@ word,level,pinyin,pos,english,erhua,measure
 们,1,men,后缀,"(plural suffix for people: 我们, 他们)",0,
 米饭,1,mǐ fàn,名,(cooked) rice,0,
 面包,1,miàn bāo,名,bread,0,片、块
-面条儿,1,miàn tiáor,名,erhua variant of,1,
+面条儿,1,miàn tiáor,名,noodles,1,
 明年,1,míng nián,名,next year,0,
 明天,1,míng tiān,名,tomorrow,0,
 名字,1,míng zi,名,name (of a person or thing),0,个
@@ -259,7 +259,7 @@ word,level,pinyin,pos,english,erhua,measure
 一半,1,yí bàn,数,half,0,
 一下,1,yí xià,数量、副,(after a verb) briefly / a bit / once,0,
 椅子,1,yǐ zi,名,chair,0,把、张
-一点儿,1,yì diǎnr,数量,erhua variant of,1,
+一点儿,1,yì diǎnr,数量,a little / a bit,1,
 一些,1,yì xiē,数量,some / a few,0,
 有,1,yǒu,动,to have / there is / there are,0,
 有的,1,yǒu de,代,(there are) some (who are...) / some (exist),0,
@@ -306,7 +306,7 @@ word,level,pinyin,pos,english,erhua,measure
 帮,2,bāng,动,to help / to assist / to support,0,
 帮忙,2,bāng máng,动,to help / to lend a hand,0,
 包,2,bāo,动、名、量,bag / to wrap / bun,0,个、只
-本子,2,běn zi,名,"book / notebook / Japanese-style self-published comic (esp. an erotic one), aka ""dōjinshi""",0,本
+本子,2,běn zi,名,notebook,0,本
 比,2,bǐ,动、介,than / to compare,0,
 笔,2,bǐ,名,pen / pencil / writing brush,0,支、枝
 别,2,bié,副,don't (imperative) / other,0,
@@ -316,7 +316,7 @@ word,level,pinyin,pos,english,erhua,measure
 车站,2,chē zhàn,名,rail station / bus stop,0,处、个
 出,2,chū,动,"to go out / to come out; (Malaysian, after a clock time) a little past: 七点九个字出",0,
 出国,2,chū guó,动,to go abroad / to leave the country,0,
-出来,2,chū lái,动,"(after a verb, indicates coming out, completion of an action, or ability to discern or detect)",0,
+出来,2,chū lái,动,"to come out; (after a verb) out, or figured out: 想出来 = think of",0,
 出门,2,chū mén,动,to go out / to leave home,0,
 出去,2,chū qù,动,to go out,0,
 床,2,chuáng,名,bed / couch / measure word for beds,0,张
@@ -374,7 +374,7 @@ word,level,pinyin,pos,english,erhua,measure
 就,2,jiù,副,then / right away / as early as (happening sooner than expected),0,
 咖啡,2,kā fēi,名,coffee,0,杯
 开始,2,kāi shǐ,动、名,to begin / beginning,0,个
-开学,2,kāi xué,动,(of a student) to start school / (of a semester) to begin / the start of a new term,0,
+开学,2,kāi xué,动,school starts / start of term,0,
 考,2,kǎo,动,to check / to verify / to test,0,
 考试,2,kǎo shì,动、名,to take an exam / exam,0,次
 可能,2,kěn éng,形、名、动,might (happen) / possible,0,个
@@ -390,7 +390,7 @@ word,level,pinyin,pos,english,erhua,measure
 路,2,lù,名,road / journey / route,0,条
 路上,2,lù shang,名,on the road / on a journey,0,
 旅游,2,lǚ yóu,动,trip / journey,0,
-绿茶,2,lǜ chá,名,green tea / (slang) (of a girl) seemingly innocent and charming but actually calculating and manipulative / a girl who has these qualities,0,
+绿茶,2,lǜ chá,名,green tea,0,
 绿色,2,lǜ sè,名、形,green,0,
 慢,2,màn,形,slow,0,
 没意思,2,méi yì si,,boring / of no interest,0,
@@ -404,7 +404,7 @@ word,level,pinyin,pos,english,erhua,measure
 那么,2,nà me,代、连,so / then / like that,0,
 那样,2,nà yàng,代,like that / that kind,0,
 奶茶,2,nǎi chá,名,milk tea,0,
-奶奶,2,nǎi nai,名,(informal) grandma (paternal grandmother) / (respectful) mistress of the house,0,位
+奶奶,2,nǎi nai,名,grandma (father's mother),0,位
 男孩儿,2,nán háir,名,erhua form of 男孩,1,
 鸟,2,niǎo,名,bird,0,只、群
 女孩儿,2,nǚ háir,名,erhua form of 女孩,1,
@@ -436,7 +436,7 @@ word,level,pinyin,pos,english,erhua,measure
 虽然,2,suī rán,连,although / even though,0,
 所以,2,suǒ yǐ,连,therefore / as a result,0,
 疼,2,téng,形,(it) hurts / sore / to love dearly,0,
-踢,2,tī,动,to kick / to play (e.g. soccer) / (slang) butch (in a lesbian relationship),0,
+踢,2,tī,动,to kick / to play (football),0,
 题,2,tí,名,topic / problem for discussion / exam question,0,个、道
 条,2,tiáo,量,"(measure word for long thin things: loaves, roads, fish) / strip",0,
 跳舞,2,tiào wǔ,动,to dance,0,
@@ -456,14 +456,14 @@ word,level,pinyin,pos,english,erhua,measure
 下来,2,xià lái,动,to come down / (completed action marker),0,
 下面,2,xià miàn,名,below / under,0,
 下去,2,xià qù,动,to go down / to descend,0,
-小孩儿,2,xiǎo háir,名,erhua variant of 小孩,1,
+小孩儿,2,xiǎo háir,名,child,1,
 小时候,2,xiǎo shí hou,名,in one's childhood,0,
 笑,2,xiào,动,laugh / smile,0,
 姓,2,xìng,名、动,family name / surname / to be surnamed,0,
 姓名,2,xìng míng,名,full name,0,
 颜色,2,yán sè,名,color,0,
 眼睛,2,yǎn jing,名,eye,0,只、双
-药,2,yào,名,"medicine / drug / substance used for a specific purpose (e.g. poisoning, explosion, fermenting)",0,种、服、味
+药,2,yào,名,medicine / drug,0,种、服、味
 药店,2,yào diàn,名,pharmacy (Malaysia: 药房 yào fáng),0,
 爷爷,2,yé ye,名,father's father / paternal grandfather,0,
 一会儿,2,yí huìr,数量、副,a moment / a while / in a moment,1,
@@ -512,7 +512,7 @@ word,level,pinyin,pos,english,erhua,measure
 帮助,3,bāng zhù,动,assistance / aid,0,
 饱,3,bǎo,形,full (after eating),0,
 报纸,3,bào zhǐ,名,newspaper / newsprint,0,份、期、张
-北,3,běi,名,north / (classical) to be defeated,0,
+北,3,běi,名,north,0,
 北方,3,běi fāng,名,north / the northern part a country,0,
 被,3,bèi,介,(passive marker) by: 被偷了 = got stolen,0,
 笔记,3,bǐ jì,名,to take down (in writing) / notes,0,本
@@ -651,7 +651,7 @@ word,level,pinyin,pos,english,erhua,measure
 关于,3,guān yú,介,about / concerning,0,
 关注,3,guān zhù,动,to pay attention to / to follow something closely,0,
 国家,3,guó jiā,名,country / nation,0,个
-过节,3,guò jié,动,to celebrate a festival / after the celebrations (i.e. once the festival is over),0,
+过节,3,guò jié,动,to celebrate a festival,0,
 海,3,hǎi,名,sea / ocean,0,个、片
 害怕,3,hài pà,动,to be afraid / to be scared,0,
 好多,3,hǎo duō,数,many / quite a lot,0,
@@ -664,7 +664,7 @@ word,level,pinyin,pos,english,erhua,measure
 红绿灯,3,hóng-lǜ dēng,名,traffic light / traffic signal,0,
 后来,3,hòu lái,名,afterwards / later,0,
 后年,3,hòu nián,名,the year after next,0,
-后天,3,hòu tiān,名,"the day after tomorrow / life after birth (the period in which one develops through experiences, contrasted with 先天) / acquired (not innate or congenital)",0,
+后天,3,hòu tiān,名,the day after tomorrow,0,
 护照,3,hù zhào,名,passport,0,本、个
 花园,3,huā yuán,名,garden,0,座
 画家,3,huà jiā,名,painter,0,个
@@ -676,7 +676,7 @@ word,level,pinyin,pos,english,erhua,measure
 会议,3,huì yì,名,meeting / conference,0,场、届
 或,3,huò,连,or,0,
 或者,3,huò zhě,连,or / possibly,0,
-鸡,3,jī,名,fowl / chicken / (slang) prostitute,0,只
+鸡,3,jī,名,chicken,0,只
 几乎,3,jī hū,副,almost / nearly,0,
 机会,3,jī huì,名,opportunity / chance,0,个
 极,3,jí,副,"extremely / pole (geography, physics) / utmost",0,
@@ -717,7 +717,7 @@ word,level,pinyin,pos,english,erhua,measure
 卡,3,kǎ,名,card / to get stuck,0,张、片
 开花,3,kāi huā,动,to bloom / to blossom / to flower,0,
 开会,3,kāi huì,动,to hold a meeting / to attend a meeting,0,
-开机,3,kāi jī,动,to start an engine / to boot up (a computer) / to press Ctrl-Alt-Delete,0,
+开机,3,kāi jī,动,to switch on / to boot up,0,
 开心,3,kāi xīn,形,to feel happy / to rejoice,0,
 看来,3,kàn lái,动,it seems,0,
 可,3,kě,连,can / may / able to,0,
@@ -745,7 +745,7 @@ word,level,pinyin,pos,english,erhua,measure
 凉快,3,liáng kuai,形,nice and cold / pleasantly cool,0,
 辆,3,liàng,量,measure word for vehicles,0,
 聊,3,liáo,动,to chat,0,
-聊天儿,3,liáo tiānr,动,erhua variant of 聊天,1,
+聊天儿,3,liáo tiānr,动,to chat,1,
 了解,3,liǎo jiě,动,to understand / to know about,0,
 邻居,3,lín jū,名,neighbor / next door,0,个
 留学,3,liú xué,动,to study abroad,0,
@@ -771,7 +771,7 @@ word,level,pinyin,pos,english,erhua,measure
 男人,3,nán rén,名,man,0,个
 男生,3,nán shēng,名,schoolboy / male student,0,
 难题,3,nán tí,名,difficult problem,0,
-难听,3,nán tīng,形,unpleasant to hear / coarse / vulgar,0,
+难听,3,nán tīng,形,unpleasant to hear / rude,0,
 年级,3,nián jí,名,"grade / year (in school, college etc)",0,个
 年轻,3,nián qīng,形,young,0,
 牛,3,niú,名,ox / cow / bull,0,条、头
@@ -783,7 +783,7 @@ word,level,pinyin,pos,english,erhua,measure
 拍照,3,pāi zhào,动,to take a picture,0,
 盘子,3,pán zi,名,tray / plate,0,个
 胖,3,pàng,形,fat / plump,0,
-啤酒,3,pí jiǔ,名,beer (loanword),0,杯、瓶、罐、桶、缸
+啤酒,3,pí jiǔ,名,beer,0,杯、瓶、罐、桶、缸
 平时,3,píng shí,名,ordinarily / in normal times,0,
 瓶子,3,píng zi,名,bottle,0,个
 骑,3,qí,动,"to ride (a bike, a horse)",0,
@@ -811,7 +811,7 @@ word,level,pinyin,pos,english,erhua,measure
 如果,3,rú guǒ,连,if / in case,0,
 伞,3,sǎn,名,umbrella / parasol,0,把
 扫,3,sǎo,动,to sweep,0,
-沙发,3,shā fā,名,sofa (loanword),0,条、张
+沙发,3,shā fā,名,sofa,0,条、张
 山,3,shān,名,mountain / hill / anything that resembles a mountain,0,座
 上衣,3,shàng yī,名,jacket / upper outer garment,0,件
 勺子,3,sháo zi,名,scoop / ladle,0,把
@@ -855,7 +855,7 @@ word,level,pinyin,pos,english,erhua,measure
 图书馆,3,tú shū guǎn,名,library,0,家、个
 腿,3,tuǐ,名,leg,0,条
 外地,3,wài dì,名,parts of the country other than where one is,0,
-外卖,3,wài mài,动、名,(of a restaurant) to provide a takeout or home delivery meal / takeout (business) / takeout (meal),0,
+外卖,3,wài mài,动、名,takeaway (food) / delivery,0,
 外语,3,wài yǔ,名,foreign language,0,门
 完成,3,wán chéng,动,to complete / to accomplish,0,
 碗,3,wǎn,名,bowl / cup,0,只、个
@@ -913,13 +913,13 @@ word,level,pinyin,pos,english,erhua,measure
 页,3,yè,量,page,0,
 一定,3,yí dìng,形、副,surely / certainly,0,
 一共,3,yí gòng,副,altogether,0,
-一块儿,3,yí kuàir,名、副,erhua variant of,1,
+一块儿,3,yí kuàir,名、副,together,1,
 一样,3,yí yàng,形,same / like,0,
 以后,3,yǐ hòu,名,after / later,0,
 以前,3,yǐ qián,名,before / formerly,0,
 以上,3,yǐ shàng,名,that level or higher / that amount or more,0,
 以外,3,yǐ wài,名,apart from / other than,0,
-以为,3,yǐ wéi,动,to think (i.e. to take it to be true that ...) (Usually there is an implication that the notion is mistaken – except when expressing one's own current opinion.),0,
+以为,3,yǐ wéi,动,to think (often wrongly) / to assume,0,
 以下,3,yǐ xià,名,that level or lower / that amount or less,0,
 一般,3,yì bān,形,ordinary / usually / generally,0,
 一边,3,yì biān,副,one side; 一边…一边… = doing A while doing B,0,
@@ -989,7 +989,7 @@ word,level,pinyin,pos,english,erhua,measure
 作业,3,zuò yè,名,school assignment / homework (Malaysia: 功课 gōng kè),0,个
 爱情,4,ài qíng,名,romance / love (romantic),0,份
 爱心,4,ài xīn,名,compassion / kindness,0,片
-安检,4,ān jiǎn,动,security check (abbr. for ) / to do a security check,0,
+安检,4,ān jiǎn,动,security check,0,
 安排,4,ān pái,动,to arrange / to plan,0,
 按,4,àn,动、介,to press / according to,0,
 按时,4,àn shí,副,on time / before deadline,0,
@@ -1005,7 +1005,7 @@ word,level,pinyin,pos,english,erhua,measure
 报考,4,bào kǎo,动,to enter oneself for an examination,0,
 报名,4,bào míng,动,to sign up / to enter one's name,0,
 抱歉,4,bào qiàn,形,sorry,0,
-背,4,bēi,动,the back of a body or object / to turn one's back / to hide something from,0,
+背,4,bēi,动,to carry on your back,0,
 背包,4,bēi bāo,名,knapsack / rucksack,0,个
 北部,4,běi bù,名,northern part,0,
 倍,4,bèi,量,"(two, three etc) -fold / times (multiplier) / double",0,
@@ -1055,7 +1055,7 @@ word,level,pinyin,pos,english,erhua,measure
 查看,4,chá kàn,动,to look over / to examine,0,
 茶叶,4,chá yè,名,tea / tea leaves,0,盒、罐、包、片
 查找,4,chá zhǎo,动,to search for / to look up,0,
-差点儿,4,chà diǎnr,形、副,erhua variant of,1,
+差点儿,4,chà diǎnr,形、副,almost,1,
 产生,4,chǎn shēng,动,to arise / to come into being,0,
 厂,4,chǎng,名,factory / yard / depot,0,
 场,4,chǎng,量,"(measure word for events, games, films) / field / scene",0,
@@ -1076,14 +1076,14 @@ word,level,pinyin,pos,english,erhua,measure
 出差,4,chū chāi,动,to go on a business trip,0,
 出口,4,chū kǒu,名,an exit / to speak,0,个
 出现,4,chū xiàn,动,to appear,0,
-出行,4,chū xíng,动,to go out somewhere (relatively short trip) / to set off on a journey (longer trip),0,
+出行,4,chū xíng,动,to go on a trip / to travel,0,
 出租,4,chū zū,动,to rent,0,
 厨房,4,chú fáng,名,kitchen,0,间
 厨师,4,chú shī,名,cook / chef,0,
 窗,4,chuāng,名,shutter / window,0,扇
 窗户,4,chuāng hu,名,window (Malaysia: 窗口 chuāng kǒu),0,个、扇
 吹,4,chuī,动,to blow / to play a wind instrument / to blast,0,
-词语,4,cí yǔ,名,word (general term including monosyllables through to short phrases) / term (e.g. technical term),0,
+词语,4,cí yǔ,名,word / expression,0,
 此,4,cǐ,代,this,0,
 此次,4,cǐ cì,,this time,0,
 此外,4,cǐ wài,连,besides / in addition,0,
@@ -1102,13 +1102,13 @@ word,level,pinyin,pos,english,erhua,measure
 达到,4,dá dào,动,to reach / to achieve,0,
 打招呼,4,dǎ zhāo hu,,to greet someone by word or action / to give prior notice,0,
 打败,4,dǎ bài,动,to defeat / to overpower,0,
-打工,4,dǎ gōng,动,"to work a temporary or casual job / (of students) to have a job outside of class time, or during vacation",0,
+打工,4,dǎ gōng,动,to work a casual or part-time job,0,
 打扰,4,dǎ rǎo,动,to disturb / to bother,0,
 打印,4,dǎ yìn,动,to affix a seal / to stamp,0,
 打印机,4,dǎ yìn jī,名,printer,0,
 打折,4,dǎ zhé,动,to give a discount,0,
 打针,4,dǎ zhēn,动,to give or get an injection,0,
-大巴,4,dà bā,名,(coll.) large bus / coach / (abbr. for 大型巴士),0,
+大巴,4,dà bā,名,coach / large bus,0,
 大大,4,dà dà,副,greatly / enormously,0,
 大夫,4,dài fu,名,doctor (Malaysia: 医生 yī shēng),0,
 大量,4,dà liàng,形,great amount / large quantity,0,
@@ -1141,16 +1141,16 @@ word,level,pinyin,pos,english,erhua,measure
 底下,4,dǐ xia,名,the location below something / afterwards,0,
 地球,4,dì qiú,名,the earth,0,
 地址,4,dì zhǐ,名,address,0,个
-点名,4,diǎn míng,动,roll call / to mention sb by name / (to call or praise or criticize sb) by name,0,
+点名,4,diǎn míng,动,to take the register / to name someone,0,
 点头,4,diǎn tóu,动,to nod,0,
-电动车,4,diàn dòng chē,名,"electric vehicle (commonly refers to e-bikes, scooters or electric cars)",0,
+电动车,4,diàn dòng chē,名,electric bike / electric vehicle,0,
 电视剧,4,diàn shì jù,名,TV series / TV drama,0,部
 掉,4,diào,动,to fall / to drop / to lag behind,0,
 调查,4,diào chá,动,investigation / to investigate,0,项、个
 订,4,dìng,动,to agree / to conclude / to draw up,0,
 定,4,dìng,动,to decide / to fix / (一定) surely,0,
 东部,4,dōng bù,名,the east / eastern part,0,
-动车,4,dòng chē,名,(PRC) (D- or C-class) high-speed train / power car / multiple-unit train (abbr. for ),0,
+动车,4,dòng chē,名,high-speed train,0,
 动作,4,dòng zuò,名,movement / motion,0,个
 读者,4,dú zhě,名,reader,0,
 堵车,4,dǔ chē,动,traffic jam / (of traffic) to get congested (Malaysia: 塞车 sāi chē),0,
@@ -1217,10 +1217,10 @@ word,level,pinyin,pos,english,erhua,measure
 赶上,4,gǎn shàng,动,to keep up with / to catch up with,0,
 感受,4,gǎn shòu,动、名,feeling / to feel / to experience,0,
 感谢,4,gǎn xiè,动,to thank / thanks,0,
-干活儿,4,gàn huór,动,erhua variant of,1,
+干活儿,4,gàn huór,动,to work (manual work),1,
 钢琴,4,gāng qín,名,piano,0,架、台
 高价,4,gāo jià,名,high price,0,
-高考,4,gāo kǎo,名,college entrance exam (especially as abbr. for ),0,
+高考,4,gāo kǎo,名,college entrance exam,0,
 高速,4,gāo sù,形,high speed,0,
 高温,4,gāo wēn,名,high temperature,0,
 高于,4,gāo yú,动,greater than / to exceed,0,
@@ -1271,7 +1271,7 @@ word,level,pinyin,pos,english,erhua,measure
 寒假,4,hán jià,名,winter vacation,0,
 寒冷,4,hán lěng,形,cold (climate) / frigid,0,
 喊,4,hǎn,动,to yell / to shout / to call out for (a person),0,
-汗,4,hàn,名,"perspiration / sweat / to be speechless (out of helplessness, embarrassment etc) (Internet slang used as an interjection)",0,滴、头、身
+汗,4,hàn,名,sweat,0,滴、头、身
 航班,4,háng bān,名,scheduled flight / flight number,0,
 好处,4,hǎo chù,名,benefit / advantage,0,
 好好,4,hǎo hǎo,形、副,well / carefully,0,
@@ -1338,7 +1338,7 @@ word,level,pinyin,pos,english,erhua,measure
 健身,4,jiàn shēn,动,to exercise / to keep fit,0,
 健身房,4,jiàn shēn fáng,名,gym / gymnasium,0,
 建议,4,jiàn yì,动、名,to suggest / suggestion,0,个、点
-江,4,jiāng,名,river / (bound form) Yangtze River / (bound form) Jiangsu Province (abbr. for ),0,条、道
+江,4,jiāng,名,river,0,条、道
 将,4,jiāng,介、副,will / shall (formal),0,
 将来,4,jiāng lái,名,in the future / future,0,个
 将要,4,jiāng yào,副,will / shall,0,
@@ -1352,7 +1352,7 @@ word,level,pinyin,pos,english,erhua,measure
 降温,4,jiàng wēn,动,to become cooler / to lower the temperature / cooling,0,
 交,4,jiāo,动,to hand in / to pay / to make (friends),0,
 骄傲,4,jiāo ào,形、名,proud / pride / arrogant,0,
-交警,4,jiāo jǐng,名,traffic police (abbr. for 交通警察),0,
+交警,4,jiāo jǐng,名,traffic police,0,
 交流,4,jiāo liú,动,to exchange / exchange,0,
 郊区,4,jiāo qū,名,suburban district / outskirts,0,
 交通,4,jiāo tōng,名,to be connected / traffic,0,
@@ -1446,7 +1446,7 @@ word,level,pinyin,pos,english,erhua,measure
 理解,4,lǐ jiě,动,to understand,0,
 礼貌,4,lǐ mào,名、形,courtesy / manners,0,
 理想,4,lǐ xiǎng,名、形,an ideal / a dream,0,
-厉害,4,lì hai,形,"(used to describe someone or something that makes a very strong impression, whether favorable or unfavorable) terrible / intense",0,
+厉害,4,lì hai,形,terrible / intense / amazing,0,
 力气,4,lì qi,名,strength,0,
 例如,4,lì rú,动,for example / for instance,0,
 例子,4,lì zi,名,case / (for) instance,0,个
@@ -1497,7 +1497,7 @@ word,level,pinyin,pos,english,erhua,measure
 末,4,mò,名,tip / end / final stage,0,
 母女,4,mǔ nǚ,名,mother and daughter / mother-daughter,0,
 母亲,4,mǔ qīn,名,mother,0,
-母子,4,mǔ zǐ,名,mother and child / parent and subsidiary (companies) / principal and interest,0,
+母子,4,mǔ zǐ,名,mother and child,0,
 目标,4,mù biāo,名,target / goal,0,个
 目的,4,mù dì,名,purpose / aim,0,个
 目的地,4,mù dì dì,名,destination (location),0,
@@ -1535,7 +1535,7 @@ word,level,pinyin,pos,english,erhua,measure
 皮肤,4,pí fū,名,skin,0,层、块
 脾气,4,pí qi,名,character / temperament,0,股
 皮鞋,4,pí xié,名,leather shoes,0,
-篇,4,piān,名、量,sheet / piece of writing / bound set of bamboo slips used for record keeping (old),0,
+篇,4,piān,名、量,(measure word for articles and essays) / a piece of writing,0,
 片,4,piàn,名、量,slice / piece (measure word),0,
 乒乓球,4,pīng pāng qiú,名,table tennis / ping-pong / table tennis ball,0,个
 平常,4,píng cháng,形、名,ordinary / common,0,
@@ -1544,13 +1544,13 @@ word,level,pinyin,pos,english,erhua,measure
 葡萄酒,4,pú tao jiǔ,名,(grape) wine,0,
 普遍,4,pǔ biàn,形,universal / general,0,
 普通,4,pǔ tōng,形,common / ordinary,0,
-普通话,4,pǔ tōng huà,名,Mandarin (common language) / Putonghua (common speech of the Chinese language) / ordinary speech,0,
+普通话,4,pǔ tōng huà,名,Mandarin (standard Chinese),0,
 期,4,qī,量,period / phase / term,0,
 期末,4,qī mò,名,the end of a term or semester (in school),0,
 期中,4,qī zhōng,名,interim / midterm,0,
 其次,4,qí cì,代,next / secondly,0,
 其中,4,qí zhōng,名,among them / in it,0,
-起到,4,qǐ dào,动,(in an expression of the form 起到 + … + 作用) to have (a (motivating etc) effect) / to play (a (stabilizing etc) role),0,
+起到,4,qǐ dào,动,to have (an effect) / to play (a role),0,
 气,4,qì,名、动,air / anger / breath,0,
 气候,4,qì hòu,名,climate / atmosphere,0,
 汽水,4,qì shuǐ,名,soda / pop,0,
@@ -1564,7 +1564,7 @@ word,level,pinyin,pos,english,erhua,measure
 敲,4,qiāo,动,to hit / to strike / to tap,0,
 桥,4,qiáo,名,bridge,0,座
 巧,4,qiǎo,形,opportunely / coincidentally / as it happens,0,
-巧克力,4,qiǎo kè lì,名,chocolate (loanword) (Malaysia: 朱古力 zhū gǔ lì),0,块
+巧克力,4,qiǎo kè lì,名,chocolate (Malaysia: 朱古力 zhū gǔ lì),0,块
 亲戚,4,qīn qi,名,a relative (i.e. family relation),0,门、个、位
 琴,4,qín,名,guqin (a type of zither) / musical instrument in general,0,
 轻,4,qīng,形,light / easy / gentle,0,
@@ -1605,7 +1605,7 @@ word,level,pinyin,pos,english,erhua,measure
 日子,4,rì zi,名,days / life / date,0,
 入,4,rù,动,to enter,0,
 入口,4,rù kǒu,名,entrance / to import,0,
-入学,4,rù xué,动,to enter a school or college / to go to school for the first time as a child,0,
+入学,4,rù xué,动,to start school,0,
 入住,4,rù zhù,动,to check in (at a hotel etc) / to move into (a house),0,
 散步,4,sàn bù,动,to take a walk / to go for a walk,0,
 扫码,4,sǎo mǎ,动,to scan a QR code or barcode,0,
@@ -1681,7 +1681,7 @@ word,level,pinyin,pos,english,erhua,measure
 顺序,4,shùn xù,名,sequence / order,0,
 说法,4,shuō fǎ,名,way of speaking / wording,0,
 说明,4,shuō míng,动、名,to explain / to illustrate,0,个
-说明书,4,shuō míng shū,名,(technical) manual / (book of) directions / synopsis (of a play or film),0,本
+说明书,4,shuō míng shū,名,instruction manual,0,本
 硕士,4,shuò shì,名,master's degree / person who has a master's degree / learned person,0,
 死,4,sǐ,动、形,to die; (after an adjective) extremely: 累死我了 = I'm exhausted,0,
 速度,4,sù dù,名,speed / rate,0,个
@@ -1712,10 +1712,10 @@ word,level,pinyin,pos,english,erhua,measure
 提供,4,tí gōng,动,to offer / to supply,0,
 提前,4,tí qián,动,to shift to an earlier date / to do something ahead of time,0,
 提醒,4,tí xǐng,动,to remind / to call attention to,0,
-体检,4,tǐ jiǎn,动,,0,
+体检,4,tǐ jiǎn,动,physical check-up,0,
 体温,4,tǐ wēn,名,(body) temperature,0,
 体重,4,tǐ zhòng,名,body weight,0,
-填写,4,tián xiě,动,to fill in a form / to write data in a box (on a questionnaire or web form),0,
+填写,4,tián xiě,动,to fill in (a form),0,
 条件,4,tiáo jiàn,名,condition / circumstances,0,个
 听力,4,tīng lì,名,hearing / listening ability,0,
 听众,4,tīng zhòng,名,audience / listeners,0,
@@ -1861,7 +1861,7 @@ word,level,pinyin,pos,english,erhua,measure
 用来,4,yòng lái,动,to be used for,0,
 用于,4,yòng yú,动,use in / use on,0,
 优点,4,yōu diǎn,名,merit / benefit,0,个、项
-幽默,4,yōu mò,形,(loanword) humor / humorous,0,
+幽默,4,yōu mò,形,humour / humorous,0,
 优秀,4,yōu xiù,形,outstanding / excellent,0,
 由,4,yóu,介,by / from / because of,0,
 油,4,yóu,名,oil / fat / grease,0,
@@ -1958,7 +1958,7 @@ word,level,pinyin,pos,english,erhua,measure
 仔细,4,zǐ xì,形,careful / attentive,0,
 自,4,zì,介,self / from,0,
 自然,4,zì rán,名、形、副,natural / of course / nature,0,
-自习,4,zì xí,动,to study outside of class time (reviewing one's lessons) / to study in one's free time / individual study,0,
+自习,4,zì xí,动,to study on your own (outside class),0,
 自信,4,zì xìn,动、名、形,to have confidence in oneself / self-confidence,0,
 自学,4,zì xué,动,self-study / to study on one's own,0,
 总结,4,zǒng jié,动、名,to sum up / to conclude,0,个

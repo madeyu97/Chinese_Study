@@ -31,7 +31,16 @@ import streamlit as st
 
 st.set_page_config(page_title="华语 Study", page_icon="🎧", layout="centered")
 
-from auth import current_user, login_page, on_hsk_track  # noqa: E402  (page config must come first)
+try:
+    from auth import current_user, login_page, on_hsk_track  # noqa: E402  (page config must come first)
+except Exception as e:                       # the database is set up on import
+    import logging
+    logging.error(f"[START] couldn't start: {e}")
+    st.error("Can't reach the study database just now - your progress is safe. "
+             "Try again in a minute.")
+    if st.button("🔄 Try again", type="primary"):
+        st.rerun()
+    st.stop()
 
 if current_user() is None:
     # the sign-in screen is the only page until someone has chosen who they are

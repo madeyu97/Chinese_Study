@@ -2,7 +2,7 @@ const fs = require("fs");
 const { JSDOM } = require("jsdom");
 
 const html = fs.readFileSync(
-  "/home/claude/Chinese_Study-main/pinyin-immersion-app/src/hw_component/index.html", "utf-8");
+  require("path").join(__dirname, "index.html"), "utf-8");
 
 // Strip the CDN script tag (no network in jsdom) — we inject a stub instead.
 const patched = html.replace(/<script src="https:\/\/cdn\.jsdelivr[^"]*"><\/script>/, "");

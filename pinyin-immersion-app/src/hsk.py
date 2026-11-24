@@ -70,10 +70,6 @@ def recognise_chars(upto=4):
     return [c for c, lv in _recognise() if lv <= upto]
 
 
-def char_level(ch):
-    return next((lv for c, lv in _recognise() if c == ch), None)
-
-
 @functools.lru_cache(maxsize=1)
 def _write():
     return [(r["char"], int(r["band"])) for r in _read("write.csv")]
@@ -83,10 +79,6 @@ def write_chars(upto=4):
     """The characters to write by hand, band 2 (HSK 1-2) then 3 then 4,
     in the syllabus's order within each band."""
     return [c for c, band in _write() if band <= upto]
-
-
-def write_band(ch):
-    return next((b for c, b in _write() if c == ch), None)
 
 
 @functools.lru_cache(maxsize=1)

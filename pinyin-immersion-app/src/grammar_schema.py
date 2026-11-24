@@ -1,7 +1,7 @@
 # src/grammar_schema.py
 """The shape of one grammar structure (see grammar_curriculum for the fields)."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

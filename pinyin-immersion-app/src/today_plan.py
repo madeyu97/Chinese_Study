@@ -273,7 +273,7 @@ def gather_state(user_id, also=(), hsk_track=False):
     def handwriting_():
         started = db.handwriting_started(user_id)
         h = {"started": started, "due": 0, "new_room": 0, "new_available": 0}
-        if started:
+        if started or hsk_track:    # the HSK track writes from day one
             h["due"], h["new_available"] = db.handwriting_due_and_new(user_id)
             h["new_room"] = db.handwriting_new_allowance(user_id, h["due"])
         return h

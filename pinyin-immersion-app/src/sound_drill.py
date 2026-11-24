@@ -29,7 +29,6 @@ drilled is played inside its word instead.
 
 import random
 import re
-import unicodedata
 
 from pypinyin import lazy_pinyin, pinyin as _pinyin, Style
 
@@ -227,7 +226,6 @@ def pair_item(family, rng, kind=None):
     target = rng.choice(words)
     kind = kind or rng.choice(("pair_meaning", "pair_complete", "pair_word"))
     meaning = wc.short_meaning(target["english"])
-    others = [w for w in words if w is not target]
     if kind == "pair_meaning":
         opts = [{"value": w["chinese"], "label": f"{w['chinese']}"} for w in words]
         q = f"Which {ch}-word means “{meaning}”?"

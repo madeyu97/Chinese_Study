@@ -538,11 +538,6 @@ for _row in CURRICULUM:
     _prev = _row[4]
 
 
-def char_share(ch):
-    """Percentage of running text this single character accounts for."""
-    return _SHARE.get(ch, 0.0)
-
-
 def coverage_for(chars):
     """Combined share of running text for any set of characters studied,
     regardless of the order they were learned in."""

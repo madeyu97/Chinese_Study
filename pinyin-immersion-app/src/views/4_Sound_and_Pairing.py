@@ -16,9 +16,7 @@ tone drill starts straight away. A round in progress is saved as you go, so
 leaving the app picks up at the same item.
 """
 
-import random
 import time
-from datetime import date
 
 import streamlit as st
 

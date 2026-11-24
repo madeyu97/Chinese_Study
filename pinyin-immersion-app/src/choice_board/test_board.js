@@ -63,5 +63,18 @@ check("listening round has no prompt card", w2.document.getElementById("prompt")
 check("restored answered round, dark theme",
       w2.cards()[3].classList.contains("right") && w2.cards()[0].disabled && w2.document.body.classList.contains("dark"));
 
+// HSK games: English cards, and a prompt with a blank, pinyin and meaning
+const w3 = board();
+const meanings = ["to rest", "body", "<b>x</b>", "price"].map((en) => ({ kind: "text", zh: "", py: "", en }));
+w3.render({ sid: "h1", round: 0, prompt: { kind: "word", zh: "＿息", py: "xiū xi", en: "rest" },
+            options: meanings, answer: 0, answered: null, show_pinyin: true });
+const pr = w3.document.getElementById("prompt").textContent;
+check("prompt shows blank, pinyin and meaning", pr.includes("＿息") && pr.includes("xiū xi") && pr.includes("rest"));
+check("English cards show just the English, escaped",
+      w3.cards()[0].textContent === "to rest" && w3.cards()[2].innerHTML.includes("&lt;b&gt;"));
+check("English cards are labelled by their text", w3.cards()[1].getAttribute("aria-label") === "body");
+w3.cards()[0].click();
+check("tapping an English card answers", w3.values().pop().chosen === 0 && w3.cards()[0].classList.contains("right"));
+
 console.log(failed ? `${failed} failed` : "all passed");
 process.exit(failed ? 1 : 0);

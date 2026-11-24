@@ -1799,6 +1799,13 @@ def db_tests():
         assert tplan.gather_state(uid).keys() == state.keys()
         state, (bad,) = tplan.gather_state(uid, also=[lambda: 1 / 0])
         assert bad is None and "words" in state, "a failed extra read doesn't take the page down"
+        # the HSK track writes from day one: what's new is read before writing is started
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM handwriting_progress WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        h = tplan.gather_state(uid, hsk_track=True)["handwriting"]
+        assert not h["started"] and h["new_room"] > 0, h
+        assert tplan.gather_state(uid)["handwriting"]["new_room"] == 0, "the original waits"
         # the real background path: writes queue up, in order, without blocking
         real_exists, old_env = db._runtime_exists, os.environ.pop("NO_BACKGROUND", None)
         db._runtime_exists = lambda: True

@@ -27,7 +27,7 @@ def _pinned_username():
     the database.
 
     Set in that app's secrets:
-        APP_USER = "matt"     # or "jean"
+        APP_USER = "matt"     # or "selina"
 
     When set, the PIN screen is skipped entirely. When absent, the app
     falls back to the PIN chooser so a single shared deployment still

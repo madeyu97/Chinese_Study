@@ -6,7 +6,7 @@ Scoring and SRS logic for character-level handwriting drills.
 Kept separate from db_manager to avoid circular imports.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 # ----------------------------------------------------------------------
 # Stroke counts for common simplified Chinese characters.

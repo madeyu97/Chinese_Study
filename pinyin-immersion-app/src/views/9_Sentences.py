@@ -22,7 +22,6 @@ import random
 import re
 import time
 import unicodedata
-from datetime import date
 
 import streamlit as st
 

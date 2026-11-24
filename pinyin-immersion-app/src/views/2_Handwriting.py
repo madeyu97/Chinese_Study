@@ -21,7 +21,6 @@ chosen source starts straight away.
 
 import time
 import uuid
-from datetime import date
 
 import streamlit as st
 

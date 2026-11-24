@@ -154,7 +154,10 @@ if nxt is None:
 
 st.divider()
 st.subheader("🎮 Play instead of scrolling")
-st.caption("Picture games with your words — five minutes here beats five minutes of the feed, "
+st.caption("Quick HSK games — listening, look-alike characters, measure words, sentence "
+           "scramble — and the herb game. Five minutes here beats five minutes of the feed."
+           if HSK else
+           "Picture games with your words — five minutes here beats five minutes of the feed, "
            "and every round still links a word to its meaning.")
 if st.button("🎮 Play a game", width="stretch", key="tp_play"):
     st.switch_page(tp.GAMES_PAGE)

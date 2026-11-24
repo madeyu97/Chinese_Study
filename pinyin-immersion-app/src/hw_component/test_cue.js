@@ -1,5 +1,5 @@
 const fs=require("fs"), {JSDOM}=require("jsdom");
-let html=fs.readFileSync("/home/claude/w/Chinese_Study-main/pinyin-immersion-app/src/hw_component/index.html","utf-8");
+let html=fs.readFileSync(require("path").join(__dirname, "index.html"),"utf-8");
 html=html.replace(/<script src="https:\/\/cdn[^"]*"><\/script>/,"");
 const dom=new JSDOM(html,{url:"http://localhost/",runScripts:"dangerously",pretendToBeVisual:true,
  beforeParse(w){

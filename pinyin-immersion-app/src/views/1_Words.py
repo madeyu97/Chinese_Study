@@ -28,7 +28,6 @@ after the second, close to sleep.
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
 
 import streamlit as st
 

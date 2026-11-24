@@ -497,6 +497,19 @@ def examples(sid, limit=3):
 
 
 _CJK_CHAR = re.compile(r"[\u4e00-\u9fff]")
+# Chinese grammar terms in the structures' patterns, in English for the card
+_TERMS = {"主语": "subject", "动词": "verb", "宾语": "object", "形容词": "adjective",
+          "名词": "noun", "量词": "measure word", "数量": "amount", "东西": "thing",
+          "地方": "place", "人": "person"}
+
+
+def pattern_en(pattern):
+    """A pattern with its grammar terms in English: 主语 + 动词 + 宾语 →
+    subject + verb + object; 没(有) + 动词 → 没(有) + verb. Real words stay."""
+    if "+" not in pattern:
+        return pattern
+    return re.sub(r"(?<![\u4e00-\u9fff])(" + "|".join(sorted(_TERMS, key=len, reverse=True))
+                  + r")(?![\u4e00-\u9fff])", lambda m: _TERMS[m.group(1)], pattern)
 
 
 def with_english(text):
@@ -574,8 +587,10 @@ def plan_lessons(due, fresh, progress, upto, minutes, new_max, checks_max):
     for sid in fresh:
         mode = lesson_mode(sid, progress, upto)
         if (mode == "new" and full >= new_max) or (mode == "check" and checks >= checks_max):
-            break
+            continue                       # enough of that kind: look on for the other
         if LESSON_MINUTES[mode] > left and picked:
+            if mode == "new":
+                continue                   # a check may still fit
             break
         picked.append((sid, mode))
         left -= LESSON_MINUTES[mode]

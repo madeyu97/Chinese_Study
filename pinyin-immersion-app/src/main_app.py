@@ -79,4 +79,11 @@ HSK_PAGES = {
     ],
 }
 
+if on_hsk_track():
+    # on a phone the page titles took two lines and pushed the lesson down
+    st.markdown("<style>@media (max-width: 640px) { h1 { font-size: 1.7rem !important; } "
+                "h2, h3 { font-size: 1.25rem !important; } } "
+                # word tiles (st.pills): big enough to read and to tap
+                "div[data-testid='stButtonGroup'] button { font-size: 1.35rem; "
+                "padding: 0.35rem 0.9rem; min-height: 2.6rem; }</style>", unsafe_allow_html=True)
 st.navigation(HSK_PAGES if on_hsk_track() else PAGES).run()

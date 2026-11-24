@@ -18,6 +18,7 @@ import streamlit as st
 import db_manager as db
 import hsk
 import placement as pl
+import tiles_ui
 from audio_engine import create_audio_file, warm
 from auth import require_login, sidebar_user_badge
 
@@ -103,13 +104,11 @@ if run:
             st.markdown(f"<div style='font-size:1.8rem;line-height:1.5;min-height:2.8rem'>"
                         f"{' '.join(built) or '…'}</div>", unsafe_allow_html=True)
             left = [i for i in range(len(item["tiles"])) if i not in picked]
-            cols = st.columns(min(4, max(1, len(left))))
-            for n, i in enumerate(left):
-                tile = item["tiles"][i]
-                label = f"{tile}  \n{item['pinyin'].get(tile, '')}"
-                if cols[n % len(cols)].button(label, key=f"{qkey}_t{i}", width="stretch"):
-                    picked.append(i)
-                    st.rerun()
+            tapped = tiles_ui.pick(item["tiles"], picked, qkey, lambda i: (
+                f"{item['tiles'][i]} {item['pinyin'].get(item['tiles'][i], '')}"))
+            if tapped is not None:
+                picked.append(tapped)
+                st.rerun()
             c1, c2, c3 = st.columns(3)
             if c1.button("↩️ Undo", disabled=not picked, key=f"{qkey}_undo", width="stretch"):
                 picked.pop()

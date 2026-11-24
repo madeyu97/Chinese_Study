@@ -30,6 +30,7 @@ import hsk_grammar as hg
 import session_store as store
 import today_plan as tp
 import quiz
+import tiles_ui
 import word_content as wc
 from audio_engine import create_audio_file, warm
 from auth import on_hsk_track, require_login, sidebar_user_badge
@@ -86,7 +87,8 @@ with st.sidebar:
     st.caption(f"{sum(1 for s_ in order if s_.id in progress)} of {len(order)} structures "
                f"practised{span} · {len(queue)} ready today")
 
-st.title("🧩 Grammar drills")
+if not (HSK and "gr_sid" in S):        # in a lesson the structure is the heading
+    st.title("🧩 Grammar drills")
 store.notice()
 
 if len(known) < MIN_KNOWN:
@@ -278,7 +280,7 @@ card_ = hg.card(structure.id) if HSK else None
 if card_ and S.get("gr_mode") == "new" and S.get("gr_learned") != structure.id:
     ahead.grammar(USER_ID, [structure.id], hsk=True)   # its drills are written while you read
     st.subheader(structure.name)
-    st.markdown(f"<div style='font-size:1.5rem'>{structure.pattern}</div>",
+    st.markdown(f"<div style='font-size:1.5rem'>{hg.pattern_en(structure.pattern) if HSK else structure.pattern}</div>",
                 unsafe_allow_html=True)
     st.caption(structure.purpose)
     learn_card(card_)
@@ -324,14 +326,13 @@ payload = S.gr_set
 # structure card
 # ----------------------------------------------------------------------
 st.subheader(structure.name)
-st.markdown(f"<div style='font-size:1.5rem'>{structure.pattern}</div>",
+st.markdown(f"<div style='font-size:1.5rem'>{hg.pattern_en(structure.pattern) if HSK else structure.pattern}</div>",
             unsafe_allow_html=True)
-st.caption(structure.purpose)
-if S.get("gr_mode") == "quick":
-    st.caption("🔁 Quick review: a few items, mostly said aloud.")
-elif S.get("gr_mode") == "check":
-    st.caption("⚡ Quick check: this is below your grammar level. Pass it and it counts as "
-               "known; miss it and it becomes a full lesson tomorrow.")
+tag = {"quick": "🔁 Quick review · ", "check": "⚡ Quick check, below your level · "}.get(
+    S.get("gr_mode"), "")
+gp_ = S.get("gr_plan") or {}
+step = f"{gp_['i'] + 1} of {len(gp_['ids'])} this morning · " if len(gp_.get("ids") or []) > 1 else ""
+st.caption(f"{step}{tag}{structure.purpose}")
 if card_:
     with st.expander("How it works"):
         learn_card(card_)
@@ -519,11 +520,10 @@ def build_sentence():
                 f"{' '.join(built) or '…'}</div>", unsafe_allow_html=True)
     if "verdict" not in a:
         left = [i for i in range(len(tiles)) if i not in picked]
-        cols = st.columns(min(4, max(1, len(left))))
-        for n, i in enumerate(left):
-            if cols[n % len(cols)].button(tiles[i], key=f"{key}_t{i}", width="stretch"):
-                S.gr_ans = {"picked": picked + [i]}
-                st.rerun()
+        tapped = tiles_ui.pick(tiles, picked, key)
+        if tapped is not None:
+            S.gr_ans = {"picked": picked + [tapped]}
+            st.rerun()
         c1, c2, c3 = st.columns(3)
         if c1.button("↩️ Undo", disabled=not picked, key=f"{key}_undo", width="stretch"):
             S.gr_ans = {"picked": picked[:-1]}

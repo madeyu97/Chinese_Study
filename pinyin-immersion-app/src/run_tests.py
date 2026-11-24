@@ -2160,6 +2160,12 @@ def db_tests():
             stages = at.session_state["gr_stages"]
             assert set(stages) <= set(_hg.LESSON_ITEMS["check"]) and "rapid" in stages, stages
             assert any("Quick check" in c.value for c in at.caption)
+            if stages[0] == "build":            # tiles are pills: tap them into order
+                assert len(at.pills) == 1, "one row of tiles"
+                at.pills[0].set_value(0).run()
+                assert not at.exception, at.exception
+                assert at.session_state["gr_ans"]["picked"] == [0]
+                assert len(at.pills) == 1 and at.pills[0].value is None, "the next tap starts clear"
             at.session_state["gr_results"] = ["correct"] * 6
             at.session_state["gr_stage"] = len(stages)
             at.run()
@@ -3617,6 +3623,9 @@ def t_grammar_pace():
     assert all(m == "quick" for _, m in picked) and len(picked) == 25 // _hg.LESSON_MINUTES["quick"]
     checks = _hg.plan_lessons([], h1[:10], {}, 3, 25, 2, 6)
     assert [m for _, m in checks] == ["check"] * 6, "checks of known levels are cheap, capped"
+    h2 = [i for i in order if lv[i] == 2]
+    mixed = _hg.plan_lessons([], h1[:20] + h2[:5], {}, 2, 25, 2, 6)
+    assert [m for _, m in mixed] == ["check"] * 6 + ["new"], "new structures don't wait for every check"
     assert _hg.plan_lessons(["x"], [], {"x": {"interval": 0}}, 1, 1, 2, 6) == [("x", "new")], \
         "always at least one"
     # the plan: an HSK morning names what it holds

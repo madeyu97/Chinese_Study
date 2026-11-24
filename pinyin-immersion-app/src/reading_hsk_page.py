@@ -148,9 +148,10 @@ def run(user):
     c1, c2 = st.columns(2)
     listen = c1.toggle("🎧 Listen first", value=True, key="rh_listen")
     all_py = c2.toggle("Show all pinyin", key="rh_all_py")
-    hidden = listen and ans is None and S.get("rh_shown") != cur["id"]
-    st.subheader(p.get("title", ""))
     audio = create_audio_file(p["text"])
+    # with no audio (TTS down) there's nothing to listen to: the text shows
+    hidden = bool(audio) and listen and ans is None and S.get("rh_shown") != cur["id"]
+    st.subheader(p.get("title", ""))
     if audio:
         st.audio(audio, format="audio/mp3")
     if hidden:

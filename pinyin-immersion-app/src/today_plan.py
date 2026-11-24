@@ -360,9 +360,10 @@ def gather_state(user_id, also=(), hsk_track=False):
                                                            else None))
             else:
                 order = gc.learning_order()
+            # HSK track: a long list of what's next; the morning's minutes decide
+            # how many (hsk_grammar.plan_lessons)
             queue = gd.todays_queue(order, g_progress, today, g_new,
-                                    HSK_GRAMMAR_NEW_MAX + HSK_GRAMMAR_CHECKS_MAX if hsk_track
-                                    else GRAMMAR_NEW_PER_DAY)
+                                    len(order) if hsk_track else GRAMMAR_NEW_PER_DAY)
             state["grammar"] = {
                 "known": len(g_known),
                 "due": [(s.id, s.name) for s in queue if s.id in g_progress],
@@ -374,11 +375,13 @@ def gather_state(user_id, also=(), hsk_track=False):
                 # the drill bank writes these ahead (ahead.for_day): reviews
                 # due in the next few days, then the next new structures
                 import drill_bank
-                today_ids = {s.id for s in queue}
-                state["grammar"]["upcoming"] = [
-                    sid for sid in drill_bank.targets(g_progress, order, today,
-                                                      new_ahead=HSK_BANK_AHEAD)
-                    if sid not in today_ids]
+                g = state["grammar"]
+                planned = {i for i, _ in hg.plan_lessons(
+                    [i for i, _ in g["due"]], [i for i, _ in g["fresh"]], g["progress"],
+                    g["upto"], HSK_GRAMMAR_MINUTES, HSK_GRAMMAR_NEW_MAX, HSK_GRAMMAR_CHECKS_MAX)}
+                g["upcoming"] = [i for i in drill_bank.targets(
+                    g_progress, order, today, new_ahead=HSK_BANK_AHEAD + len(planned),
+                    upto=g["upto"]) if i not in planned]
         except Exception as e:
             logging.warning(f"[PLAN] grammar unavailable: {e}")
     if ok(hand):

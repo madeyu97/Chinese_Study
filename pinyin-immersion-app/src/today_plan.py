@@ -301,20 +301,25 @@ def gather_state(user_id, also=(), hsk_track=False):
             h["new_room"] = db.handwriting_new_allowance(user_id, h["due"])
         return h
 
+    # the HSK track's plan has no words, tones, recap or sentence steps: those
+    # reads are skipped there (failed, as if unavailable)
+    def unless_hsk(name, fn):
+        return (lambda: failed) if hsk_track else safely(name, fn)
+
     (prog, due, introduced, recap, words, tone_prog, tone_new, g_progress, g_new, g_known,
      hand, characters, hsk_levels, *extra) = db.in_parallel(
         safely("progress", lambda: db.day_progress(user_id)),
-        safely("words", due_),
-        safely("words", lambda: db.introduced_today(user_id)),
-        safely("recap", lambda: db.recap_count(user_id)),
-        safely("tones", lambda: db.introduced_words(user_id)),
-        safely("tones", lambda: db.drill_progress_get(user_id, "tone")),
-        safely("tones", lambda: db.drill_new_today(user_id, "tone")),
+        unless_hsk("words", due_),
+        unless_hsk("words", lambda: db.introduced_today(user_id)),
+        unless_hsk("recap", lambda: db.recap_count(user_id)),
+        unless_hsk("tones", lambda: db.introduced_words(user_id)),
+        unless_hsk("tones", lambda: db.drill_progress_get(user_id, "tone")),
+        unless_hsk("tones", lambda: db.drill_new_today(user_id, "tone")),
         safely("grammar", lambda: db.grammar_progress(user_id)),
         safely("grammar", lambda: db.grammar_new_today(user_id)),
         safely("grammar", lambda: db.grammar_known_vocab(user_id)),
         safely("handwriting", handwriting_),
-        safely("reading", lambda: db.known_characters(user_id)),
+        unless_hsk("reading", lambda: db.known_characters(user_id)),
         safely("grammar", lambda: db.get_hsk_levels(user_id) if hsk_track else None),
         *[safely("extra", fn) for fn in also])
 

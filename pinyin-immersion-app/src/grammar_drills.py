@@ -261,6 +261,10 @@ def build_prompt(structure, known_words, china_pairs=(), contrasts=(),
     kind_note = ("This is a CONTRAST DRILL: every stage should make the learner choose "
                  "between the structures listed below (use each of them across the items), "
                  "not just use one." if structure.kind == "contrast" else "")
+    if structure.id in QUESTION_STRUCTURES:
+        kind_note += ("\nThis structure MAKES QUESTIONS. In CONVERSATION the question uses it "
+                      "(the learner hears it and answers); the sample is the natural answer, "
+                      "which usually won't use it. In produce and rapid the learner asks.")
     learner = ("""You write grammar drills for an adult preparing for the HSK exams (2025
 syllabus) who lives in Malaysia: natural, everyday, conversational Mandarin,
 in standard vocabulary - the HSK word where Malaysians say it differently
@@ -413,8 +417,9 @@ def structure_problem(hanzi, structure):
 def stored_set_ok(payload, structure):
     """Whether a drill set saved earlier still passes today's structure check
     (one written before a structure's rules were tightened may not)."""
-    keys = {"identify": ("hanzi",), "produce": ("answer_hanzi",),
-            "rapid": ("answer_hanzi",), "conversation": ("sample_hanzi",)}
+    keys = {"identify": ("hanzi",), "produce": ("answer_hanzi",), "rapid": ("answer_hanzi",),
+            "conversation": ("question_hanzi",) if structure.id in QUESTION_STRUCTURES
+            else ("sample_hanzi",)}
     try:
         return all(structure_problem(str(it.get(k) or ""), structure) is None
                    for stage, ks in keys.items() for it in payload.get(stage) or []
@@ -432,6 +437,18 @@ FIELDS = {"identify": [("hanzi", "pinyin", True)],
           "transform": [("source_hanzi", "source_pinyin", False),
                         ("answer_hanzi", "answer_pinyin", True)]}
 OPTIONAL = {"contrast", "transform"}   # a set without these is still a set
+# structures that make a question: the reply to 你忙吗？ is 不忙 - no 吗 - so in
+# their conversation stage the question carries the structure, the reply needn't
+QUESTION_STRUCTURES = {"ma_question", "a_not_a", "shei", "shenme", "nage", "nali", "zenme",
+                       "ji_howmany", "duoshao", "qword_position", "zenmeyang", "jidian",
+                       "duo_adj", "weishenme", "haishi_or", "you_mei_you", "shi_de_question",
+                       "pot_question", "daodi", "rhetorical_q", "ne_followup"}
+
+
+def fields_for(stage, structure):
+    if stage == "conversation" and structure and structure.id in QUESTION_STRUCTURES:
+        return [("question_hanzi", "question_pinyin", True), ("sample_hanzi", "sample_pinyin", False)]
+    return FIELDS[stage]
 
 
 def _new_words(tokens, allowed):
@@ -484,7 +501,7 @@ def _item_problems(stage, it, structure, allowed, introduced):
     problems, missing_all = [], []
     if not isinstance(it, dict):
         return ["not an object"]
-    for hz_key, py_key, needs_marker in FIELDS[stage]:
+    for hz_key, py_key, needs_marker in fields_for(stage, structure):
         hz = ap._force_simplified(str(it.get(hz_key) or "")).strip()
         it[hz_key] = hz
         if not hz:

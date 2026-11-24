@@ -13,8 +13,8 @@ level, up to READING_STOCK unread.
 Run nightly by .github/workflows/fill-drill-bank.yml at 02:00 Malaysia
 time (18:00 UTC), when the day's use is over but the day's Groq allowance
 (which resets at 00:00 UTC) still has room. Stops at max_sets (default 25),
-after MAX_MINUTES, or after three failures in a row (the allowance is
-probably used up) - whatever is written stays written.
+after MAX_MINUTES, or after four grammar failures in a row - whatever is
+written stays written.
 """
 
 import logging
@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 os.environ.setdefault("NO_BACKGROUND", "1")       # no app-side background jobs here
+os.environ.setdefault("AI_STRONG_ONLY", "1")      # wait for the strong models, never the small one
 
 MAX_MINUTES = 100
 READING_STOCK = 8       # unread reading passages to have ready each morning
@@ -70,14 +71,16 @@ def main(max_sets=25):
             else:
                 failed_in_row += 1
                 logging.warning(f"  {sid}: not written")
-                if failed_in_row >= 3:
-                    logging.warning("grammar: three failures in a row (allowance used up?)")
+                if failed_in_row >= 4:
+                    logging.warning("grammar: four failures in a row - stopping grammar")
                     break
         # graded reading at the reading level: keep a stock of unread passages
+        # (whatever happened with grammar)
         level = (db.get_hsk_levels(uid) or {}).get("read") or 1
         short = READING_STOCK - db.reading_passage_stats(uid, level)["unread"]
+        logging.info(f"reading: {max(0, short)} passages to write at HSK {level}")
         for _ in range(max(0, short)):
-            if time.time() - started > MAX_MINUTES * 60 or failed_in_row >= 3:
+            if time.time() - started > MAX_MINUTES * 60:
                 break
             ok = write_passage(uid, level)
             logging.info(f"  passage at HSK {level}: {'written' if ok else 'not written'}")

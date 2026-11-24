@@ -14,7 +14,9 @@ What this does:
 - Keeps count of the tokens each model used in the last minute (and the
   calls still running), and starts a call only when its model has room.
 - Each model has its own allowance, so when one is full the call moves to
-  another that isn't (config.AI_FALLBACKS) instead of waiting for it.
+  another that isn't (config.AI_FALLBACKS) instead of waiting for it - but
+  work done ahead, and the nightly job (AI_STRONG_ONLY), never moves to a
+  small model (config.AI_WEAK_MODELS): it waits for a strong one instead.
 - What's on screen goes first: work done ahead in the background
   (background()) waits while anything the learner is waiting for is
   queued, and leaves room in each model's allowance for it.
@@ -36,7 +38,9 @@ import threading
 import time
 from collections import deque
 
-from config import AI_FALLBACKS, AI_TOKENS_PER_MINUTE
+import os
+
+from config import AI_FALLBACKS, AI_TOKENS_PER_MINUTE, AI_WEAK_MODELS
 
 WINDOW = 60.0
 BACKGROUND_RESERVE = 0.35      # share of each allowance background work leaves free
@@ -140,10 +144,14 @@ class Scheduler:
                     bg = is_background()
                     names = [m for m in self.candidates(name) if m not in tried] or \
                         self.candidates(name)
+                    if bg or os.environ.get("AI_STRONG_ONLY"):
+                        # work done ahead (and the nightly job) waits for a strong
+                        # model rather than taking the small one: what it writes
+                        # is what the learner sees later
+                        strong = [m for m in names if m not in AI_WEAK_MODELS]
+                        names = strong or [name]
                     if not (bg and self._foreground_waiting(me)):
-                        # background work tries the other models first, keeping
-                        # the one the learner's calls go to free for them
-                        for m in (names[1:] + names[:1] if bg else names):
+                        for m in names:
                             st = self.model(m)
                             spare = st.limit * BACKGROUND_RESERVE if bg else 0
                             # a call bigger than allowance-minus-reserve still runs

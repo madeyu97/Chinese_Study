@@ -496,12 +496,39 @@ def examples(sid, limit=3):
     return out[:limit]
 
 
+_CJK_CHAR = re.compile(r"[\u4e00-\u9fff]")
+
+
+def with_english(text):
+    """The card's own words, with English in brackets after Chinese that has
+    none beside it (hsk_grammar_glosses): 我不想去 → 我不想去 (I don't want to go)."""
+    from hsk_grammar_glosses import GLOSSES
+    taken = []
+    for zh in sorted(GLOSSES, key=len, reverse=True):
+        for m in re.finditer(re.escape(zh), text):
+            a, b = m.start(), m.end()
+            while b < len(text) and text[b] in "？！":
+                b += 1
+            nxt = text[b:b + 4].lstrip("!?.,;: ")
+            glossed = nxt.startswith(("(", "✗", "=", "—")) or (
+                text[b:b + 1] == " " and text[b + 1:b + 2].isascii() and text[b + 1:b + 2].isalpha())
+            if ((a and _CJK_CHAR.match(text[a - 1])) or (b < len(text) and _CJK_CHAR.match(text[b]))
+                    or glossed or any(x <= a < y for x, y, _ in taken)):
+                continue
+            taken.append((a, b, zh))
+            break
+    for a, b, zh in sorted(taken, reverse=True):
+        inside = a and text[a - 1] == "(" and text[b:b + 1] == ")"     # (我的书) → (我的书 = my book)
+        text = text[:b] + (f" = {GLOSSES[zh]}" if inside else f" ({GLOSSES[zh]})") + text[b:]
+    return text
+
+
 def card(sid):
     """What the 'how it works' card shows, or None if there isn't one."""
     if sid not in LEARN:
         return None
     how, trap = LEARN[sid]
-    return {"how": how, "trap": trap, "examples": examples(sid),
+    return {"how": with_english(how), "trap": with_english(trap), "examples": examples(sid),
             "hsk": structure_level().get(sid),
             "points": [p["point"] for p in points_for(sid)]}
 

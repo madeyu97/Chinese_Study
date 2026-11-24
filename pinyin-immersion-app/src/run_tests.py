@@ -3982,6 +3982,33 @@ def t_hsk_grammar():
     assert ex["pinyin"][0].isupper() and ex["pinyin"].rstrip()[-1] in ".?!", ex
 
 
+@test("grammar cards: every Chinese example in a card's own words has its English")
+def t_card_english():
+    import re as _re
+    import hsk_grammar_glosses as _gg
+    import hsk_grammar as hg
+
+    def bare(text):
+        out = []
+        for m in _re.finditer(r"[\u4e00-\u9fff][\u4e00-\u9fff，、]*[\u4e00-\u9fff][？！]?", text):
+            a, b = m.start(), m.end()
+            if len(_re.sub(r"[^\u4e00-\u9fff]", "", m.group())) < 3:
+                continue                      # a grammar word the card is explaining
+            nxt = text[b:b + 5].lstrip("!?.,;: )")
+            if nxt.startswith(("(", "=", "—", "✗", "+", "…", "/")) or \
+                    _re.search(r"(not|Not|never|than|of|use|is) $", text[max(0, a - 6):a]) or \
+                    (text[b:b + 1] == " " and text[b + 1:b + 2].isascii() and text[b + 1:b + 2].isalpha()):
+                continue
+            out.append(m.group())
+        return out
+    cards = [hg.card(sid) for sid in hg.LEARN]
+    left = [x for c in cards for t in (c["how"], c["trap"]) for x in bare(t)]
+    assert not left, left
+    assert all(any(k in t for h_t in hg.LEARN.values() for t in h_t) for k in _gg.GLOSSES), "no stale glosses"
+    c = hg.card("de_de_de")
+    assert "(我的书 = my book)" in c["how"] and c["how"].count("my book") == 1, c["how"]
+
+
 @test("pinyin: the words that change with their neighbours read right (地 得 长 只 一 不 儿 ...)")
 def t_pinyin_context():
     import pinyin_hsk as ph
@@ -4357,7 +4384,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs(); t_grammar_pace(); t_pinyin_context()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs(); t_grammar_pace(); t_pinyin_context(); t_card_english()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

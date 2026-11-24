@@ -27,6 +27,7 @@ import games_hsk as gh
 import grammar_build as gb
 import quiz
 import session_store as store
+import tiles_ui
 from audio_engine import create_audio_file, warm
 
 S = st.session_state
@@ -157,8 +158,7 @@ def run(user):
 
         picker(gh.GAMES)
         st.subheader("🌿 Herbs")
-        st.caption("Separate from HSK: the herb list from Herb Dojo (data/herbs.csv), "
-                   "tier-1 herbs most often.")
+        st.caption("Separate from HSK: your Herb Dojo herb list, tier-1 herbs most often.")
         picker(gh.HERB_GAMES)
         st.stop()
 
@@ -223,12 +223,11 @@ def run(user):
         key = f"gh_{S.gh_sid}_{i}"
         if "verdict" not in a:
             left = [n for n in range(len(tiles)) if n not in picked]
-            cols = st.columns(min(4, max(1, len(left))))
-            for c, n in enumerate(left):
-                if cols[c % len(cols)].button(tiles[n], key=f"{key}_t{n}", width="stretch"):
-                    S.gh_ans = {"picked": picked + [n]}
-                    persist()
-                    st.rerun()
+            tapped = tiles_ui.pick(tiles, picked, key)
+            if tapped is not None:
+                S.gh_ans = {"picked": picked + [tapped]}
+                persist()
+                st.rerun()
             c1, c2, c3 = st.columns(3)
             if c1.button("↩️ Undo", disabled=not picked, key=f"{key}_undo", width="stretch"):
                 S.gh_ans = {"picked": picked[:-1]}

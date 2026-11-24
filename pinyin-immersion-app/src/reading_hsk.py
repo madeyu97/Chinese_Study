@@ -19,6 +19,7 @@ while you wait unless the stock has run out.
     generate(level, ...)         write, check, review -> payload or None
 """
 
+import json
 import logging
 import re
 
@@ -26,7 +27,8 @@ import hsk
 
 MAX_NEW = 3                       # words above the level, declared
 MIN_COVERAGE = 0.93               # share of words at or below the level
-LENGTH = {1: (50, 100), 2: (80, 140), 3: (110, 200), 4: (150, 260)}   # characters
+LENGTH = {1: (45, 100), 2: (70, 140), 3: (100, 200), 4: (140, 260)}   # characters
+SENTENCES = {1: "6-8 short", 2: "6-8", 3: "5-8", 4: "5-8"}
 TOPICS = ("a morning at the hawker centre", "taking the bus in town", "a weekend plan",
           "a message to a friend", "buying fruit at the market", "the weather today",
           "a visit to the doctor", "a phone call home", "a day at work", "cooking dinner",
@@ -159,8 +161,8 @@ particles); at most {MAX_NEW} words from outside it, each declared in
 "new_words" with pinyin and English:
 {vocab}
 
-Write ONE short passage, {lo}-{hi} Chinese characters, 3-6 sentences that
-connect: a little scene, a message, a short story - with a point, not a list
+Write ONE short passage: {SENTENCES[level]} sentences, {lo}-{hi} Chinese characters
+in all (count them - fewer than {lo} is rejected), that connect: a little scene, a message, a short story - with a point, not a list
 of facts. Topic: {topic or "anything from everyday life in Malaysia"}.
 Work in a few of these structures the learner has studied, naturally:
 {gram}
@@ -256,6 +258,18 @@ def annotate(payload, level):
     return out
 
 
+def _revise(draft, problems):
+    """Feedback that keeps the draft: the model revises what it wrote instead
+    of starting again (a fresh start fixed one problem and made another -
+    the first live run's HSK 1 passages got shorter each time)."""
+    text = json.dumps({k: draft.get(k) for k in ("title", "text", "english", "new_words",
+                                                 "question")}, ensure_ascii=False) \
+        if isinstance(draft, dict) else ""
+    return ("\n".join(f"- {x}" for x in problems[:10])
+            + (f"\nYOUR DRAFT (revise it - keep what works, fix only the problems above):\n{text}"
+               if text else ""))
+
+
 def generate(level, grammar=(), topic="", avoid=(), attempts=3):
     """Write, check and review a passage. Returns the payload (with "words"
     annotated) or None."""
@@ -279,8 +293,8 @@ def generate(level, grammar=(), topic="", avoid=(), attempts=3):
                 draft["words"] = annotate(draft, level)
                 return draft
             problems = review_problems
-        feedback = "\n".join(f"- {x}" for x in problems[:10])
-        logging.warning(f"[READ HSK] HSK {level} attempt {attempt}: {feedback}")
+        feedback = _revise(draft, problems)
+        logging.warning(f"[READ HSK] HSK {level} attempt {attempt}: " + "; ".join(problems[:10]))
     return None
 
 

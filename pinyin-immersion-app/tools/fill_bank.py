@@ -50,8 +50,9 @@ def main(max_sets=25):
     users = [u for u in db.list_users() if u["username"].lower() in HSK_TRACK_USERS]
     for user in users:
         uid = user["id"]
-        order = hg.learning_order(hsk.grammar_upto(db.get_hsk_levels(uid)))
-        todo = drill_bank.targets(db.grammar_progress(uid), order, clock.today())
+        upto = hsk.grammar_upto(db.get_hsk_levels(uid))
+        order = hg.learning_order(upto)
+        todo = drill_bank.targets(db.grammar_progress(uid), order, clock.today(), upto=upto)
         logging.info(f"{user['username']}: {len(todo)} structures to have ready")
         for sid in todo:
             if written >= max_sets or time.time() - started > MAX_MINUTES * 60:

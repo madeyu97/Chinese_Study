@@ -26,9 +26,16 @@ import re
 import hsk
 
 MAX_NEW = 3                       # words above the level, declared
-MIN_COVERAGE = 0.93               # share of words at or below the level
+# share of words at or below the level: a short HSK 1 passage of ~30 words
+# with its 3 allowed new words is at 90%, so the bar is lower there
+MIN_COVERAGE = {1: 0.88, 2: 0.9, 3: 0.92, 4: 0.93}
 LENGTH = {1: (45, 100), 2: (70, 140), 3: (100, 200), 4: (140, 260)}   # characters
 SENTENCES = {1: "6-8 short", 2: "6-8", 3: "5-8", 4: "5-8"}
+# HSK 1-2 has a few hundred words: topics they can carry
+EASY_TOPICS = ("my family", "what I eat in a day", "the weather today", "going to the shop",
+               "my friend", "a day at school", "what time I get up", "buying fruit",
+               "my room", "a phone call home", "a weekend at home", "my new phone",
+               "going to the doctor", "a cup of tea with a friend", "taking the bus")
 TOPICS = ("a morning at the hawker centre", "taking the bus in town", "a weekend plan",
           "a message to a friend", "buying fruit at the market", "the weather today",
           "a visit to the doctor", "a phone call home", "a day at work", "cooking dinner",
@@ -128,7 +135,7 @@ def check(payload, level):
         p.append("uses words above HSK " + str(level) + " that weren't declared: "
                  + "、".join(out) + " - replace them with easier words, or declare up to "
                  f"{MAX_NEW} in new_words")
-    elif coverage(a) < MIN_COVERAGE:
+    elif coverage(a) < MIN_COVERAGE[level]:
         p.append("too many new words for this level")
     q = payload.get("question")
     if not (isinstance(q, dict) and q.get("question") and isinstance(q.get("options"), list)
@@ -268,6 +275,11 @@ def _revise(draft, problems):
     return ("\n".join(f"- {x}" for x in problems[:10])
             + (f"\nYOUR DRAFT (revise it - keep what works, fix only the problems above):\n{text}"
                if text else ""))
+
+
+def topic_for(level, rng=None):
+    import random
+    return (rng or random).choice(EASY_TOPICS if level <= 2 else TOPICS)
 
 
 def generate(level, grammar=(), topic="", avoid=(), attempts=3):

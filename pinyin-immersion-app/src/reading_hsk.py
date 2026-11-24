@@ -3,10 +3,10 @@
 Graded reading for the HSK track: short passages at your reading level.
 
 Each passage is a few connected sentences - a scene, a message, a short
-story - in everyday Malaysian Mandarin, built from HSK words up to your
+story - in everyday Mandarin (Malaysia as the setting), built from HSK words up to your
 reading level, with at most MAX_NEW words above it (declared, with pinyin
 and English). It reuses grammar you've drilled, and ends with one
-comprehension question in English.
+comprehension question in Chinese (with its English).
 
 Everything a passage needs on screen is worked out when it is written and
 stored with it - the words (jieba, kept whole where they're HSK words),
@@ -133,6 +133,16 @@ def check(payload, level):
             and len(q["options"]) == 3 and isinstance(q.get("answer"), int)
             and 0 <= q["answer"] < 3 and len({str(o) for o in q["options"]}) == 3):
         p.append("question needs: question, three different options, answer (0-2)")
+    elif not (q.get("question_english") and isinstance(q.get("options_english"), list)
+              and len(q["options_english"]) == 3):
+        p.append("question needs question_english and three options_english")
+    else:
+        # the question is in Chinese, like the exam's: it must be at the level too
+        qa = analyse(q["question"] + "。" + "。".join(map(str, q["options"])), level,
+                     [w["hanzi"] for w in new])
+        hard = sorted({x["w"] for x in qa if x["status"] == "out"})
+        if hard:
+            p.append("the question uses words above HSK " + str(level) + ": " + "、".join(hard))
     return p
 
 
@@ -141,8 +151,8 @@ def build_prompt(level, grammar=(), topic="", avoid=(), feedback=""):
     vocab = "、".join(w["word"] for w in hsk.words_upto(level))
     gram = "\n".join(f"  - {g.name}: {g.pattern}" for g in grammar) or "  (any at this level)"
     return f"""
-You write graded reading for an adult learning MALAYSIAN Mandarin (everyday,
-natural, the way Chinese Malaysians speak and write messages).
+You write graded reading for an adult preparing for the HSK exams who lives
+in Malaysia: everyday, natural Mandarin in standard HSK vocabulary.
 
 LEVEL: HSK {level}. Use ONLY words from this list (plus names of places and
 particles); at most {MAX_NEW} words from outside it, each declared in
@@ -157,17 +167,20 @@ Work in a few of these structures the learner has studied, naturally:
 
 Rules: simplified characters; Chinese numerals, never digits; no Latin
 letters; no Beijing 儿 (哪里, 一点, 这里); no names of real people - use roles or
-common given names. Malaysian words are welcome (巴刹, 巴士, 冷气).
+common given names. Standard HSK vocabulary (出租车 not 德士); Malaysia is a
+fine setting.
 {("Don't repeat these earlier titles: " + "、".join(avoid)) if avoid else ""}
 
-Then ONE comprehension question in English about the passage, with three
-English options, exactly one right - answerable only by understanding the
-passage, not by guessing.
+Then ONE comprehension question about the passage, in Chinese like the HSK
+exam's, using only words from the list, with three short Chinese options,
+exactly one right - answerable only by understanding the passage, not by
+guessing. Give the English of the question and of each option too.
 {("YOUR LAST DRAFT WAS REJECTED. Fix:\n" + feedback) if feedback else ""}
 Return ONLY JSON:
 {{"title": "<short Chinese title>", "text": "<the passage>", "english": "<translation>",
  "new_words": [{{"hanzi": "…", "pinyin": "…", "english": "…"}}],
- "question": {{"question": "…", "options": ["…", "…", "…"], "answer": 0}}}}
+ "question": {{"question": "<in Chinese>", "options": ["…", "…", "…"], "answer": 0,
+              "question_english": "…", "options_english": ["…", "…", "…"]}}}}
 """.strip()
 
 
@@ -175,8 +188,8 @@ def _review(payload, level):
     from config import REVIEW_MODEL, GRADING_MODEL
     from grammar_drills import _chat_json
     prompt = f"""
-You are a strict native-speaker reviewer of Malaysian Mandarin reading material
-for an HSK {level} learner.
+You are a strict native-speaker reviewer of Mandarin reading material for an
+HSK {level} learner.
 
 TITLE: {payload['title']}
 TEXT: {payload['text']}

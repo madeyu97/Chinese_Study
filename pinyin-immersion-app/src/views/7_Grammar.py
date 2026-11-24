@@ -138,9 +138,11 @@ def load_set(structure):
     picked = None if S.get("gr_fresh") else \
         db.grammar_pick_set(USER_ID, structure.id, len(known))
     if picked and gd.stored_set_ok(picked["payload"], structure):
-        db.background(db.grammar_mark_served, picked["id"])
+        # a quick review uses a few of its items, so it doesn't use the set up
+        if S.get("gr_mode") not in ("quick", "check"):
+            db.background(db.grammar_mark_served, picked["id"])
         warm(gd.sentences_in(picked["payload"]))
-        return picked["payload"]
+        return gd.repinyin(picked["payload"]) if HSK else picked["payload"]
     contrasts = [gc.get(c) for c in structure.contrast if gc.get(c)]
     with st.spinner("Writing drills from your vocabulary and checking them…"):
         payload = gd.generate(structure, known, db.grammar_china_pairs(), contrasts,
@@ -171,14 +173,24 @@ def stages_of(payload):
 def items_of(payload, stage):
     items = (payload.get("contrast") or {}).get("items", []) if stage == "contrast" \
         else payload.get(stage, [])
-    cap = hg.LESSON_ITEMS.get("new" if S.get("gr_mode") == "again" else S.get("gr_mode"))
+    mode = S.get("gr_mode")
+    cap = hg.LESSON_ITEMS.get("new" if mode == "again" else mode)
     if stage in ("identify", "contrast"):    # a stored set may predate the option checks
         items = [it for it in items or [] if gd.mcq_problem(it) is None]
     if stage == "conversation":
         # questions written before each came with a cue were often answered
         # with a reply that didn't fit them: those are left out
         items = [it for it in items or [] if str(it.get("cue") or "").strip()]
-    return (items or [])[:cap.get(stage, 0)] if cap else (items or [])
+    items = items or []
+    if not cap:
+        return items
+    if mode in ("quick", "check") and len(items) > cap.get(stage, 0):
+        # reviews take a different few each time from the same set (fixed for
+        # the day, so a page reload doesn't change them)
+        import random as _random
+        rng = _random.Random(f"{S.get('gr_sid')}:{clock.today().isoformat()}:{stage}")
+        return rng.sample(items, cap.get(stage, 0))
+    return items[:cap.get(stage, 0)]
 
 
 def record(result):

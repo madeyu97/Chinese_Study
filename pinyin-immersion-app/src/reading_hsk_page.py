@@ -172,8 +172,16 @@ def run(user):
                 lv = f" · HSK {w['hsk']}" if w.get("hsk") else ""
                 st.markdown(f"{tag}**{w['w']}** {w.get('py', '')} — {w.get('en', '')}{lv}")
 
+    en_opts = q.get("options_english") or []
     with st.container(border=True):
         st.markdown(f"**{q['question']}**")
+        if q.get("question_english"):           # the question is in Chinese, like the exam's
+            with st.expander("Pinyin and English"):
+                from pinyin_hsk import sentence_pinyin
+                st.caption(sentence_pinyin(q["question"]))
+                st.markdown(q["question_english"])
+                for opt, en in zip(q["options"], en_opts):
+                    st.caption(f"{opt} {sentence_pinyin(opt)} — {en}")
         if ans is None:
             for n, opt in enumerate(q["options"]):
                 if st.button(opt, key=f"rh_opt_{cur['id']}_{n}", width="stretch"):
@@ -185,7 +193,8 @@ def run(user):
                     st.rerun()
         else:
             right = ans == q["answer"]
-            st.markdown(("✅ " if right else "❌ ") + f"**{q['options'][q['answer']]}**")
+            st.markdown(("✅ " if right else "❌ ") + f"**{q['options'][q['answer']]}**"
+                        + (f" — {en_opts[q['answer']]}" if len(en_opts) == 3 else ""))
     if ans is not None:
         with st.expander("Translation", expanded=ans != q["answer"]):
             st.write(p.get("english", ""))

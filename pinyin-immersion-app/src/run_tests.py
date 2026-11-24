@@ -3982,6 +3982,22 @@ def t_hsk_grammar():
     assert ex["pinyin"][0].isupper() and ex["pinyin"].rstrip()[-1] in ".?!", ex
 
 
+@test("HSK drill writer: standard HSK words asked for, and pinyin from pinyin_hsk")
+def t_gr_hsk_writer():
+    s_ = gcur.get("ba_basic")
+    hsk_p = gdr.build_prompt(s_, ["我", "门"], [("出租车", "德士")], hsk=True)
+    plain = gdr.build_prompt(s_, ["我", "门"], [("出租车", "德士")])
+    assert "HSK" in hsk_p and "德士 not 出租车" not in hsk_p and "出租车 not 德士" in hsk_p
+    assert "Prefer the words Malaysians use: 德士 not 出租车" in plain, "the original app unchanged"
+    pay = {"identify": [{"hanzi": "他高兴地说。", "pinyin": "tā gāo xìng dì shuō"}],
+           "rapid": [{"answer_hanzi": "这只猫很长。", "answer_pinyin": "x"}],
+           "contrast": {"items": [{"hanzi": "我得走了。", "pinyin": "wǒ dé zǒu le"}]}}
+    out = gdr.repinyin(pay)
+    assert out["identify"][0]["pinyin"] == "tā gāo xìng de shuō"
+    assert out["rapid"][0]["answer_pinyin"] == "zhè zhī māo hěn cháng"
+    assert out["contrast"]["items"][0]["pinyin"] == "wǒ děi zǒu le"
+
+
 @test("grammar cards: every Chinese example in a card's own words has its English")
 def t_card_english():
     import re as _re
@@ -4139,9 +4155,17 @@ def t_reading_hsk():
     assert rh.analyse("我喝咖啡。", 1)[-2]["status"] == "out", "咖啡 is HSK 2"
     good = {"title": "去巴刹", "text": text, "english": "This morning mum and I went to the market.",
             "new_words": [{"hanzi": "巴刹", "pinyin": "bā shā", "english": "market"}],
-            "question": {"question": "Who went to the market?", "answer": 0,
-                         "options": ["Mum and me", "My brother", "Nobody"]}}
+            "question": {"question": "谁去巴刹了？", "answer": 0,
+                         "options": ["我和妈妈", "我的哥哥", "没有人"],
+                         "question_english": "Who went to the market?",
+                         "options_english": ["Mum and me", "My brother", "Nobody"]}}
     assert rh.check(good, 1) == [], rh.check(good, 1)
+    # the question is in Chinese at the level, with its English
+    assert any("question_english" in p for p in rh.check(dict(good, question={
+        "question": "谁去了？", "options": ["我", "你", "他"], "answer": 0}), 1))
+    hard_q = dict(good["question"], question="谁去巴刹购物了？")
+    assert any("question uses words above" in p and "购物" in p
+               for p in rh.check(dict(good, question=hard_q), 1))
     bad = dict(good, text=text.replace("茶", "咖啡"), new_words=[])
     probs = rh.check(bad, 1)
     assert any("巴刹" in p and "咖啡" in p for p in probs), probs
@@ -4384,7 +4408,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs(); t_grammar_pace(); t_pinyin_context(); t_card_english()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs(); t_grammar_pace(); t_pinyin_context(); t_card_english(); t_gr_hsk_writer()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

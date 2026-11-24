@@ -2169,6 +2169,7 @@ def db_tests():
             # a review of it later is quick, a miss turns it back into a lesson
             assert _hg.lesson_mode(sid, db.grammar_progress(uid), 3) == "quick"
             # Anki progress is kept, and drills then build from those words
+            db.set_anki_words(uid, None)
             assert db.get_anki_words(uid) is None
             db.set_anki_words(uid, 450)
             assert db.get_anki_words(uid) == 450

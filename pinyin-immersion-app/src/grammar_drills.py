@@ -857,9 +857,9 @@ def session_grade(results):
     return grade, round(score, 3)
 
 
-def schedule(interval, ease, grade, core=False, today=None):
+def schedule(interval, ease, grade, core=False, today=None, core_cap=21):
     """Same spacing as the vocabulary SRS; core structures are capped at a
-    shorter interval so they keep coming back."""
+    shorter interval (core_cap days) so they keep coming back."""
     today = today or clock.today()
     ease = ease or 2.5
     if grade == 0:
@@ -876,7 +876,7 @@ def schedule(interval, ease, grade, core=False, today=None):
         else:
             factor = {1: 1.2, 2: ease, 3: ease * 1.3}[grade]
             interval = max(interval + 1, int(interval * factor))
-    interval = min(interval, 21 if core else 90)
+    interval = min(interval, core_cap if core else 90)
     nxt = today + timedelta(days=max(interval, 1) if grade else 0)
     return interval, round(ease, 2), nxt.isoformat()
 

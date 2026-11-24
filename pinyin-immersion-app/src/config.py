@@ -184,3 +184,12 @@ PLAN_READING_SENTENCES = 4
 # People on the HSK 1-4 app: Today · Write · Grammar · Read · Play.
 # Anyone else (Selina's deployment) keeps the original app, unchanged.
 HSK_TRACK_USERS = {"matt"}
+
+# Grammar on the HSK track: the morning is about HSK_GRAMMAR_MINUTES of
+# grammar - reviews first (short), then new structures in what's left. One
+# structure a day, reviews first, would add only ~50 of HSK 1-4's 344 in a
+# year; this pace does them all in about nine months (see hsk_grammar.py).
+HSK_GRAMMAR_MINUTES = 25
+HSK_GRAMMAR_NEW_MAX = 2          # full new lessons a day
+HSK_GRAMMAR_CHECKS_MAX = 6       # quick checks of structures below your grammar level
+HSK_GRAMMAR_CORE_CAP = 45        # longest gap (days) for a core structure

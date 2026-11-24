@@ -423,6 +423,8 @@ def _build_schema():
     # HSK track: the level to study at, per skill - {"listen": 2, "read": 1,
     # "by": "test" | "you", "at": ISO time}. NULL until a level test or a choice.
     cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS hsk_levels JSONB")
+    # HSK track: how many HSK words you've learnt in Anki (set on the level page)
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS anki_words INTEGER")
     # Vocabulary CONTENT is shared by everyone studying on this deployment.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vocab (
@@ -1035,6 +1037,25 @@ def set_hsk_levels(user_id, listen, read, by, grammar=None):
     conn.commit()
     conn.close()
     return value
+
+
+def get_anki_words(user_id):
+    """HSK words learnt in Anki, as you last said (None if never)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT anki_words FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def set_anki_words(user_id, n):
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET anki_words = %s WHERE id = %s",
+                   (max(0, int(n)) if n is not None else None, user_id))
+    conn.commit()
+    conn.close()
 
 
 def save_placement(user_id, skill, passed, detail):
@@ -3374,11 +3395,12 @@ def grammar_known_vocab(user_id):
     if len(words) < GRAMMAR_KNOWN_FLOOR:
         cursor.execute(query, (user_id, 1, 0, GRAMMAR_VOCAB_CAP))
         words = [r[0] for r in cursor.fetchall()]
-    cursor.execute("SELECT username, hsk_levels FROM users WHERE id = %s", (user_id,))
+    cursor.execute("SELECT username, hsk_levels, anki_words FROM users WHERE id = %s",
+                   (user_id,))
     row = cursor.fetchone()
     conn.close()
     import hsk
-    return list(dict.fromkeys(words + hsk.known_words(*(row or (None, None)))))
+    return list(dict.fromkeys(words + hsk.known_words(*(row or (None, None, None)))))
 
 
 def grammar_china_pairs():

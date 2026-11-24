@@ -130,18 +130,38 @@ def counts():
             "grammar": {lv: len(grammar_points(lv)) for lv in LEVELS}}
 
 
-def known_words(username, hsk_levels):
+ANKI_FLOOR = 150       # drills need some words to build from, even on day one
+
+
+def anki_known(n):
+    """The first n HSK words in syllabus order: what n words learnt in Anki
+    cover, studying the decks in level order (within a level the deck's own
+    order may differ, so the split inside the current level is a guess)."""
+    return [w["word"] for w in words_upto(4)][:max(0, int(n or 0))]
+
+
+def known_words(username, hsk_levels, anki_words=None):
     """The words grammar drills may build from, on top of words studied in
-    the app. On the HSK track vocabulary is learnt in Anki, not here, so it
-    is the syllabus: every HSK word up to the level studied by ear (HSK 1
-    until a level is set). Off the track: none."""
+    the app. On the HSK track vocabulary is learnt in Anki, not here: the
+    words learnt there if you've said how many (at least ANKI_FLOOR),
+    otherwise every HSK word up to the level studied by ear (HSK 1 until a
+    level is set). Off the track: none."""
     from config import HSK_TRACK_USERS
     if not username or username.lower() not in HSK_TRACK_USERS:
         return []
     if isinstance(hsk_levels, str):
         hsk_levels = json.loads(hsk_levels)
-    level = (hsk_levels or {}).get("listen") or 1
-    return [w["word"] for w in words_upto(level) if re.fullmatch(r"[\u4e00-\u9fff]+", w["word"])]
+    if anki_words:
+        words = anki_known(max(anki_words, ANKI_FLOOR))
+    else:
+        words = [w["word"] for w in words_upto((hsk_levels or {}).get("listen") or 1)]
+    return [w for w in words if re.fullmatch(r"[\u4e00-\u9fff]+", w)]
+
+
+def recognised_chars(n):
+    """Recognition characters (HSK 1-4) that the first n words contain."""
+    seen = set("".join(anki_known(n)))
+    return [c for c in recognise_chars(4) if c in seen]
 
 
 def grammar_upto(hsk_levels):

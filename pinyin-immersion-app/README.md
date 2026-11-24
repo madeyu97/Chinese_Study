@@ -19,10 +19,15 @@ levels. *Listening* (hear a word, pick its meaning) and *reading* (see it in
 characters, pick its meaning) go level by level from HSK 1 and stop as soon
 as the result is clear. *Grammar* asks you to put an official HSK example
 sentence back in order. Each level is the one to study (1–4). You can also
-set them by hand.
+set them by hand. The same page asks roughly how many HSK words you've
+learnt in Anki. Grammar drills are then built from those words, and Today
+shows how many of the 1,096 recognition characters they cover.
 
 **Today** (`today_plan.py`) has two sessions a day:
-- 🌅 Morning: new grammar structures and the ones due back.
+- 🌅 Morning: about 25 minutes of grammar. Short reviews come first, then up
+  to 2 new structures. Structures below your tested grammar level get a
+  2-minute quick check instead of a full lesson. At this pace all 344
+  structures take about nine months (`hsk_grammar.plan_lessons`).
 - 🌙 Evening: writing (5 new characters a day plus reviews), then one graded passage.
 
 **✍️ Write** (`views/2_Handwriting.py`). The 400 characters HSK 1–4 asks
@@ -37,10 +42,13 @@ grammar points are mapped onto the app's structures, plus some structures
 only the HSK track has (`grammar_data_hsk.py`). Each one opens with a learn
 card (how it works, the usual trap). Then come the stages: identify → build
 (word tiles) → transform → produce → contrast → rapid → conversation.
+Reviews use only a few items, mostly said aloud (`hg.LESSON_ITEMS`).
 
 **📖 Read** (`reading_hsk.py`, `reading_hsk_page.py`). AI-written passages
-at your reading level: at least 93% known words, at most 3 new ones. Tap a
-word to see its pinyin and meaning. Each passage has a question and a
+at your reading level: at least 93% known words, at most 3 new ones. By
+default you listen first and answer the question by ear (HSK 4's listening
+paper is a third of the exam), then read. Tap a word to see its pinyin and
+meaning. Each passage has a question and a
 translation, and you can download the new words as an Anki CSV. Mandarin
 Bean is linked for more (linked only, not copied: its content is All
 Rights Reserved).

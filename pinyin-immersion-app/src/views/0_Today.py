@@ -31,17 +31,21 @@ st.title("今天 Today")
 # Everything the page shows is read at the same time (the database is far
 # from the app, so each read in a row would be its own wait).
 with st.spinner("Working out today's sessions…"):
-    state, (pending, streak, week) = tp.gather_state(USER_ID, also=[
+    state, (pending, streak, week, anki) = tp.gather_state(USER_ID, also=[
         lambda: db.unseen_nudges(USER_ID),
         lambda: db.activity_streak(USER_ID),
-        lambda: db.study_minutes(USER_ID, 7)], hsk_track=HSK)
+        lambda: db.study_minutes(USER_ID, 7),
+        lambda: db.get_anki_words(USER_ID) if HSK else None], hsk_track=HSK)
 levels = state.get("hsk_levels")
 
 if HSK:
     if levels:
         st.caption(f"🎯 Studying **HSK {levels['listen']}** by ear · "
                    f"**HSK {levels['read']}** in characters · "
-                   f"grammar up to **HSK {hsk.grammar_upto(levels)}**")
+                   f"grammar up to **HSK {hsk.grammar_upto(levels)}**"
+                   + (f" · Anki: {anki:,} words, {len(hsk.recognised_chars(anki)):,} of "
+                      f"{len(hsk.recognise_chars(4)):,} characters" if isinstance(anki, int)
+                      else " · say how far you are in Anki on the level page"))
     else:
         with st.container(border=True):
             st.markdown("🎯 **Find your HSK level first** — about five minutes. Grammar, "

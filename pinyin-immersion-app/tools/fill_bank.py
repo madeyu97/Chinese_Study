@@ -12,7 +12,9 @@ level, up to READING_STOCK unread.
 
 Run nightly by .github/workflows/fill-drill-bank.yml at 02:00 Malaysia
 time (18:00 UTC), when the day's use is over but the day's Groq allowance
-(which resets at 00:00 UTC) still has room. Stops at max_sets (default 25),
+(which resets at 00:00 UTC) still has room. Stops at max_sets (default 12 - a few
+days' worth once the bank is full, and it leaves gpt-oss-120b's 200k-token
+day room for grading your answers),
 after MAX_MINUTES, or after four grammar failures in a row - whatever is
 written stays written.
 """
@@ -31,7 +33,7 @@ MAX_MINUTES = 100
 READING_STOCK = 8       # unread reading passages to have ready each morning
 
 
-def main(max_sets=25):
+def main(max_sets=12):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     missing = [k for k in ("DATABASE_URL", "GROQ_API_KEY") if not os.environ.get(k)]
     if missing:
@@ -92,4 +94,4 @@ def main(max_sets=25):
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]) if len(sys.argv) > 1 else 25)
+    main(int(sys.argv[1]) if len(sys.argv) > 1 else 12)

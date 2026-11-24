@@ -3130,11 +3130,16 @@ def t_ai_budget():
     # qwen answers without reasoning; a qwen call moved to gpt-oss reasons briefly instead
     client.chat.completions.create(model=qwen, messages=msg, reasoning_effort="none")
     assert inner.calls[-1]["reasoning_effort"] == "none"
-    # the 120b allowance used up: the call goes to the 20b model at once, no waiting
+    # the 120b allowance used up: the call goes to Qwen at once, then the 20b model
     st.used.append((client.scheduler.clock(), 7500))
     t0 = time.time()
     client.chat.completions.create(model=big, messages=msg)
-    assert inner.calls[-1]["model"] == small and time.time() - t0 < 1
+    assert inner.calls[-1]["model"] == qwen and time.time() - t0 < 1
+    client.scheduler.model(qwen).used.append((client.scheduler.clock(), 7900))
+    client.chat.completions.create(model=big, messages=msg)
+    assert inner.calls[-1]["model"] == small, "a learner's call doesn't wait"
+    for m in (big, qwen):
+        client.scheduler.model(m).used.clear()
     # a 429: that model is marked full for the time Groq gives, and the call tried elsewhere
     req = httpx.Request("POST", "https://x")
     inner.fail[small] = groq.RateLimitError(

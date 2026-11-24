@@ -3976,10 +3976,45 @@ def t_hsk_grammar():
     assert sum(1 for sid in sids if hg.examples(sid)) >= 0.85 * len(sids)
     assert hg.structure_level()["guo_exp"] == 2 and hg.structure_level()["shi_de"] == 2
     assert hg.card("modal_verb") is None and hg.card("bei_basic")["hsk"] == 3
-    assert hg.sentence_pinyin("前边是不是电影院？") == "qián biān shì bú shì diàn yǐng yuàn"
     assert hg.sentence_pinyin("八点了，起床吧。") == "bā diǎn le qǐ chuáng ba"
-    assert hg.sentence_pinyin("我还要一杯。") == "wǒ hái yào yì bēi"
-    assert hg.sentence_pinyin("第一课") == "dì yī kè" and hg.sentence_pinyin("一个") == "yí gè"
+    # official examples show the deck's hand-checked pinyin
+    ex = hg.examples("dou_all")[0]
+    assert ex["pinyin"][0].isupper() and ex["pinyin"].rstrip()[-1] in ".?!", ex
+
+
+@test("pinyin: the words that change with their neighbours read right (地 得 长 只 一 不 儿 ...)")
+def t_pinyin_context():
+    import pinyin_hsk as ph
+    cases = {
+        "前边是不是电影院？": "qián bian shì bu shì diàn yǐng yuàn",
+        "我还要一杯。": "wǒ hái yào yì bēi",
+        "第一课": "dì yī kè", "一个": "yí ge", "星期一": "xīng qī yī", "三分之一": "sān fēn zhī yī",
+        "一百零六": "yì bǎi líng liù", "想一想": "xiǎng yi xiǎng", "一步一步地做": "yí bù yí bù de zuò",
+        "大家高高兴兴地回家了。": "dà jiā gāo gāo xìng xìng de huí jiā le",
+        "我在地上": "wǒ zài dì shàng", "特地": "tè dì",
+        "他汉语说得很好。": "tā hàn yǔ shuō de hěn hǎo",
+        "今天得认真复习。": "jīn tiān děi rèn zhēn fù xí", "我觉得": "wǒ jué de",
+        "很长时间": "hěn cháng shí jiān", "孩子长大了": "hái zi zhǎng dà le",
+        "我们都去": "wǒ men dōu qù", "老师教我们": "lǎo shī jiāo wǒ men", "你帮我查查": "nǐ bāng wǒ chá cha",
+        "这只小猫": "zhè zhī xiǎo māo", "只有我": "zhǐ yǒu wǒ", "那个人是谁？": "nà ge rén shì shéi",
+        "你帮我还回去吧。": "nǐ bāng wǒ huán huí qu ba", "我还没吃": "wǒ hái méi chī",
+        "结果改变不了了。": "jié guǒ gǎi biàn bu liǎo le", "睡不着": "shuì bu zháo",
+        "你去哪儿？": "nǐ qù nǎr", "多吃一点儿": "duō chī yì diǎnr", "我的女儿": "wǒ de nǚ ér",
+        "我没去过北京。": "wǒ méi qù guo běi jīng", "过去": "guò qù",
+        "车开过来了。": "chē kāi guò lai le", "他回来了。": "tā huí lái le",
+        "项目的设计": "xiàng mù de shè jì", "目的": "mù dì",
+        "喂，你好": "wéi nǐ hǎo", "对不起": "duì bu qǐ", "差不多": "chà bu duō",
+        "这件衣服多少钱？": "zhè jiàn yī fu duō shao qián", "爸爸妈妈": "bà ba mā ma",
+        "2022年2月4日": "èr líng èr èr nián èr yuè sì rì", "304路": "sān líng sì lù",
+        "我有2个哥哥": "wǒ yǒu liǎng ge gē ge", "106": "yì bǎi líng liù", "68.2%": "bǎi fēn zhī liù shí bā diǎn èr",
+        "一场比赛": "yì chǎng bǐ sài", "我放了假就去旅游": "wǒ fàng le jià jiù qù lǚ yóu",
+    }
+    wrong = {zh: (ph.sentence_pinyin(zh), want) for zh, want in cases.items()
+             if ph.sentence_pinyin(zh) != want}
+    assert not wrong, wrong
+    # read in the sentence when split into words (the Read page's tap-to-reveal)
+    assert ph.word_pinyin(["他", "高兴", "地", "说", "，", "今天", "得", "去", "哪儿"]) == \
+        ["tā", "gāo xìng", "de", "shuō", "", "jīn tiān", "děi", "qù", "nǎr"]
 
 
 @test("grammar Build stage: tiles rebuild the sentence, grammar words on their own tiles")
@@ -4228,12 +4263,15 @@ def t_games_hsk():
     assert "清" in _hsk.lookalikes("请") and _hsk.lookalikes("己") == ["已"]
     assert "己" not in _hsk.lookalike_chars(4), "too few look-alikes to make a round"
     # measure words: 本 for a book, and no option that would also be right
-    assert _gh.measure_answer(_hsk.word("书")) == "本"
+    assert _gh.measure_answer(_hsk.word("书")) == "本" and _gh.measure_answer(_hsk.word("菜")) == "道"
+    assert _gh.measure_answer(_hsk.word("音乐")) == "首", "not CC-CEDICT's first (张)"
+    assert all(_hsk.word(w) for ws in _gh._M.values() for w in ws.split()), "HSK nouns only"
+    assert set(_gh._M) <= set(_gh.MEASURES), "every measure word has its meaning"
     for r in _gh.measure_rounds(2, rng=rng):
         noun = r["prompt"]["zh"][2:]
-        own = _hsk.word(noun)["measure"]
+        ok = _gh.measure_ok(_hsk.word(noun))
         wrong = [o["zh"] for n, o in enumerate(r["options"]) if n != r["answer"]]
-        assert r["options"][r["answer"]]["zh"] in own and not set(wrong) & set(own)
+        assert r["options"][r["answer"]]["zh"] in ok and not set(wrong) & ok, (noun, wrong, ok)
     # scramble: official sentences up to the grammar level, shuffled
     items = _gh.scramble_items(2, rng=rng)
     assert len(items) == _gh.SCRAMBLE_ROUNDS
@@ -4269,6 +4307,8 @@ def t_games_herbs():
                 tiers.append(next(h["tier"] for h in hs if r["reveal"]["zh"].startswith(h["zh"])))
     assert tiers.count(1) > len(tiers) / 2, "tier-1 herbs most often"
     assert set(_gh.HERB_GAMES).isdisjoint(_gh.GAMES)
+    # one syllable per character (苦杏仁 had lost its kǔ)
+    assert [h["zh"] for h in hs if len(h["py"].split()) != len(h["zh"])] == []
 
 
 @test("HSK track: only the people named in config, and menus stay separate")
@@ -4317,7 +4357,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs(); t_grammar_pace()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs(); t_grammar_pace(); t_pinyin_context()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

@@ -268,7 +268,7 @@ char,band,order,strokes,cue_word,cue_pinyin,cue_english,builds_on
 及,4,267,3,及时,jí shí,in time / promptly,
 论,4,268,6,不论,bú lùn,"whatever / no matter what (who, how etc)",
 各,4,269,6,各个,gè gè,every / various,口
-入,4,270,2,入学,rù xué,to enter a school or college / to go to school for the first time as a child,人
+入,4,270,2,入学,rù xué,to start school,人
 反,4,271,4,反对,fǎn duì,to fight against / to oppose,又
 量,4,272,12,大量,dà liàng,great amount / large quantity,日
 建,4,273,8,建议,jiàn yì,to suggest / suggestion,
@@ -334,10 +334,10 @@ char,band,order,strokes,cue_word,cue_pinyin,cue_english,builds_on
 够,4,333,11,不够,bú gòu,not enough / insufficient,句多
 章,4,334,11,文章,wén zhāng,article / essay,
 志,4,335,7,杂志,zá zhì,magazine,心
-巴,4,336,4,大巴,dà bā,(coll.) large bus / coach,
+巴,4,336,4,大巴,dà bā,coach / large bus,
 例,4,337,8,例子,lì zi,case / (for) instance,
 京,4,338,8,京剧,jīng jù,Beijing opera,小
-江,4,339,6,江,jiāng,river / (bound form) Yangtze River,工
+江,4,339,6,江,jiāng,river,工
 举,4,340,9,举行,jǔ xíng,"to hold (a meeting, ceremony etc)",
 父,4,341,4,父子,fù zǐ,father and son,八
 低,4,342,7,低于,dī yú,to be lower than,
@@ -378,7 +378,7 @@ char,band,order,strokes,cue_word,cue_pinyin,cue_english,builds_on
 座,4,377,10,座位,zuò wèi,seat,广
 庭,4,378,9,家庭,jiā tíng,family / household,广
 堂,4,379,11,食堂,shí táng,dining hall / cafeteria,土
-篇,4,380,15,篇,piān,sheet / piece of writing,
+篇,4,380,15,篇,piān,(measure word for articles and essays) / a piece of writing,
 熟,4,381,15,熟悉,shú xi,to be familiar with / to know well,
 弄,4,382,7,弄,nòng,to do / to manage,
 刀,4,383,2,刀,dāo,knife / blade,

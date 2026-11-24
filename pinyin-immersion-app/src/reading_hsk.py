@@ -223,10 +223,13 @@ def annotate(payload, level):
     """The words as shown: each with pinyin, meaning and HSK level, worked out
     once when the passage is stored."""
     from dictionary_engine import cedict_gloss
-    from hsk_grammar import sentence_pinyin
+    from pinyin_hsk import word_pinyin
     declared = {w["hanzi"]: w for w in payload.get("new_words") or []}
     out = []
-    for a in analyse(payload["text"], level, declared):
+    parts = analyse(payload["text"], level, declared)
+    # read in the sentence, so 地 in 高兴地说 is de and 得 in 今天得去 is děi
+    readings = word_pinyin([a["w"] for a in parts])
+    for a, reading in zip(parts, readings):
         w = a["w"]
         if a["status"] == "punct":
             out.append({"w": w, "punct": True})
@@ -234,7 +237,7 @@ def annotate(payload, level):
         info = hsk.word(w)
         english = (declared.get(w) or {}).get("english") or (info or {}).get("english") \
             or (cedict_gloss(w)[0] or "").split(" / ")[0] or _parts_gloss(w, declared)
-        out.append({"w": w, "py": (declared.get(w) or {}).get("pinyin") or sentence_pinyin(w),
+        out.append({"w": w, "py": (declared.get(w) or {}).get("pinyin") or reading,
                     "en": english, "hsk": (info or {}).get("level"),
                     "new": a["status"] != "in"})
     return out

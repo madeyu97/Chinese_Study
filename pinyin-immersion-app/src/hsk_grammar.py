@@ -24,7 +24,7 @@ import re
 
 import grammar_curriculum as gc
 import hsk
-from dictionary_engine import has_erhua, is_cjk_char
+from dictionary_engine import has_erhua
 
 MAP = {
     # morphemes and word classes
@@ -170,11 +170,11 @@ LEARN = {
     "mei_neg": (
         "没(有) + verb: it didn't happen, or hasn't yet: 我没吃 (I didn't eat / haven't "
         "eaten).",
-        "No 了 after a 没 verb: 我没吃了 ✗."),
+        "No 了 after a 没 verb: 我没吃了 ✗ — except 'not for a long time': 我好久没吃了 (I haven't had it for ages)."),
     "bu_vs_mei": (
         "不 = don't / won't (choice, habit, future). 没 = didn't / haven't (what happened). "
         "不去 = not going; 没去 = didn't go.",
-        "有 only takes 没; 是, 知道 and adjectives only take 不."),
+        "有 only takes 没; 是 and 知道 only take 不. Adjectives take 不, and 没 only for 'hasn't become': 天还没黑 (it isn't dark yet)."),
     "buyao": (
         "不要 + verb tells someone not to do something: 不要走 (don't go). It also means "
         "'don't want': 我不要 (I don't want it).",
@@ -281,7 +281,7 @@ LEARN = {
         "Not for physical ability or permission — that's 能 / 可以."),
     "neng": (
         "能 = able to, circumstances allow: 我今天不能来 (I can't come today).",
-        "For learnt skills use 会: 我能说中文 sounds like 'I'm physically able'."),
+        "For a learnt skill 会 is the natural word: 我会说中文 (I can speak Chinese). 能 there stresses being able right now."),
     "keyi": (
         "可以 = may, allowed: 我可以坐这里吗？ (may I sit here?). Answer 可以 / 不可以.",
         "'Can't' for rules is 不可以 or 不能; for skills it's 不会."),
@@ -369,7 +369,7 @@ LEARN = {
     "noun_predicate": (
         "A date, day, age or price can stand with no verb: 今天星期一 (today's Monday), 他二十"
         "岁 (he's twenty), 这个十块 (this is ten ringgit).",
-        "The negative needs 是: 今天不是星期一. And never 他是二十岁 ✗."),
+        "The negative needs 是: 今天不是星期一 (today isn't Monday). 他是二十岁 is only for correcting someone (he IS twenty)."),
     "numbers": (
         "Numbers are built in order: 三十五 (35), 一百二十 (120). 零 fills a gap: 一百零五 "
         "(105). 两 before a measure word or 百 / 千: 两个, 两千.",
@@ -464,58 +464,10 @@ def learning_order(upto=4):
     return out + waiting
 
 
-_FOURTH = set("àèìòùǜ")
-
-
-_PLAIN = str.maketrans("āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ", "aaaaeeeeiiiioooouuuuüüüü")
-# doubled family words and the like: the second syllable is toneless
-_NEUTRAL_DOUBLES = set("妈爸哥姐弟妹爷奶星谢看想试说听走等")
-# a word's last syllable that is toneless: 我们, 桌子, 什么, 这么, 东西 …
-_NEUTRAL_ENDINGS = set("们么")
-_NEUTRAL_WORDS = {"东西": 1, "朋友": 1, "知道": 1, "衣服": 1, "时候": 1, "地方": 1,
-                  "喜欢": 1, "认识": 1, "觉得": 1, "休息": 1, "明白": 1, "便宜": 1,
-                  "漂亮": 1, "舒服": 1, "已经": None, "客气": 1, "意思": 1, "事情": 1,
-                  "名字": 1, "眼睛": 1, "关系": 1, "先生": 1, "学生": 1, "医生": None,
-                  "早上": 1, "晚上": 1, "孩子": 1, "桌子": 1, "椅子": 1, "儿子": 1,
-                  "妻子": None, "房子": 1, "饺子": 1, "包子": 1, "日子": 1, "杯子": 1}
-
-
-def _neutral_tones(text, syl):
-    """Make the toneless syllables toneless, in place: 妈妈 mā ma, 我们 wǒ men,
-    喜欢 xǐ huan, 东西 dōng xi. Words come from jieba."""
-    import jieba
-    i = 0
-    for w in jieba.lcut(text):
-        n = len(w)
-        if n >= 2 and i + n <= len(syl):
-            last = i + n - 1
-            if _NEUTRAL_WORDS.get(w) == 1 or (n == 2 and w[0] == w[1]
-                                              and w[0] in _NEUTRAL_DOUBLES) \
-                    or (w[-1] in _NEUTRAL_ENDINGS and w not in _NEUTRAL_WORDS):
-                syl[last] = syl[last].translate(_PLAIN)
-        i += n
-
-
 def sentence_pinyin(text):
-    """Pinyin for a whole sentence, word by word (pypinyin's phrase list gets
-    了 as le, 还 as hái), toneless syllables toneless (妈妈 mā ma, 喜欢 xǐ huan),
-    with the written tone changes of 不 and 一 (不是
-    bú shì, 一个 yí gè, 一家 yì jiā - but 第一 dì yī, 十一 shí yī) and no
-    punctuation."""
-    from pypinyin import Style, lazy_pinyin
-    chars = [c for c in text if is_cjk_char(c)]
-    syl = lazy_pinyin("".join(chars), style=Style.TONE)
-    _neutral_tones("".join(chars), syl)
-    out = list(syl)
-    for i, (c, py) in enumerate(zip(chars, syl)):
-        nxt = syl[i + 1] if i + 1 < len(syl) else ""
-        if c == "不" and py == "bù" and set(nxt) & _FOURTH:
-            out[i] = "bú"
-        elif (c == "一" and py == "yī" and nxt
-              and chars[i + 1] not in "十百千万零一二三四五六七八九号月日楼"
-              and (i == 0 or chars[i - 1] not in "第十百千万零一二三四五六七八九")):
-            out[i] = "yí" if set(nxt) & _FOURTH else "yì"
-    return " ".join(out)
+    """Pinyin for a whole sentence (pinyin_hsk.sentence_pinyin)."""
+    import pinyin_hsk
+    return pinyin_hsk.sentence_pinyin(text)
 
 
 def _markers(structure):
@@ -537,7 +489,10 @@ def examples(sid, limit=3):
                     or (marks and not any(m in zh for m in marks))):
                 continue
             seen.add(zh)
-            out.append({"chinese": zh, "pinyin": sentence_pinyin(zh), "english": ex["english"]})
+            # the deck's hand-checked pinyin where the sentence is as printed
+            py = ex.get("pinyin") if zh == ex["chinese"] else ""
+            out.append({"chinese": zh, "pinyin": py or sentence_pinyin(zh),
+                        "english": ex["english"]})
     return out[:limit]
 
 

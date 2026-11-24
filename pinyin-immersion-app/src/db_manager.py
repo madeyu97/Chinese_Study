@@ -746,6 +746,14 @@ def _build_schema():
             date_added TEXT
         )
     ''')
+    # herb pinyin that didn't match its characters (苦杏仁 was 'xìng rén'): the
+    # same fixes as data/herbs.csv, for lists already imported
+    for chinese, wrong, right in (("苦杏仁", "Xìng Rén", "Kǔ Xìng Rén"),
+                                  ("龍膽", "Lóng Dǎn Cǎo", "Lóng Dǎn"),
+                                  ("茵陳", "Yīn Chén Hāo", "Yīn Chén"),
+                                  ("龜甲", "Guī Bǎn", "Guī Jiǎ")):
+        cursor.execute("UPDATE herbs SET pinyin = %s WHERE chinese = %s AND pinyin = %s",
+                       (right, chinese, wrong))
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS activity_log (
             id SERIAL PRIMARY KEY,

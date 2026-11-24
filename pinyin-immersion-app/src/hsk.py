@@ -112,7 +112,7 @@ def _grammar():
     examples = {}
     for r in _read("grammar_examples.csv"):
         examples.setdefault(r["grammar_id"], []).append(
-            {"chinese": r["chinese"], "english": r["english"]})
+            {"chinese": r["chinese"], "pinyin": r.get("pinyin", ""), "english": r["english"]})
     return [{"id": r["id"], "level": int(r["level"]), "point": r["point"], "type": r["type"],
              "category": r["category"], "detail": r["detail"],
              "examples": examples.get(r["id"], [])} for r in _read("grammar.csv")]

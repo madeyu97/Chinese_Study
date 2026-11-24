@@ -72,6 +72,7 @@ MEASURES = {
     "架": "planes, pianos", "节": "class periods; sections", "层": "floors, layers",
     "朵": "flowers, clouds", "盘": "a plate of", "碗": "a bowl of", "瓶": "a bottle of",
     "盒": "a box of", "包": "a packet of", "段": "sections, periods", "幅": "pictures, paintings",
+    "根": "long thin things: bananas, hairs", "列": "trains",
     "条儿": "long thin things", "辈子": "a lifetime", "口": "family members; mouthfuls",
 }
 MEASURES.pop("条儿")
@@ -241,13 +242,93 @@ def lookalike_rounds(level, n=ROUNDS, rng=None):
 # ----------------------------------------------------------------------
 # measure words
 # ----------------------------------------------------------------------
+# The measure word each noun takes in everyday speech, and the others that are
+# also right. CC-CEDICT lists measure words in no useful order (菜: 棵 before
+# 道, 音乐: 张), so only these hand-checked nouns are asked.
+_M = {
+    "个": "人 孩子 学生 小学生 问题 办法 东西 地方 机场 词 球 篮球 书包 杯子 饺子 面包 苹果 西瓜 碗 "
+          "箱子 节目 公园 图书馆 游戏 决定 成绩 会议 爸爸 妈妈 哥哥 弟弟 姐姐 妹妹 奶奶 朋友 同学 "
+          "鸡蛋 字 名字 星期 月 国家 城市 门 窗户 手机 故事 习惯 机会 计划 意见 世界",
+    "位": "老师 医生 经理 校长 客人 先生 女士 教授 律师 司机 警察",
+    "名": "运动员 记者 护士",
+    "本": "书 本子 笔记本 词典 字典 护照 课本 杂志 小说",
+    "张": "照片 票 机票 地图 卡 纸 床 桌子 脸 嘴 沙发 报纸 菜单",
+    "把": "椅子 伞 勺子 牙刷 刀 钥匙",
+    "条": "裤子 裙子 路 马路 街 河 船 鱼 新闻 腿 狗 毛巾 短信 消息",
+    "件": "衣服 事 事情 礼物 行李 大衣 衬衫 上衣 雨衣 毛衣",
+    "辆": "汽车 车 自行车 公交车 出租车",
+    "台": "电脑 电视 空调 洗衣机 电梯 冰箱",
+    "部": "电影 电话",
+    "首": "歌 音乐",
+    "家": "宾馆 饭店 饭馆 商店 书店 超市 公司 银行 商场 店 医院 电影院 酒店",
+    "所": "大学 学校",
+    "间": "教室 房间 屋子 卫生间 办公室 厨房",
+    "座": "山 房子 楼 桥",
+    "只": "猫 鸟 鸡 羊 动物 耳朵 老虎",
+    "头": "牛",
+    "双": "鞋 手 脚 筷子 眼睛 袜子",
+    "杯": "茶 咖啡 红茶 酒 啤酒 果汁",
+    "瓶": "牛奶 矿泉水 水",
+    "碗": "饭 米饭",
+    "道": "菜 题",
+    "节": "课",
+    "门": "历史 外语 语言 课程",
+    "颗": "糖 牙 星星",
+    "块": "蛋糕 冰 黑板 手表 肉",
+    "片": "海 草地",
+    "篇": "课文 文章 日记",
+    "份": "工作",
+    "封": "信 邮件",
+    "支": "笔 铅笔 队",
+    "棵": "树 草",
+    "朵": "花 云",
+    "幅": "画",
+    "场": "比赛 雨 雪 表演 考试 病",
+    "架": "飞机",
+    "顿": "早饭 午饭 晚饭",
+    "根": "香蕉 头发",
+    "列": "火车",
+    "种": "药 颜色 水果 运动",
+}
+# other measure words that are right too, so they're never wrong options
+_ALSO = {"人": "位口", "老师": "个", "医生": "个", "经理": "个", "客人": "个", "爸爸": "位",
+         "妈妈": "位", "朋友": "位", "同学": "位", "奶奶": "位", "运动员": "个位", "护士": "个位",
+         "记者": "个位", "医院": "所个", "电影院": "个", "大学": "个", "学校": "个", "饭店": "个",
+         "公司": "个", "商店": "个", "银行": "个", "超市": "个", "店": "个", "教室": "个",
+         "房间": "个", "屋子": "个", "办公室": "个", "厨房": "个", "卫生间": "个", "山": "个",
+         "房子": "个栋套", "楼": "个栋层", "桥": "个", "城市": "座", "图书馆": "座家", "公园": "座",
+         "猫": "个", "鸟": "个", "鸡": "个", "羊": "头个", "狗": "只个", "动物": "种个",
+         "牛": "条个", "耳朵": "个双", "眼睛": "只个", "手": "只", "脚": "只", "筷子": "把",
+         "鞋": "只", "袜子": "只", "茶": "壶瓶", "咖啡": "瓶", "酒": "瓶", "啤酒": "瓶罐",
+         "果汁": "瓶", "牛奶": "杯盒", "矿泉水": "杯", "水": "杯", "饭": "顿", "面条": "根",
+         "课": "门", "历史": "种", "外语": "种", "语言": "种", "糖": "块", "蛋糕": "个",
+         "手表": "个", "花": "枝", "画": "张", "病": "种", "考试": "次", "表演": "个",
+         "苹果": "颗", "西瓜": "颗", "面包": "片块", "饺子": "只", "球": "只", "篮球": "只",
+         "书包": "只", "杯子": "只", "碗": "只", "箱子": "只", "节目": "场", "游戏": "场",
+         "决定": "项", "成绩": "项", "会议": "场次", "问题": "道", "办法": "种条",
+         "沙发": "条套", "报纸": "份", "菜单": "份", "礼物": "份", "工作": "个", "菜": "盘个",
+         "题": "个", "信": "个", "邮件": "个", "药": "片盒", "水果": "个", "颜色": "个",
+         "运动": "项个", "头发": "", "香蕉": "把个", "早饭": "份", "午饭": "份", "晚饭": "份",
+         "车": "部", "汽车": "部", "电话": "个", "手机": "部台", "门": "扇道", "窗户": "扇",
+         "电影": "个", "歌": "个", "床": "个", "桌子": "个", "照片": "个", "地图": "个",
+         "纸": "", "钥匙": "个", "刀": "个", "椅子": "个", "伞": "个", "故事": "段", "习惯": "种",
+         "机会": "次", "计划": "项", "意见": "条", "世界": "", "事": "个", "事情": "个",
+         "衣服": "套", "鱼": "个", "新闻": "个", "短信": "个", "消息": "个", "队": "个",
+         "云": "片", "海": "", "草地": "块", "树叶": "", "课文": "", "文章": "", "日记": "",
+         "笔": "个", "铅笔": "个", "冰箱": "个", "电脑": "个", "电视": "个", "空调": "个"}
+MEASURE_OF = {noun: m for m, nouns in _M.items() for noun in nouns.split()}
+
+
 def measure_answer(word):
-    """The measure word to ask for: the noun's own one before the general 个."""
-    ms = [m for m in word["measure"] if m in MEASURES]
-    if not ms:
-        return None
-    own = [m for m in ms if m != "个"]
-    return own[0] if own else ms[0]
+    """The measure word to ask for with a noun, from the hand-checked list
+    (None for nouns not on it)."""
+    return MEASURE_OF.get(word["word"])
+
+
+def measure_ok(word):
+    """Every measure word that's right with the noun."""
+    w = word["word"]
+    return {MEASURE_OF.get(w, "")} | set(_ALSO.get(w, "")) | set(word.get("measure") or ()) - {""}
 
 
 def measure_rounds(level, n=ROUNDS, rng=None):
@@ -264,7 +345,7 @@ def measure_rounds(level, n=ROUNDS, rng=None):
     rounds = []
     for t in targets:
         m = measure_answer(t)
-        others = [x for x in common if x not in t["measure"]]
+        others = [x for x in common if x not in measure_ok(t)]
         rng.shuffle(others)
         opts, ans = _place(m, others[:OPTIONS - 1], rng)
         phrase = f"一{m}{t['word']}"
@@ -272,9 +353,9 @@ def measure_rounds(level, n=ROUNDS, rng=None):
             _word_card(f"一＿{t['word']}", t["pinyin"], placement.show(t["english"])),
             [_word_card(o) for o in opts], ans,
             {"zh": phrase, "py": hg.sentence_pinyin(phrase),
-             "en": f"{m}: {MEASURES[m]}" + (
-                 f" · also {'、'.join(x for x in t['measure'] if x != m)}"
-                 if len(t["measure"]) > 1 else "")},
+             "en": f"{placement.show(t['english'])} · {m}: {MEASURES[m]}" + (
+                 f" · also {'、'.join(sorted(also))}" if (also := set(_ALSO.get(t["word"], ""))
+                                                         - {m}) else "")},
             notes=[(o, _char_py(o), MEASURES[o]) for o in opts if o != m]))
     return rounds
 

@@ -28,7 +28,8 @@ shows how many of the 1,096 recognition characters they cover.
   to 2 new structures. Structures below your tested grammar level get a
   2-minute quick check instead of a full lesson. At this pace all 344
   structures take about nine months (`hsk_grammar.plan_lessons`).
-- 🌙 Evening: writing (5 new characters a day plus reviews), then one graded passage.
+- 🌙 Evening: one picture-word game (about 3 minutes, a different kind each
+  day), writing (5 new characters a day plus reviews), then one graded passage.
 
 **✍️ Write** (`views/2_Handwriting.py`). The 400 characters HSK 1–4 asks
 you to write by hand, in `data/hsk/write_order.csv` order: HSK 1–2, then 3,
@@ -54,13 +55,22 @@ Bean is linked for more (linked only, not copied: its content is All
 Rights Reserved).
 
 **🎮 Play** (`games_hsk.py`, `games_hsk_page.py`):
+- 🖼️ Picture words, first on the page: picture → word, word → picture,
+  hear it → picture, picture memory. 623 HSK 1–4 words (a third of the list)
+  have a picture, each checked by eye (`data/hsk/pictures.csv`). Abstract
+  words, and ones a picture can't tell apart from another word, are left
+  out. Each game adds at most 3 new words, next in the syllabus.
 - Hear it, find it
 - Read it
 - Look-alikes (请 qǐng / 清 qīng / 情 qíng)
-- Measure words (一＿书 → 本)
-- Sentence scramble
+- Measure words (一＿书 → 本): 299 nouns, 248 with a measure word other than 个
+- Sentence scramble: official example sentences, two-clause ones too (HSK 4: 167)
 - Memory match
-- The picture games, over HSK words only
+
+Every answer is saved per word (table `game_seen`). A game starts with the
+words you missed last time, then the ones due again (after 1, 3, 7, 21, 60
+days), then words you haven't met yet (ones learnt in Anki first). After
+that it takes the words played longest ago (`games_hsk.prioritise`).
 
 🌿 Herbs is a separate section: name the herb, find the herb, write herb
 names.
@@ -103,7 +113,9 @@ Daily amounts (new grammar, new characters, session times) are in
   from a Herb Dojo export).
 - `data/frequency_words.csv`, `data/frequency_ranks.csv`: the original
   app's frequency list and glosses (`data/FREQUENCY_SOURCE.md`).
-- `data/game_images/`: pictures for the picture games, with credits.
+- `data/game_images/`: pictures for the picture games, with credits. The HSK
+  pictures are mostly ARASAAC pictograms (`arasaac/`, CC BY-NC-SA 4.0:
+  non-commercial use only); `tools/build_hsk_pictures.py` fetches any missing.
 
 ## Running and testing
 

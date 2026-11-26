@@ -2132,6 +2132,91 @@ def db_tests():
             (db.bank_get, audio_engine.create_audio_file, db.grammar_known_vocab,
              db.grammar_pick_set, db.grammar_mark_served, gdr.grade_answer) = real
 
+    @test("HSK play: picture games first, every answer kept per word, missed words back next game")
+    def t_hsk_play():
+        import audio_engine
+        import game_components as gcomp
+        import games_hsk as _gh
+        from streamlit.testing.v1 import AppTest
+        uid = _fresh_learner()
+        db.set_hsk_levels(uid, 1, 1, "test", grammar=1)
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM game_seen WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        real = (audio_engine.create_audio_file, gcomp.choice_board, gcomp.memory_board)
+        audio_engine.create_audio_file = lambda text, voice=None: None
+        calls = []
+
+        def choose(right):
+            def board(**k):
+                calls.append(k)
+                n = k["answer"] if right else (k["answer"] + 1) % len(k["options"])
+                return {"sid": k["sid"], "round": k["round"], "chosen": n}
+            return board
+
+        def page():
+            at = AppTest.from_file("views/8_Games.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "matt", "display_name": "M"}
+            return at
+        try:
+            at = page(); at.run()
+            assert not at.exception, at.exception
+            labels = [b.label for b in at.button]
+            assert labels.index(next(l for l in labels if "Picture → word" in l)) == 0, "pictures first"
+            assert any("HSK words with pictures" in c.value for c in at.caption)
+            # a game of missed words
+            gcomp.choice_board = choose(False)
+            next(b for b in at.button if b.key == "ghpick_word_pic").click().run()
+            missed = []
+            for _ in range(_gh.ROUNDS):
+                missed.append(at.session_state["gh_rounds"][at.session_state["gh_i"]]["item"])
+                at.run()
+                next(b for b in at.button if b.label == "Next ▶️").click().run()
+            assert not at.exception, at.exception
+            prompt, opts = calls[-1]["prompt"], calls[-1]["options"]
+            assert prompt["kind"] == "word" and all(o["kind"] == "image" and o["img"].startswith("data:")
+                                                    for o in opts), "pictures reach the board"
+            seen = db.game_seen(uid, "pic")
+            assert set(missed) <= set(seen) and all(seen[w]["box"] == 0 for w in missed), seen
+            # the next picture game (any of them) starts from those words
+            again = _gh.picture_rounds("pic_word", seen=seen,
+                                       known=_gh.known_for_pictures({"read": 1}, 0))
+            assert len({r["item"] for r in again} & set(missed)) >= _gh.ROUNDS // 2
+            # right answers move a word up a box
+            gcomp.choice_board = choose(True)
+            next(b for b in at.button if "Play again" in b.label).click().run()
+            first = at.session_state["gh_rounds"][0]["item"]
+            at.run()
+            assert db.game_seen(uid, "pic")[first]["box"] >= 1
+            met, right = db.game_coverage(uid, "pic")
+            assert met >= _gh.ROUNDS and right >= 1
+            # picture memory: picture faces reach the board as pictures
+            boards = []
+            gcomp.memory_board = lambda **k: boards.append(k)
+            next(b for b in at.button if b.label == "✖ End game").click().run()
+            next(b for b in at.button if b.key == "ghpick_pic_memory").click().run()
+            assert not at.exception, at.exception
+            faces = boards[-1]["cards"]
+            assert sum(1 for c in faces if c["img"].startswith("data:image")) == _gh.MEMORY_PAIRS
+            # today's plan: the evening's picture game starts by itself and counts as the step
+            db.saved_session_del(uid, "games_hsk")
+            gcomp.choice_board = choose(True)
+            at = page()
+            at.session_state["tp"] = {"date": clock.today().isoformat(), "slot": "evening",
+                                      "order": ["pictures", "handwriting"],
+                                      "params": {"pictures": {"game": "listen_pic"}},
+                                      "done": [], "skipped": []}
+            at.run()
+            assert at.session_state["gh_game"] == "listen_pic", "no picker: the game is on"
+            for _ in range(_gh.ROUNDS):
+                at.run()
+                next(b for b in at.button if b.label == "Next ▶️").click().run()
+            assert not at.exception, at.exception
+            assert any(b.label.startswith("Continue ▶") and "Handwriting" in b.label for b in at.button)
+            assert at.session_state["tp"]["done"] == ["pictures"]
+        finally:
+            audio_engine.create_audio_file, gcomp.choice_board, gcomp.memory_board = real
+
     @test("HSK grammar: a quick check below your level - no lesson card, a few items, a week's gap when passed")
     def t_grammar_hsk_modes():
         import audio_engine
@@ -2355,6 +2440,7 @@ def db_tests():
     t_pages_resume()
     t_dont_know()
     t_grammar_hsk_modes()
+    t_hsk_play()
     t_pages_smoke()
 
 
@@ -3597,8 +3683,12 @@ def t_plan_hsk():
                                                    "new_available": 9}), hsk_track=True)
     m, e = (_sess(day)[k] for k in ("morning", "evening"))
     assert _keys(m) == ["grammar"], _keys(m)
-    assert _keys(e) == ["handwriting", "reading"], _keys(e)
-    assert e["steps"][0]["params"]["new"] == 5, "the day's new characters, before writing is started"
+    assert _keys(e) == ["pictures", "handwriting", "reading"], _keys(e)
+    assert e["steps"][1]["params"]["new"] == 5, "the day's new characters, before writing is started"
+    # one picture game an evening, a different kind each day
+    games = {tplan.build_day(dict(_plan_state(), day_n=n), hsk_track=True)[1]["steps"][0]["params"]["game"]
+             for n in range(3)}
+    assert games == set(tplan.PICTURE_ROTATION) and games <= set(__import__("games_hsk").PICTURE_GAMES)
     assert day[0]["why"] == tplan.HSK_SESSIONS["morning"][3]
     # the original app is untouched
     assert _keys(_sess(tplan.build_day(_plan_state()))["morning"]) == ["words", "tones", "grammar"]
@@ -3809,10 +3899,15 @@ def t_games_commons():
     lines = gimg.credit_lines(gitems.ITEMS)
     assert len(lines) == len(used) and all(credits[n]["author"] in l.replace("\\", "") for n, l in zip(used, lines))
     svgs = {p.stem for p in gimg.IMAGE_DIR.glob("*.svg")}
-    assert svgs == {i["image"][3:] for i in gitems.ITEMS if i["image"].startswith("tw:")}, "no stray Twemoji"
+    import games_hsk as _gh
+    used_tw = {i["image"][3:] for i in gitems.ITEMS + _gh.pictures() if i["image"].startswith("tw:")}
+    assert svgs == used_tw, "no stray Twemoji"
+    webps = {p.stem for p in (gimg.IMAGE_DIR / "arasaac").glob("*.webp")}
+    assert webps == {p["image"][3:] for p in _gh.pictures() if p["image"].startswith("as:")}, \
+        "no stray pictograms"
     assert {p.name for p in gimg.IMAGE_DIR.iterdir()} == (
         {p + ".svg" for p in svgs} | {c["file"] for c in credits.values()}
-        | {"ATTRIBUTION.md", "credits.json"}), "nothing unaccounted for in data/game_images"
+        | {"ATTRIBUTION.md", "credits.json", "arasaac"}), "nothing unaccounted for in data/game_images"
 
 
 @test("games: rounds use same-topic look-alikes, all different; memory board has matching pairs")
@@ -4389,6 +4484,104 @@ def t_games_hsk():
     assert _gh.memory_matches(cards, [w0, word_n[1]]) == set(), "two words are not a pair"
 
 
+@test("game order: missed words first, then due, then unmet (Anki first), a few new, then oldest")
+def t_game_priority():
+    import datetime as _dt
+    import random as _r
+    import games_hsk as _gh
+    today = _dt.date(2026, 11, 26)
+    d = lambda n: (today - _dt.timedelta(days=n)).isoformat()   # noqa: E731
+    keys = list("abcdefghijkl")
+    seen = {"a": {"box": 0, "last": d(0)}, "b": {"box": 0, "last": d(3)},      # missed
+            "c": {"box": 2, "last": d(5)},                                      # due (3 days)
+            "d": {"box": 3, "last": d(2)},                                      # not due (7)
+            "e": {"box": 5, "last": d(1)}}                                      # not due (60)
+    order = _gh.prioritise(keys, seen, today, n=4, known={"f", "g"}, new_max=2, rng=_r.Random(1))
+    assert sorted(order) == keys, "every key once"
+    assert order[:2] == ["b", "a"], "missed first, longest ago first"
+    assert order[2] == "c" and set(order[3:5]) == {"f", "g"}, "then due, then words already learnt"
+    assert order[5:7] == ["h", "i"], "then new words in syllabus order, up to new_max"
+    assert order[7:] == ["d", "e", "j", "k", "l"], "then played longest ago, the other new ones last"
+    # a game of many missed words still leaves room for others
+    many = {k: {"box": 0, "last": d(1)} for k in keys[:8]}
+    assert set(_gh.prioritise(keys, many, today, n=4, rng=_r.Random(2))[2:4]) <= set(keys[8:])
+    # every game takes its rounds in that order
+    level2 = [w["word"] for w in _gh._meaning_pool(2)]
+    missed = {w: {"box": 0, "last": d(0)} for w in level2[:5]}
+    got = {r["item"] for r in _gh.meaning_rounds(2, rng=_r.Random(3), seen=missed, today=today)}
+    assert set(level2[:5]) <= got, "the five missed words come back"
+    for game in ("listen", "lookalike", "measure"):
+        rounds = _gh.rounds_for(game, {"listen": 2, "read": 2}, rng=_r.Random(4))
+        assert all(r["item"] for r in rounds), game
+    assert all(r["item"] and len(r["item"]) == 1 for r in _gh.lookalike_rounds(3, rng=_r.Random(5))), \
+        "look-alikes are kept per character"
+
+
+@test("picture words: 600+ HSK words, each picture bundled, no option another picture could fit")
+def t_hsk_pictures():
+    import random as _r
+    import games_hsk as _gh
+    import game_images as _gimg
+    pics = _gh.pictures()
+    assert len(pics) >= 600, len(pics)
+    assert len({p["word"] for p in pics}) == len(pics) and all(_hsk.word(p["word"]) for p in pics)
+    for p in pics:
+        assert _gimg.path_for(p["image"]).exists(), p
+    arasaac = [p for p in pics if p["image"].startswith("as:")]
+    assert len(arasaac) >= 450 and _gimg.data_uri(arasaac[0]["image"]).startswith("data:image/webp")
+    assert all(_gimg.path_for(p["image"]).stat().st_size < 40_000 for p in arasaac), "kept small"
+    assert len(_gh.picture_words(1)) >= 150
+    known = _gh.known_for_pictures({"read": 1}, 0)
+    rng = _r.Random(7)
+    for game in _gh.PICTURE_GAMES:
+        if game == "pic_memory":
+            continue
+        rounds = _gh.rounds_for(game, {"read": 1, "listen": 1}, rng=rng, known=known)
+        assert len(rounds) == _gh.ROUNDS, game
+        new = [r for r in rounds if r["item"] not in known]
+        assert len(new) <= _gh.NEW_PER_GAME, (game, [r["item"] for r in new])
+        for r in rounds:
+            words = [_hsk.word(n[0]) for n in r["notes"]] + [_hsk.word(r["item"])]
+            by = {p["word"]: p for p in pics}
+            ps = [by[w["word"]] for w in words]
+            assert len({p["image"] for p in ps}) == _gh.OPTIONS, "four different pictures"
+            assert not any(_gh._same_meaning(a, b) for i, a in enumerate(ps) for b in ps[i + 1:]), \
+                [p["word"] for p in ps]
+            kinds = [o["kind"] for o in r["options"]]
+            assert kinds == (["word"] * 4 if game == "pic_word" else ["image"] * 4), (game, kinds)
+            assert (r["audio"] == r["item"]) == (game == "listen_pic")
+            assert r["reveal"]["image"] == by[r["item"]]["image"]
+    # synonyms that share a picture are never options together
+    by = {p["word"]: p for p in pics}
+    assert _gh._same_meaning(by["饭店"], by["饭馆"]) and _gh._same_meaning(by["晚饭"], by["晚餐"])
+    cards = _gh.picture_memory(rng=rng, known=known)
+    assert len(cards) == 2 * _gh.MEMORY_PAIRS
+    imgs = [c["image"] for c in cards if c["face"] == "image"]
+    assert len(set(imgs)) == _gh.MEMORY_PAIRS and all(c["image"] == "" for c in cards if c["face"] == "word")
+    w0 = next(n for n, c in enumerate(cards) if c["face"] == "word")
+    p0 = next(n for n, c in enumerate(cards) if c["face"] == "image" and c["pair"] == cards[w0]["pair"])
+    assert _gh.memory_matches(cards, [w0, p0]) == {w0, p0}
+
+
+@test("scramble: two-clause and longer sentences at HSK 3-4, the level test keeps its strict pool")
+def t_scramble_pool():
+    import placement as _pl
+    import grammar_build as _gb
+    for lv, strict_max in ((1, 7), (2, 7), (3, 7), (4, 8)):
+        strict, game = _pl.grammar_pool(lv), _pl.grammar_pool(lv, game=True)
+        assert all(len(e["answer"]) <= strict_max and "，" not in e["hanzi"] for e in strict)
+        assert {e["hanzi"] for e in strict} <= {e["hanzi"] for e in game}
+        assert all(len(e["answer"]) <= (7 if lv == 1 else 8 if lv == 2 else 10) for e in game)
+        assert all(_gb.core(e["hanzi"]) == "".join(e["answer"]) for e in game)
+    g4 = _pl.grammar_pool(4, game=True)
+    assert len(g4) >= 3 * len(_pl.grammar_pool(4)), "HSK 4 scramble had only 52 sentences"
+    assert any("，" in e["hanzi"] for e in g4)
+    # a second clause may have its own subject; a fronted topic still can't
+    assert any(e["hanzi"].startswith("因为") or e["hanzi"].startswith("虽然") for e in g4 + _pl.grammar_pool(3, game=True))
+    assert _gb.tiles_of("我只是提供一些建议到底怎么做由你决定", max_tiles=10, glue=False) is None, \
+        "no gluing 做+由 to fit"
+
+
 @test("herb game: separate from HSK - names, characters, tier-1 first")
 def t_games_herbs():
     import random as _r
@@ -4458,7 +4651,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_games_herbs(); t_grammar_pace(); t_pinyin_context(); t_card_english(); t_gr_hsk_writer()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_game_priority(); t_hsk_pictures(); t_scramble_pool(); t_games_herbs(); t_grammar_pace(); t_pinyin_context(); t_card_english(); t_gr_hsk_writer()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

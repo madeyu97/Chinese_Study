@@ -82,13 +82,17 @@ def main(max_sets=12):
         level = (db.get_hsk_levels(uid) or {}).get("read") or 1
         short = READING_STOCK - db.reading_passage_stats(uid, level)["unread"]
         logging.info(f"reading: {max(0, short)} passages to write at HSK {level}")
+        misses = passages = 0
         for _ in range(max(0, short)):
             if time.time() - started > MAX_MINUTES * 60:
                 break
             ok = write_passage(uid, level)
+            passages += bool(ok)
             logging.info(f"  passage at HSK {level}: {'written' if ok else 'not written'}")
-            if not ok:
+            misses += not ok
+            if misses >= 2:              # one bad draft run is luck; two, stop for tonight
                 break
+        logging.info(f"reading: {passages} passages written")
     logging.info(f"done: {written} sets written")
     return written
 

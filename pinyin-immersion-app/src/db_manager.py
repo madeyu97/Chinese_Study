@@ -649,6 +649,20 @@ def _build_schema():
             PRIMARY KEY (user_id, game)
         )
     ''')
+    # one row per word (character, sentence) per kind of game: what
+    # games_hsk.prioritise orders the next game by
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS game_seen (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            family TEXT NOT NULL,
+            item TEXT NOT NULL,
+            box INTEGER DEFAULT 0,
+            seen INTEGER DEFAULT 0,
+            wrong INTEGER DEFAULT 0,
+            last_seen TEXT,
+            PRIMARY KEY (user_id, family, item)
+        )
+    ''')
     conn.commit()
 
     # Users must exist before anything references them, and the legacy
@@ -4142,6 +4156,50 @@ def save_game_score(user_id, game, score):
     conn.commit()
     conn.close()
     return score > before
+
+
+def game_seen(user_id, family):
+    """{item: {"box", "seen", "wrong", "last"}} for one kind of game."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT item, box, seen, wrong, last_seen FROM game_seen
+                      WHERE user_id = %s AND family = %s""", (user_id, family))
+    out = {i: {"box": b, "seen": n, "wrong": w, "last": d} for i, b, n, w, d in cursor.fetchall()}
+    conn.close()
+    return out
+
+
+def record_game_item(user_id, family, item, correct, boxes=6):
+    """One answer in a game: right moves the word up a box (it comes back
+    later), wrong puts it back in box 0 (next game). Never raises."""
+    try:
+        conn = get_connection(one_shot=True)
+        cursor = conn.cursor()
+        cursor.execute("""INSERT INTO game_seen (user_id, family, item, box, seen, wrong, last_seen)
+                          VALUES (%s, %s, %s, %s, 1, %s, %s)
+                          ON CONFLICT (user_id, family, item) DO UPDATE SET
+                              box = CASE WHEN EXCLUDED.wrong > 0 THEN 0
+                                         ELSE LEAST(game_seen.box + 1, %s) END,
+                              seen = game_seen.seen + 1,
+                              wrong = game_seen.wrong + EXCLUDED.wrong,
+                              last_seen = EXCLUDED.last_seen""",
+                       (user_id, family, item, 1 if correct else 0, 0 if correct else 1,
+                        clock.today().isoformat(), boxes - 1))
+        conn.commit()
+        conn.close()
+    except Exception as e:                       # noqa: BLE001
+        print(f"record_game_item: {e}")
+
+
+def game_coverage(user_id, family):
+    """(items met, items right last time) for one kind of game."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT COUNT(*), COUNT(*) FILTER (WHERE box > 0) FROM game_seen
+                      WHERE user_id = %s AND family = %s""", (user_id, family))
+    row = cursor.fetchone()
+    conn.close()
+    return int(row[0] or 0), int(row[1] or 0)
 
 
 def saved_session_put(user_id, name, state_json, elapsed=0):

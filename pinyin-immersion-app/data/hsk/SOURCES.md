@@ -31,3 +31,11 @@ where it has the word, otherwise the first senses of
 `erhua = 1` marks Beijing 儿 words (哪儿, 一会儿…). The app teaches
 Malaysian Mandarin, so drills and tests leave them out — the 儿-less word
 is on the list too (哪里).
+
+`pictures.csv` gives the picture for each of the 623 HSK words the picture
+games use. 500 are [ARASAAC](https://arasaac.org) pictograms (Sergio Palao,
+Government of Aragón, CC BY-NC-SA 4.0). The rest are Twemoji (CC BY 4.0) and
+the Commons photos already in `data/game_images`. Candidates were matched on
+ARASAAC's Chinese and English keywords, then each one was looked at. One that
+could fairly stand for another word in the same game, or needs the word
+already known to make sense, was left out.

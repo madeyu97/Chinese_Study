@@ -83,15 +83,17 @@ _WHOLE = {"不错", "不过", "不用", "不要", "不同", "不久", "不但", 
           "难过", "经过", "通过", "过去", "过来", "错过", "超过", "接着", "随着", "沿着", "顺着"}
 
 
-def tiles_of(sentence, markers=()):
+def tiles_of(sentence, markers=(), max_tiles=None, glue=True):
     """The sentence cut into words (jieba), punctuation dropped, grammar words
     on tiles of their own - or None if it would make too few or too many
-    tiles to be a fair puzzle."""
+    tiles (MAX_TILES unless max_tiles says) to be a fair puzzle. glue=False
+    leaves jieba's words whole rather than gluing single characters to fit."""
+    most = max_tiles or MAX_TILES
     text = core(sentence)
     if not text or not all(is_cjk_char(c) for c in text):
         return None
     words = _split([w for w in jieba.lcut(text) if w.strip()], markers)
-    if len(words) > MAX_TILES:
+    if len(words) > most and glue:
         # fold the longest run of single characters into its neighbour until
         # it fits: 个 + 人 → 个人, keeping particles like 了 / 吗 apart
         keep = set("了吗呢吧着过的得地都也就才还又再不没把被比") | SUBJECTS
@@ -104,10 +106,10 @@ def tiles_of(sentence, markers=()):
                 words[i:i + 2] = [a + b]
                 return True
             return False
-        while len(words) > MAX_TILES:
+        while len(words) > most:
             if not (fold(True) or fold(False)):
                 return None
-    return words if MIN_TILES <= len(words) <= MAX_TILES else None
+    return words if MIN_TILES <= len(words) <= most else None
 
 
 def _shuffled(words, seed):

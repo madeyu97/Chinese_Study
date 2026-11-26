@@ -44,6 +44,7 @@ STEPS = {
     "sentences": ("🎧", "Listen & speak", "views/9_Sentences.py"),
     "handwriting": ("✍️", "Handwriting", "views/2_Handwriting.py"),
     "reading": ("📖", "Reading", "views/6_Reading.py"),
+    "pictures": ("🖼️", "Picture words", "views/8_Games.py"),
 }
 SESSIONS = {
     "morning": ("🌅", "Morning", "Learn",
@@ -165,6 +166,13 @@ def _evening(state, done):
                   "today's new and missed words, once more")
         steps.append(_step("evening", "words", detail, 0.4 * max(n, 5),
                            {"recap": True, "cap": PLAN_RECAP_WORDS}, done))
+    if state.get("hsk_track"):
+        # HSK vocabulary through pictures: one game, missed words first, a few
+        # new ones - the picture game changes day to day
+        game = PICTURE_ROTATION[state.get("day_n", 0) % len(PICTURE_ROTATION)]
+        steps.append(_step("evening", "pictures",
+                           "one game — words missed last time first, up to 3 new",
+                           3, {"game": game}, done))
     h = state.get("handwriting")
     # the HSK app teaches writing from the start; the original waits until
     # writing has been started from the Handwriting page
@@ -207,14 +215,16 @@ def _evening(state, done):
 BUILDERS = {"morning": _morning, "evening": _evening}
 
 
-HSK_STEPS = ("grammar", "handwriting", "reading")
+HSK_STEPS = ("grammar", "pictures", "handwriting", "reading")
+PICTURE_ROTATION = ("word_pic", "listen_pic", "pic_word")
 PLAN_READING_PASSAGES = 1
 HSK_BANK_AHEAD = 6      # new structures beyond today's whose drills the app writes ahead
 HSK_SESSIONS = {
     "morning": ("🌅", "Morning", "Learn",
                 "New grammar while you're fresh, and the structures due back."),
     "evening": ("🌙", "Evening", "Use & keep",
-                "Writing, then reading - characters met in print after writing them."),
+                "Picture words, then writing and reading - characters met in print "
+                "after writing them."),
 }
 
 
@@ -326,7 +336,7 @@ def gather_state(user_id, also=(), hsk_track=False):
     def ok(*values):
         return all(v is not failed for v in values)
 
-    state = {"done": set(), "finished": {}, "skipped": set()}
+    state = {"done": set(), "finished": {}, "skipped": set(), "day_n": today.toordinal()}
     if hsk_track:
         state["hsk_levels"] = hsk_levels if ok(hsk_levels) else None
     if ok(prog):

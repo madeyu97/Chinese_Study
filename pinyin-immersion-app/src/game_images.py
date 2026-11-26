@@ -8,6 +8,9 @@ Image keys:
   wm:<name>       photo or illustration from Wikimedia Commons, e.g.
                   "wm:durian" -> durian.jpg; author, licence and source
                   link for each are in credits.json
+  as:<id>         ARASAAC pictogram (HSK picture games), e.g. "as:2462" ->
+                  arasaac/2462.webp. Pictograms by Sergio Palao, ARASAAC
+                  (arasaac.org), Government of Aragón, CC BY-NC-SA 4.0
 """
 
 import base64
@@ -17,7 +20,9 @@ from pathlib import Path
 
 IMAGE_DIR = Path(__file__).resolve().parent.parent / "data" / "game_images"
 CREDITS_PATH = IMAGE_DIR / "credits.json"
-MIME = {".svg": "image/svg+xml", ".jpg": "image/jpeg", ".png": "image/png"}
+MIME = {".svg": "image/svg+xml", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+ARASAAC_CREDIT = ("Pictograms: Sergio Palao, [ARASAAC](https://arasaac.org), Government of Aragón, "
+                  "[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).")
 
 
 @functools.lru_cache(maxsize=1)
@@ -32,10 +37,12 @@ def path_for(key):
         return IMAGE_DIR / f"{name}.svg"
     if kind == "wm":
         return IMAGE_DIR / credits()[name]["file"]
+    if kind == "as":
+        return IMAGE_DIR / "arasaac" / f"{name}.webp"
     raise KeyError(key)
 
 
-@functools.lru_cache(maxsize=512)
+@functools.lru_cache(maxsize=1024)
 def data_uri(key):
     path = path_for(key)
     data = base64.b64encode(path.read_bytes()).decode("ascii")

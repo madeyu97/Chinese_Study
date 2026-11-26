@@ -14,9 +14,8 @@ Every answer is a card you tap: the picture or word cards in the quiz games
 A game in progress is saved to the database after every move, so leaving
 the page - or the app - and coming back picks up where you left off.
 
-On the HSK track this page hands over to games_hsk_page (HSK 1-4 games and
-the separate herb game); the picture games here still run, over HSK words
-only and without the TCM topics, when picked from that list.
+On the HSK track this page hands over to games_hsk_page: HSK 1-4 games,
+HSK picture games and the separate herb game.
 """
 
 import time
@@ -38,16 +37,14 @@ st.set_page_config(page_title="Play", page_icon="🎮", layout="centered")
 USER = require_login()
 USER_ID = USER["id"]
 S = st.session_state
-# the HSK track has its own games (games_hsk_page); the picture games below
-# still run there, over HSK words only, when picked from its list
-HSK = on_hsk_track(USER)
-if HSK and not S.get("games_pictures"):
+# the HSK track has its own games, picture games included (games_hsk_page)
+if on_hsk_track(USER):
     with st.sidebar:
         sidebar_user_badge()
     import games_hsk_page
     games_hsk_page.run(USER)
     st.stop()
-CATS = [c for c in gi.CATEGORIES if not (HSK and c in ("tcm", "herbs"))]
+CATS = list(gi.CATEGORIES)
 
 
 # what a game in progress is saved as (widget keys and audio are left out)
@@ -80,7 +77,7 @@ def restore():
 SHOW = ["Characters + pinyin", "Characters only"]
 WORDS = ["All — learn new ones too", "Only words I've met"]
 # kept outside the widgets, which Streamlit forgets while a game is on screen
-PREFS = S.setdefault("games_hsk_prefs" if HSK else "games_prefs",
+PREFS = S.setdefault("games_prefs",
                      {"show": SHOW[0], "cats": list(CATS), "words": WORDS[0]})
 
 with st.sidebar:
@@ -134,13 +131,6 @@ def start(game):
     only_met = PREFS["words"] == WORDS[1]
     met = {w["chinese"] for w in db.introduced_words(USER_ID)} if only_met else None
     pool, topped = gm.word_pool(PREFS["cats"] or list(CATS), met, only_met)
-    if HSK:                     # HSK words up to the reading level, all HSK words if too few
-        import games_hsk as gh
-        level = gh.level_for("pictures", db.get_hsk_levels(USER_ID))
-        hsk_pool = [i for i in pool if i["chinese"] in gh.picture_words(level)]
-        if len(hsk_pool) < gm.MIN_POOL:
-            hsk_pool = [i for i in pool if i["chinese"] in gh.picture_words(4)]
-        pool = hsk_pool if len(hsk_pool) >= gm.MIN_POOL else pool
     S.gm_game, S.gm_topped, S.gm_t0 = game, topped, time.time()
     S.gm_sid, S.gm_show = uuid.uuid4().hex, PREFS["show"] == SHOW[0]
     S.gm_vocab = db.vocab_ids_for([i["chinese"] for i in pool])
@@ -165,21 +155,16 @@ def end_button():
 # game picker
 # ----------------------------------------------------------------------
 if "gm_game" not in S:
-    if HSK and st.button("← HSK games", key="gm_back_hsk"):
-        S.games_pictures = False
-        st.rerun()
     st.caption("Quick picture games for spare minutes — every round still links a word to "
-               "its meaning. Today's plan comes first; this is the extra."
-               + (" HSK words only, up to your reading level." if HSK else ""))
+               "its meaning. Today's plan comes first; this is the extra.")
     with st.expander("Topics and display"):
         PREFS["show"] = st.radio("Show words as", SHOW, index=SHOW.index(PREFS["show"]),
                                  key="games_show", horizontal=True)
         PREFS["cats"] = st.multiselect(
             "Topics", CATS, default=[c for c in PREFS["cats"] if c in CATS],
             format_func=lambda c: f"{gi.CATEGORIES[c][2]} {gi.CATEGORIES[c][1]}", key="games_cats")
-        if not HSK:             # on the HSK track words are studied in Anki, not here
-            PREFS["words"] = st.radio("Words", WORDS, index=WORDS.index(PREFS["words"]),
-                                      key="games_words", horizontal=True)
+        PREFS["words"] = st.radio("Words", WORDS, index=WORDS.index(PREFS["words"]),
+                                  key="games_words", horizontal=True)
     best = db.game_scores(USER_ID)
     for key, (icon, name, blurb) in gm.GAMES.items():
         b = best.get(key)

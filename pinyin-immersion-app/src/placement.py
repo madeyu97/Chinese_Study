@@ -126,31 +126,57 @@ def new_test(skill, seed=None):
             "answers": [], "passed": 0, "done": False, "log": []}
 
 
-def grammar_pool(level):
+def grammar_pool(level, game=False):
     """Official HSK example sentences for the level's grammar points (the
     ones drilled, not the vocabulary ones) that make a fair puzzle: 4-7
     tiles (8 at HSK 4, whose examples run long), English given, no
-    Beijing 儿, one sentence."""
+    Beijing 儿, one sentence.
+
+    game=True is the wider pool for the sentence scramble: those, plus
+    sentences from every grammar point, up to 10 tiles at HSK 3-4 and two
+    clauses joined by a comma (因为下雨，所以我没去), cut as jieba cuts them
+    (no gluing words together to fit). The level test keeps the strict pool."""
+    strict = _grammar_examples(level, False)
+    if not game:
+        return strict
+    have = {e["hanzi"] for e in strict}
+    return strict + [e for e in _grammar_examples(level, True) if e["hanzi"] not in have]
+
+
+def _grammar_examples(level, game):
     import hsk_grammar as hg
     import grammar_build as gb
     from dictionary_engine import has_erhua
     import grammar_curriculum as gc
-    most = 8 if level == 4 else 7
+    most = ({1: 7, 2: 8}.get(level, 10) if game else 8 if level == 4 else 7)
+    no_punct = r"[；、“”]" if game else r"[，；、“”]"
     out, seen = [], set()
     for p in hsk.grammar_points(level):
-        if not hg.MAP.get(p["id"]):
+        if not hg.MAP.get(p["id"]) and not game:
             continue
-        markers = [m for sid in hg.MAP[p["id"]] for m in gc.get(sid).markers]
+        markers = [m for sid in hg.MAP.get(p["id"]) or () for m in gc.get(sid).markers]
         for ex in p["examples"]:
             zh = re.sub(r"（[^）]*）", "", ex["chinese"]).strip()
             if (not ex["english"] or has_erhua(zh) or zh in seen
                     # a list (英语、汉语、法语) could go in any order: left out
-                    or not re.search(r"[。？！]$", zh) or re.search(r"[，；、“”]", zh)):
+                    or not re.search(r"[。？！]$", zh) or re.search(no_punct, zh)
+                    or zh.count("，") > 1):
                 continue
-            words = gb.tiles_of(zh, markers)
+            # the level test as before (glued to fit 8 tiles, then 4-7); the
+            # scramble as jieba cuts it
+            words = (gb.tiles_of(zh, markers, max_tiles=most, glue=False) if game
+                     else gb.tiles_of(zh, markers))
             # a fronted topic (火车票你买到了没有) has a second right order
-            # (你买到火车票了没有): only sentences whose subject is up front
-            late = [i for i, w in enumerate(words or []) if w in gb.SUBJECTS]
+            # (你买到火车票了没有): only sentences whose subject is up front in
+            # the first clause (a second clause may have its own subject)
+            first = len(gb.core(zh.split("，")[0]))
+            late, n = [], 0
+            for i, w in enumerate(words or []):
+                if n >= first:
+                    break
+                if w in gb.SUBJECTS:
+                    late.append(i)
+                n += len(w)
             if late and late[0] > 1:
                 continue
             if words and 4 <= len(words) <= most:

@@ -12,8 +12,19 @@ something Anki and the study pages don't cover.
   scramble   an official HSK example sentence, its words shuffled
   memory     turn over cards, match characters to meanings
 
+Picture games (PICTURE_GAMES) link HSK words to pictures without English:
+picture -> word, word -> picture, hear it -> picture, and memory. About a
+quarter of HSK 1-4 has a picture (data/hsk/pictures.csv, each one checked
+by eye); they draw on every level, not just the one tested, so they also
+bring in new words - a few a game, next in syllabus order.
+
 Words come from the syllabus up to the level the level test set: listening
 games by the listening level, the rest by reading, the scramble by grammar.
+
+Every answer is kept per word (db game_seen), and each game is filled in
+this order (prioritise): words missed last time, words due again (a
+Leitner box: 1, 3, 7, 21, 60 days), words not yet met - ones learnt in Anki
+first - then whatever was played longest ago.
 
 The herb game is separate (HERB_GAMES): name the herb from its characters,
 find its characters from the name, or write herb names on the Write page.
@@ -21,10 +32,13 @@ find its characters from the name, or write herb names on the Write page.
 Pure: the page (games_hsk_page.py) keeps the state and draws the cards.
 Every round is {"prompt": card | None, "audio": text | None, "options":
 [cards], "answer": index, "reveal": {zh, py, en}, "notes": [(zh, py, en)]}
-where a card is {"kind": "word"|"text", "zh", "py", "en"}.
+where a card is {"kind": "word"|"text", "zh", "py", "en"} or, in the
+picture games, {"kind": "image", "image": key} (the page turns the key into
+the picture). Each round also names its "item": what game_seen records.
 """
 
 import csv
+import datetime
 import functools
 import random
 import re
@@ -42,7 +56,12 @@ GAMES = {
     "measure": ("📏", "Measure words", "一＿书 'a book': which measure word fits?"),
     "scramble": ("🧩", "Sentence scramble", "Put an HSK example sentence back in order."),
     "memory": ("🃏", "Memory match", "Turn over two cards at a time; match characters to meanings."),
-    "pictures": ("🖼️", "Picture games", "Picture ↔ word games, HSK words only."),
+}
+PICTURE_GAMES = {
+    "pic_word": ("🖼️", "Picture → word", "See the picture, tap its word."),
+    "word_pic": ("🔤", "Word → picture", "Read the word, tap its picture."),
+    "listen_pic": ("🎧", "Hear it → picture", "Hear a word, tap its picture."),
+    "pic_memory": ("🃏", "Picture memory", "Turn over two cards at a time; match each picture to its word."),
 }
 HERB_GAMES = {
     "herb_name": ("🌿", "Name the herb", "See the herb's characters, tap its name."),
@@ -50,7 +69,15 @@ HERB_GAMES = {
     "herb_write": ("✍️", "Write herb names", "Herb names on the Write page, tier-1 herbs first."),
 }
 SKILL = {"listen": "listen", "meaning": "read", "lookalike": "read", "measure": "read",
-         "memory": "read", "pictures": "read", "scramble": "grammar"}
+         "memory": "read", "scramble": "grammar", "pic_word": "read", "word_pic": "read",
+         "pic_memory": "read", "listen_pic": "listen"}
+# what game_seen keeps results under: games testing the same link share one
+FAMILY = {"listen": "listen", "meaning": "meaning", "memory": "meaning",
+          "lookalike": "lookalike", "measure": "measure", "scramble": "scramble",
+          "pic_word": "pic", "word_pic": "pic", "pic_memory": "pic", "listen_pic": "pic_listen",
+          "herb_name": "herb", "herb_find": "herb"}
+INTERVALS = (0, 1, 3, 7, 21, 60)       # days before a word comes back, by box
+NEW_PER_GAME = 3                       # picture games: new words (past Anki / the level) a game
 ROUNDS = 10
 SCRAMBLE_ROUNDS = 6
 MEMORY_PAIRS = 6
@@ -73,6 +100,8 @@ MEASURES = {
     "朵": "flowers, clouds", "盘": "a plate of", "碗": "a bowl of", "瓶": "a bottle of",
     "盒": "a box of", "包": "a packet of", "段": "sections, periods", "幅": "pictures, paintings",
     "根": "long thin things: bananas, hairs", "列": "trains",
+    "盏": "lamps", "匹": "horses", "扇": "doors, windows", "顶": "hats", "副": "pairs: glasses",
+    "面": "flat things: mirrors, flags", "管": "tubes", "笔": "sums of money, deals",
     "条儿": "long thin things", "辈子": "a lifetime", "口": "family members; mouthfuls",
 }
 MEASURES.pop("条儿")
@@ -93,9 +122,9 @@ def _text_card(en):
     return {"kind": "text", "zh": "", "py": "", "en": en}
 
 
-def _round(prompt, options, answer_n, reveal, audio=None, notes=None):
+def _round(prompt, options, answer_n, reveal, audio=None, notes=None, item=None):
     return {"prompt": prompt, "audio": audio, "options": options, "answer": answer_n,
-            "reveal": reveal, "notes": notes or []}
+            "reveal": reveal, "notes": notes or [], "item": item or reveal["zh"]}
 
 
 def _place(target, others, rng):
@@ -103,6 +132,64 @@ def _place(target, others, rng):
     opts = others + [target]
     rng.shuffle(opts)
     return opts, opts.index(target)
+
+
+def prioritise(keys, seen=None, today=None, n=ROUNDS, known=None, new_max=None, rng=None):
+    """keys (syllabus order) in the order a game should take them.
+
+    seen: {key: {"box", "last"}} from game_seen. First up to half the game
+    from words missed last time (box 0), then words due again, then words
+    not met yet - known ones (learnt in Anki, or up to the level) at random,
+    then up to new_max new ones in syllabus order - then the rest of the
+    missed, then whatever was played longest ago, then the other new ones.
+    Every key comes back once: a game takes the first n it can use."""
+    rng = rng or random.Random()
+    seen = seen or {}
+    today = today or datetime.date.today()
+    known = None if known is None else set(known)
+
+    def age(k):
+        try:
+            return (today - datetime.date.fromisoformat(seen[k]["last"][:10])).days
+        except (TypeError, ValueError, KeyError):
+            return 999
+
+    missed, due, rest, fresh, new = [], [], [], [], []
+    for k in keys:
+        if k in seen:
+            box = max(0, min(int(seen[k].get("box") or 0), len(INTERVALS) - 1))
+            if box == 0:
+                missed.append(k)
+            elif age(k) >= INTERVALS[box]:
+                due.append(k)
+            else:
+                rest.append(k)
+        elif known is None or k in known:
+            fresh.append(k)
+        else:
+            new.append(k)
+    jitter = {k: rng.random() for k in keys}
+    missed.sort(key=lambda k: (-age(k), jitter[k]))
+    due.sort(key=lambda k: (-age(k), jitter[k]))
+    rest.sort(key=lambda k: (-age(k), jitter[k]))
+    rng.shuffle(fresh)
+    cap = len(new) if new_max is None else new_max
+    half = max(1, n // 2)
+    return missed[:half] + due + fresh + new[:cap] + missed[half:] + rest + new[cap:]
+
+
+def _take(order, make, n, rng):
+    """The first n rounds make() can build from order, shuffled (missed
+    words shouldn't all come first)."""
+    rounds = []
+    for k in order:
+        if len(rounds) == n:
+            break
+        r = make(k)
+        if r:
+            rounds.append(r)
+    rng.shuffle(rounds)
+    return rounds
 
 
 def level_for(game, levels):
@@ -140,12 +227,13 @@ def sound_distance(a, b):
     return score
 
 
-def listen_rounds(level, n=ROUNDS, rng=None):
+def listen_rounds(level, n=ROUNDS, rng=None, seen=None, today=None):
     rng = rng or random.Random()
-    pool = _plain(hsk.words_upto(level))
+    pool = {w["word"]: w for w in _plain(hsk.words_upto(level))}
     near = _plain(hsk.words_upto(min(4, level + 1)))
-    rounds = []
-    for t in rng.sample(pool, min(n, len(pool))):
+
+    def make(key):
+        t = pool[key]
         cands = [(sound_distance(t["word"], w["word"]), rng.random(), w) for w in near
                  if w["word"] != t["word"]]
         cands = sorted((c for c in cands if c[0] > 0), key=lambda c: (-c[0], c[1]))
@@ -156,32 +244,38 @@ def listen_rounds(level, n=ROUNDS, rng=None):
             if all(w["word"] != p["word"] for p in picked):
                 picked.append(w)
         if len(picked) < OPTIONS - 1:
-            continue
+            return None
         opts, ans = _place(t, picked, rng)
-        rounds.append(_round(
+        return _round(
             None, [_word_card(o["word"]) for o in opts], ans,
             {"zh": t["word"], "py": t["pinyin"], "en": placement.show(t["english"])},
             audio=t["word"],
             notes=[(o["word"], o["pinyin"], placement.show(o["english"])) for o in opts
-                   if o is not t]))
-    return rounds
+                   if o is not t])
+    return _take(prioritise(list(pool), seen, today, n, rng=rng), make, n, rng)
 
 
 # ----------------------------------------------------------------------
 # meaning: characters -> English
 # ----------------------------------------------------------------------
-def meaning_rounds(level, n=ROUNDS, rng=None):
-    rng = rng or random.Random()
-    pool = [w for w in _plain(hsk.words_upto(level)) if placement._tokens(w)
+def _meaning_pool(level):
+    return [w for w in _plain(hsk.words_upto(level)) if placement._tokens(w)
             and placement.show(w["english"])]
-    rounds = []
-    for t in rng.sample(pool, min(n, len(pool))):
+
+
+def meaning_rounds(level, n=ROUNDS, rng=None, seen=None, today=None):
+    rng = rng or random.Random()
+    pool = _meaning_pool(level)
+    by = {w["word"]: w for w in pool}
+
+    def make(key):
+        t = by[key]
         item = placement.make_item(t, pool, rng)
-        rounds.append(_round(
+        return _round(
             _word_card(t["word"]), [_text_card(o) for o in item["options"]],
             item["options"].index(item["answer"]),
-            {"zh": t["word"], "py": t["pinyin"], "en": item["answer"]}))
-    return rounds
+            {"zh": t["word"], "py": t["pinyin"], "en": item["answer"]})
+    return _take(prioritise(list(by), seen, today, n, rng=rng), make, n, rng)
 
 
 # ----------------------------------------------------------------------
@@ -212,31 +306,29 @@ def _char_note(ch):
     return ch, _char_py(ch), f"as in {w['word']} {w['pinyin']} '{placement.show(w['english'])}'"
 
 
-def lookalike_rounds(level, n=ROUNDS, rng=None):
+def lookalike_rounds(level, n=ROUNDS, rng=None, seen=None, today=None):
     rng = rng or random.Random()
     words = {w["word"] for w in hsk.words_upto(4)}
     chars = hsk.lookalike_chars(level)
-    rounds = []
-    for ch in rng.sample(chars, len(chars)):
-        if len(rounds) == n:
-            break
+
+    def make(ch):
         w = cue_word(ch, level)
         if not w:
-            continue
+            return None
         # no option that would make another real word in the blank (今天 / 明天)
         others = [d for d in hsk.lookalikes(ch) if w["word"].replace(ch, d) not in words]
         if len(others) < OPTIONS - 1:
-            continue
+            return None
         others = others[:5]
         rng.shuffle(others)
         opts, ans = _place(ch, others[:OPTIONS - 1], rng)
         blank = w["word"].replace(ch, "＿")
-        rounds.append(_round(
+        return _round(
             _word_card(blank, w["pinyin"], placement.show(w["english"])),
             [_word_card(o) for o in opts], ans,
             {"zh": w["word"], "py": w["pinyin"], "en": placement.show(w["english"])},
-            notes=[_char_note(o) for o in opts if o != ch]))
-    return rounds
+            notes=[_char_note(o) for o in opts if o != ch], item=ch)
+    return _take(prioritise(list(chars), seen, today, n, rng=rng), make, n, rng)
 
 
 # ----------------------------------------------------------------------
@@ -248,22 +340,22 @@ def lookalike_rounds(level, n=ROUNDS, rng=None):
 _M = {
     "个": "人 孩子 学生 小学生 问题 办法 东西 地方 机场 词 球 篮球 书包 杯子 饺子 面包 苹果 西瓜 碗 "
           "箱子 节目 公园 图书馆 游戏 决定 成绩 会议 爸爸 妈妈 哥哥 弟弟 姐姐 妹妹 奶奶 朋友 同学 "
-          "鸡蛋 字 名字 星期 月 国家 城市 门 窗户 手机 故事 习惯 机会 计划 意见 世界",
-    "位": "老师 医生 经理 校长 客人 先生 女士 教授 律师 司机 警察",
+          "鸡蛋 字 名字 星期 月 国家 城市 门 手机 故事 习惯 机会 计划 意见 世界",
+    "位": "老师 医生 经理 校长 客人 先生 女士 教授 律师 司机 警察 顾客 教练 作家 师傅 父亲",
     "名": "运动员 记者 护士",
-    "本": "书 本子 笔记本 词典 字典 护照 课本 杂志 小说",
-    "张": "照片 票 机票 地图 卡 纸 床 桌子 脸 嘴 沙发 报纸 菜单",
+    "本": "书 本子 笔记本 词典 字典 护照 课本 杂志 小说 笔记 说明书",
+    "张": "照片 票 机票 地图 卡 纸 床 桌子 脸 嘴 沙发 报纸 菜单 表格 图 图片 纸巾",
     "把": "椅子 伞 勺子 牙刷 刀 钥匙",
-    "条": "裤子 裙子 路 马路 街 河 船 鱼 新闻 腿 狗 毛巾 短信 消息",
-    "件": "衣服 事 事情 礼物 行李 大衣 衬衫 上衣 雨衣 毛衣",
+    "条": "裤子 裙子 路 马路 街 河 船 鱼 新闻 腿 狗 毛巾 短信 消息 道路 街道 公路 江 胳膊 生命 法律",
+    "件": "衣服 事 事情 礼物 行李 大衣 衬衫 上衣 雨衣 毛衣 家具 商品 外套",
     "辆": "汽车 车 自行车 公交车 出租车",
     "台": "电脑 电视 空调 洗衣机 电梯 冰箱",
-    "部": "电影 电话",
+    "部": "电影 电话 电视剧 作品 话剧",
     "首": "歌 音乐",
-    "家": "宾馆 饭店 饭馆 商店 书店 超市 公司 银行 商场 店 医院 电影院 酒店",
-    "所": "大学 学校",
-    "间": "教室 房间 屋子 卫生间 办公室 厨房",
-    "座": "山 房子 楼 桥",
+    "家": "宾馆 饭店 饭馆 商店 书店 超市 公司 银行 商场 店 医院 电影院 酒店 工厂 剧院 旅馆",
+    "所": "大学 学校 学院",
+    "间": "教室 房间 屋子 卫生间 办公室 厨房 客厅 餐厅 厕所",
+    "座": "山 房子 楼 桥 城 花园",
     "只": "猫 鸟 鸡 羊 动物 耳朵 老虎",
     "头": "牛",
     "双": "鞋 手 脚 筷子 眼睛 袜子",
@@ -272,23 +364,32 @@ _M = {
     "碗": "饭 米饭",
     "道": "菜 题",
     "节": "课",
-    "门": "历史 外语 语言 课程",
-    "颗": "糖 牙 星星",
-    "块": "蛋糕 冰 黑板 手表 肉",
-    "片": "海 草地",
+    "门": "历史 外语 语言 课程 功课 口语 技术 科学 知识 专业",
+    "颗": "糖 牙 星星 心",
+    "块": "蛋糕 冰 黑板 手表 肉 巧克力 饼干 牌子",
+    "片": "海 草地 叶子 森林",
     "篇": "课文 文章 日记",
-    "份": "工作",
+    "份": "工作 工资 文件 资料",
     "封": "信 邮件",
     "支": "笔 铅笔 队",
     "棵": "树 草",
-    "朵": "花 云",
+    "朵": "花 云 鲜花",
     "幅": "画",
-    "场": "比赛 雨 雪 表演 考试 病",
-    "架": "飞机",
-    "顿": "早饭 午饭 晚饭",
-    "根": "香蕉 头发",
+    "场": "比赛 雨 雪 表演 考试 病 京剧 梦 感冒",
+    "架": "飞机 钢琴",
+    "顿": "早饭 午饭 晚饭 早餐 午餐 晚餐",
+    "根": "香蕉 头发 烟",
     "列": "火车",
     "种": "药 颜色 水果 运动",
+    "盏": "灯",
+    "匹": "马",
+    "扇": "窗 窗户",
+    "顶": "帽子",
+    "副": "眼镜",
+    "面": "镜子",
+    "管": "牙膏",
+    "笔": "钱 奖学金 生意",
+    "项": "任务",
 }
 # other measure words that are right too, so they're never wrong options
 _ALSO = {"人": "位口", "老师": "个", "医生": "个", "经理": "个", "客人": "个", "爸爸": "位",
@@ -315,7 +416,18 @@ _ALSO = {"人": "位口", "老师": "个", "医生": "个", "经理": "个", "�
          "机会": "次", "计划": "项", "意见": "条", "世界": "", "事": "个", "事情": "个",
          "衣服": "套", "鱼": "个", "新闻": "个", "短信": "个", "消息": "个", "队": "个",
          "云": "片", "海": "", "草地": "块", "树叶": "", "课文": "", "文章": "", "日记": "",
-         "笔": "个", "铅笔": "个", "冰箱": "个", "电脑": "个", "电视": "个", "空调": "个"}
+         "笔": "个", "铅笔": "个", "冰箱": "个", "电脑": "个", "电视": "个", "空调": "个",
+         "笔记": "个", "表格": "份", "图": "幅", "图片": "幅", "纸巾": "包", "窗": "个",
+         "窗户": "个", "帽子": "个", "镜子": "个", "牙膏": "支", "钱": "", "奖学金": "份",
+         "生意": "单", "胳膊": "只", "法律": "部项", "功课": "", "口语": "", "技术": "项种",
+         "科学": "种", "知识": "种", "专业": "个", "电视剧": "", "作品": "篇件个", "话剧": "台场",
+         "钢琴": "台", "家具": "套", "商品": "种个", "外套": "", "鲜花": "束枝", "叶子": "",
+         "森林": "", "工资": "", "文件": "个", "资料": "", "早餐": "份", "午餐": "份",
+         "晚餐": "份", "京剧": "出", "梦": "个", "感冒": "次", "心": "个", "烟": "支", "学院": "个",
+         "客厅": "个", "餐厅": "家个", "厕所": "个", "顾客": "个名", "教练": "个名", "作家": "个名",
+         "师傅": "个", "父亲": "个", "巧克力": "颗", "饼干": "片", "牌子": "个", "工厂": "座个",
+         "剧院": "座个", "旅馆": "个", "城": "个", "花园": "个", "任务": "个", "道路": "",
+         "街道": "", "公路": "", "江": "", "生命": "个", "说明书": "份"}
 MEASURE_OF = {noun: m for m, nouns in _M.items() for noun in nouns.split()}
 
 
@@ -331,15 +443,16 @@ def measure_ok(word):
     return {MEASURE_OF.get(w, "")} | set(_ALSO.get(w, "")) | set(word.get("measure") or ()) - {""}
 
 
-def measure_rounds(level, n=ROUNDS, rng=None):
+def measure_rounds(level, n=ROUNDS, rng=None, seen=None, today=None):
     rng = rng or random.Random()
     import hsk_grammar as hg
-    nouns = [w for w in _plain(hsk.words_upto(level)) if measure_answer(w)]
-    special = [w for w in nouns if measure_answer(w) != "个"]
-    general = [w for w in nouns if measure_answer(w) == "个"]
+    nouns = {w["word"]: w for w in _plain(hsk.words_upto(level)) if measure_answer(w)}
+    special = [k for k, w in nouns.items() if measure_answer(w) != "个"]
+    general = [k for k, w in nouns.items() if measure_answer(w) == "个"]
     # mostly nouns with a measure word of their own; 个 now and then
     k = min(len(general), max(1, n // 5))
-    targets = rng.sample(special, min(n - k, len(special))) + rng.sample(general, k)
+    targets = [nouns[x] for x in prioritise(special, seen, today, n - k, rng=rng)[:n - k]
+               + prioritise(general, seen, today, k, rng=rng)[:k]]
     rng.shuffle(targets)
     common = [m for m in MEASURES]
     rounds = []
@@ -356,7 +469,7 @@ def measure_rounds(level, n=ROUNDS, rng=None):
              "en": f"{placement.show(t['english'])} · {m}: {MEASURES[m]}" + (
                  f" · also {'、'.join(sorted(also))}" if (also := set(_ALSO.get(t["word"], ""))
                                                          - {m}) else "")},
-            notes=[(o, _char_py(o), MEASURES[o]) for o in opts if o != m]))
+            notes=[(o, _char_py(o), MEASURES[o]) for o in opts if o != m], item=t["word"]))
     return rounds
 
 
@@ -365,19 +478,20 @@ def measure_rounds(level, n=ROUNDS, rng=None):
 # ----------------------------------------------------------------------
 @functools.lru_cache(maxsize=4)
 def _scramble_pool(level):
-    return tuple(placement.grammar_pool(level))
+    return tuple(placement.grammar_pool(level, game=True))
 
 
-def scramble_items(level, n=SCRAMBLE_ROUNDS, rng=None):
+def scramble_items(level, n=SCRAMBLE_ROUNDS, rng=None, seen=None, today=None):
     """Official example sentences up to the grammar level, half of them from
     the level itself."""
     rng = rng or random.Random()
-    now = list(_scramble_pool(level))
-    before = [ex for lv in range(1, level) for ex in _scramble_pool(lv)]
-    rng.shuffle(now)
-    rng.shuffle(before)
+    now = {ex["hanzi"]: ex for ex in _scramble_pool(level)}
+    before = {ex["hanzi"]: ex for lv in range(1, level) for ex in _scramble_pool(lv)
+              if ex["hanzi"] not in now}
     k = n if not before else max(n // 2, n - len(before))
-    picked = now[:k] + before[:n - len(now[:k])]
+    picked = [now[x] for x in prioritise(list(now), seen, today, k, rng=rng)[:k]]
+    picked += [before[x] for x in prioritise(list(before), seen, today, n - len(picked),
+                                             rng=rng)[:n - len(picked)]]
     rng.shuffle(picked)
     return [placement.make_grammar_item(ex, rng) for ex in picked]
 
@@ -385,12 +499,11 @@ def scramble_items(level, n=SCRAMBLE_ROUNDS, rng=None):
 # ----------------------------------------------------------------------
 # memory: characters <-> meanings
 # ----------------------------------------------------------------------
-def memory_cards(level, pairs=MEMORY_PAIRS, rng=None):
+def memory_cards(level, pairs=MEMORY_PAIRS, rng=None, seen=None, today=None):
     rng = rng or random.Random()
-    pool = [w for w in _plain(hsk.words_upto(level)) if placement._tokens(w)
-            and placement.show(w["english"])]
+    by = {w["word"]: w for w in _meaning_pool(level)}
     chosen = []
-    for w in rng.sample(pool, len(pool)):
+    for w in (by[k] for k in prioritise(list(by), seen, today, pairs, rng=rng)):
         if all(not placement._clash(w, c) for c in chosen):
             chosen.append(w)
         if len(chosen) == pairs:
@@ -493,17 +606,119 @@ def herb_rounds(game, n=ROUNDS, rng=None, pool=None):
         else:
             prompt = _word_card(t["zh"])
             cards = [_text_card(o["name"]) for o in opts]
-        rounds.append(_round(prompt, cards, ans, _herb_reveal(t),
+        rounds.append(_round(prompt, cards, ans, _herb_reveal(t), item=t["zh"],
                              notes=[(o["zh"], o["py"], o["name"]) for o in opts if o is not t]))
     return rounds
 
 
-def rounds_for(game, levels, rng=None):
+def rounds_for(game, levels, rng=None, seen=None, today=None, known=None):
+    if game in PICTURE_GAMES:
+        return picture_rounds(game, rng=rng, seen=seen, today=today, known=known)
     level = level_for(game, levels)
     return {"listen": listen_rounds, "meaning": meaning_rounds, "lookalike": lookalike_rounds,
-            "measure": measure_rounds}[game](level, rng=rng)
+            "measure": measure_rounds}[game](level, rng=rng, seen=seen, today=today)
+
+
+# ----------------------------------------------------------------------
+# picture games
+# ----------------------------------------------------------------------
+PICTURES_CSV = Path(__file__).resolve().parent.parent / "data" / "hsk" / "pictures.csv"
+
+
+@functools.lru_cache(maxsize=1)
+def pictures():
+    """HSK words with a picture, syllabus order: the word's row plus
+    "image" (a game_images key)."""
+    if not PICTURES_CSV.exists():
+        return []
+    with open(PICTURES_CSV, encoding="utf-8") as f:
+        img = {r["word"]: r["image"] for r in csv.DictReader(f)}
+    return [{**w, "image": img[w["word"]]} for w in hsk.words_upto(4, include_erhua=True)
+            if w["word"] in img]
 
 
 def picture_words(level):
-    """HSK words (up to level) that the picture games have pictures for."""
-    return {w["word"] for w in hsk.words_upto(level, include_erhua=True)}
+    """HSK words (up to level) that have a picture."""
+    return {p["word"] for p in pictures() if p["level"] <= level}
+
+
+def known_for_pictures(levels, anki_words=None):
+    """Words the picture games treat as learnt: what Anki covers, if you've
+    said, and every word up to the reading level. The rest are new."""
+    lv = (levels or {}).get("read") or 1
+    return set(hsk.anki_known(anki_words or 0)) | {w["word"] for w in hsk.words_upto(lv)}
+
+
+def _same_meaning(a, b):
+    """Two picture words one picture could stand for: the same picture,
+    meanings that share a word (饭店 / 饭馆), or one inside the other
+    (饭 / 米饭)."""
+    return (a["image"] == b["image"] or placement._clash(a, b)
+            or a["word"] in b["word"] or b["word"] in a["word"])
+
+
+def picture_options(t, pool, familiar, rng, n=OPTIONS - 1):
+    """n other picture words for t: none that could also be right, words
+    already met first, the same part of speech first (a picture of a verb
+    among nouns gives itself away)."""
+    others = [p for p in pool if p["word"] != t["word"] and not _same_meaning(t, p)]
+    rng.shuffle(others)
+    others.sort(key=lambda p: (p["word"] not in familiar, p["pos"][:1] != t["pos"][:1]))
+    picked = []
+    for p in others:
+        if len(picked) == n:
+            break
+        if all(not _same_meaning(p, q) for q in picked):
+            picked.append(p)
+    return picked
+
+
+def _pic_card(p):
+    return {"kind": "image", "image": p["image"]}
+
+
+def picture_rounds(game, n=ROUNDS, rng=None, seen=None, today=None, known=None):
+    """pic_word: picture -> word; word_pic: word -> picture; listen_pic:
+    hear the word -> picture."""
+    rng = rng or random.Random()
+    pool = pictures()
+    by = {p["word"]: p for p in pool}
+    known = set(known or ())
+    familiar = known | set(seen or ())
+
+    def make(key):
+        t = by[key]
+        others = picture_options(t, pool, familiar, rng)
+        if len(others) < OPTIONS - 1:
+            return None
+        opts, ans = _place(t, others, rng)
+        reveal = {"zh": t["word"], "py": t["pinyin"], "en": placement.show(t["english"]),
+                  "image": t["image"]}
+        notes = [(o["word"], o["pinyin"], placement.show(o["english"])) for o in opts if o is not t]
+        if game == "pic_word":
+            return _round(_pic_card(t), [_word_card(o["word"], o["pinyin"]) for o in opts], ans,
+                          reveal, notes=notes)
+        prompt = _word_card(t["word"], t["pinyin"]) if game == "word_pic" else None
+        return _round(prompt, [_pic_card(o) for o in opts], ans, reveal, notes=notes,
+                      audio=t["word"] if game == "listen_pic" else None)
+    order = prioritise(list(by), seen, today, n, known=known or None, new_max=NEW_PER_GAME, rng=rng)
+    return _take(order, make, n, rng)
+
+
+def picture_memory(pairs=MEMORY_PAIRS, rng=None, seen=None, today=None, known=None):
+    """Memory cards: each picture word as a picture and as characters, no two
+    that one picture could stand for."""
+    rng = rng or random.Random()
+    by = {p["word"]: p for p in pictures()}
+    chosen = []
+    for k in prioritise(list(by), seen, today, pairs, known=set(known or ()) or None,
+                        new_max=1, rng=rng):
+        if all(not _same_meaning(by[k], c) for c in chosen):
+            chosen.append(by[k])
+        if len(chosen) == pairs:
+            break
+    cards = [{"pair": p["word"], "face": f, "image": p["image"] if f == "image" else "",
+              "zh": p["word"], "py": p["pinyin"], "en": placement.show(p["english"])}
+             for p in chosen for f in ("image", "word")]
+    rng.shuffle(cards)
+    return cards

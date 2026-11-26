@@ -37,7 +37,9 @@ def max_new(level):
 # share of words at or below the level: a short HSK 1 passage of ~35 words
 # with its 5 allowed new words is at 86%, so the bar is lower there
 MIN_COVERAGE = {1: 0.85, 2: 0.88, 3: 0.92, 4: 0.93}
-LENGTH = {1: (45, 100), 2: (70, 140), 3: (100, 200), 4: (140, 260)}   # characters
+# characters; HSK 1's exam passages are short too (revised drafts of 36-43
+# characters sank every retry of a live run at the old minimum of 45)
+LENGTH = {1: (35, 100), 2: (70, 140), 3: (100, 200), 4: (140, 260)}
 SENTENCES = {1: "6-8 short", 2: "6-8", 3: "5-8", 4: "5-8"}
 # HSK 1-2 has a few hundred words: topics they can carry
 EASY_TOPICS = ("my family", "what I eat in a day", "the weather today", "going to the shop",
@@ -169,8 +171,11 @@ def check(payload, level):
     text = str(payload.get("text") or "").strip()
     lo, hi = LENGTH[level]
     n = len(_cjk(text))
-    if not (lo <= n <= hi):
-        p.append(f"text is {n} characters; it must be {lo}-{hi}")
+    if n < lo:
+        p.append(f"text is {n} characters; it must be {lo}-{hi} - add a sentence or two "
+                 f"(about {lo - n + 10} more characters), keeping everything else")
+    elif n > hi:
+        p.append(f"text is {n} characters; it must be {lo}-{hi} - cut a sentence")
     if re.search(r"[A-Za-z0-9]", text):
         p.append("digits or Latin letters in the text - write numbers in Chinese")
     if has_erhua(text):

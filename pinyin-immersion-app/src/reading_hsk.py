@@ -4,7 +4,7 @@ Graded reading for the HSK track: short passages at your reading level.
 
 Each passage is a few connected sentences - a scene, a message, a short
 story - in everyday Mandarin (Malaysia as the setting), built from HSK words up to your
-reading level, with at most MAX_NEW words above it (declared, with pinyin
+reading level, with at most max_new(level) words above it (declared, with pinyin
 and English). It reuses grammar you've drilled, and ends with one
 comprehension question in Chinese (with its English).
 
@@ -25,10 +25,18 @@ import re
 
 import hsk
 
-MAX_NEW = 3                       # words above the level, declared
-# share of words at or below the level: a short HSK 1 passage of ~30 words
-# with its 3 allowed new words is at 90%, so the bar is lower there
-MIN_COVERAGE = {1: 0.88, 2: 0.9, 3: 0.92, 4: 0.93}
+MAX_NEW = 3                       # words above the level, declared (HSK 3-4)
+# HSK 1 has 300 words and HSK 2 another 200: a natural passage needs a few
+# more from outside them (因为, 开心, 用 sank every HSK 1 draft of the live runs)
+MAX_NEW_AT = {1: 5, 2: 4}
+
+
+def max_new(level):
+    return MAX_NEW_AT.get(level, MAX_NEW)
+
+# share of words at or below the level: a short HSK 1 passage of ~35 words
+# with its 5 allowed new words is at 86%, so the bar is lower there
+MIN_COVERAGE = {1: 0.85, 2: 0.88, 3: 0.92, 4: 0.93}
 LENGTH = {1: (45, 100), 2: (70, 140), 3: (100, 200), 4: (140, 260)}   # characters
 SENTENCES = {1: "6-8 short", 2: "6-8", 3: "5-8", 4: "5-8"}
 # HSK 1-2 has a few hundred words: topics they can carry
@@ -81,6 +89,22 @@ def words_of(text):
     return out
 
 
+def _pieces(token):
+    """A token jieba glued together that isn't a word (我用, 很快) cut into
+    HSK words and single characters, longest first - so the word above the
+    level (用) is the one reported, not the pair. Real words stay whole."""
+    from dictionary_engine import cedict_gloss
+    if len(token) < 2 or hsk.word(token) or (cedict_gloss(token)[0] or ""):
+        return [token]
+    every = {w["word"] for w in hsk.words_upto(4, include_erhua=True)}
+    out, i = [], 0
+    while i < len(token):
+        j = next(j for j in range(len(token), i, -1) if j == i + 1 or token[i:j] in every)
+        out.append(token[i:j])
+        i = j
+    return out
+
+
 def analyse(text, level, declared=()):
     """[{"w", "status"}] for each word: "in" (at or below the level),
     "new" (declared above-level word), "out" (above the level, undeclared),
@@ -88,11 +112,16 @@ def analyse(text, level, declared=()):
     known, declared = _known(level), set(declared)
     chars = frozenset(hsk.recognise_chars(level))
     out = []
-    for w in words_of(text):
+    def fine(w):
+        return w in known or all(c in _FREE for c in w) or (
+            len(w) > 1 and _splits(w, known, chars if len(w) <= 3 else frozenset()))
+
+    for w in (p for tok in words_of(text) for p in (
+            [tok] if not _cjk(tok) or fine(tok) or tok in declared
+            or any(d in tok for d in declared) else _pieces(tok))):
         if not _cjk(w):
             out.append({"w": w, "status": "punct"})
-        elif w in known or all(c in _FREE for c in w) or (
-                len(w) > 1 and _splits(w, known, chars if len(w) <= 3 else frozenset())):
+        elif fine(w):
             out.append({"w": w, "status": "in"})
         elif w in declared or any(d in w for d in declared):
             out.append({"w": w, "status": "new"})
@@ -108,7 +137,7 @@ def coverage(analysis):
 
 def auto_declare(payload, level):
     """Declare the draft's few above-level words itself (with pinyin and a
-    meaning), when that keeps it within MAX_NEW: the live runs failed again
+    meaning), when that keeps it within max_new: the live runs failed again
     and again on one or two words (等, 送) the writer hadn't listed."""
     if not isinstance(payload, dict):
         return payload
@@ -120,7 +149,7 @@ def auto_declare(payload, level):
         "。".join(map(str, q.get("options") or []))
     out = list(dict.fromkeys(x["w"] for x in analyse(text, level, [w["hanzi"] for w in new])
                              if x["status"] == "out"))
-    if not out or len(new) + len(out) > MAX_NEW:
+    if not out or len(new) + len(out) > max_new(level):
         return payload
     for w in out:
         info = hsk.word(w)
@@ -149,8 +178,8 @@ def check(payload, level):
     if not str(payload.get("title") or "").strip() or not str(payload.get("english") or "").strip():
         p.append("needs a Chinese title and an English translation")
     new = [w for w in payload.get("new_words") or [] if isinstance(w, dict) and w.get("hanzi")]
-    if len(new) > MAX_NEW:
-        p.append(f"declares {len(new)} new words; at most {MAX_NEW}")
+    if len(new) > max_new(level):
+        p.append(f"declares {len(new)} new words; at most {max_new(level)}")
     for w in new:
         if not w.get("english"):
             p.append(f"new word {w['hanzi']} needs its English")
@@ -159,7 +188,7 @@ def check(payload, level):
     if out:
         p.append("uses words above HSK " + str(level) + " that weren't declared: "
                  + "、".join(out) + " - replace them with easier words, or declare up to "
-                 f"{MAX_NEW} in new_words")
+                 f"{max_new(level)} in new_words")
     elif coverage(a) < MIN_COVERAGE[level]:
         p.append("too many new words for this level")
     q = payload.get("question")
@@ -189,7 +218,7 @@ You write graded reading for an adult preparing for the HSK exams who lives
 in Malaysia: everyday, natural Mandarin in standard HSK vocabulary.
 
 LEVEL: HSK {level}. Use ONLY words from this list (plus names of places and
-particles); at most {MAX_NEW} words from outside it, each declared in
+particles); at most {max_new(level)} words from outside it, each declared in
 "new_words" with pinyin and English:
 {vocab}
 
@@ -234,6 +263,11 @@ QUESTION: {payload['question']['question']} | options: {payload['question']['opt
 Check: the Chinese is natural and correct; the sentences connect into a
 passage; the English matches; exactly one option is right, the key points to
 it, and it can't be answered without understanding the text.
+At HSK {level} the vocabulary is small on purpose: short, plain sentences, a
+word used twice, and simple statements (很好, 很好看) are expected - don't
+reject for those. Reject for Chinese a native speaker wouldn't say, a scene
+that makes no sense (a film watched in a restaurant), a wrong translation or a
+wrong key.
 Return ONLY JSON: {{"acceptable": true/false, "problems": ["…"]}}
 """.strip()
     for model in (REVIEW_MODEL, GRADING_MODEL):

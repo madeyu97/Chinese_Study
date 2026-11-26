@@ -4327,6 +4327,14 @@ def t_reading_hsk():
     p1, p4 = rh.build_prompt(1), rh.build_prompt(4)
     assert "HSK 1" in p1 and "咖啡" not in p1.split("particles);")[1].split("Write ONE")[0]
     assert len(p4) > len(p1)
+    # jieba's glued pairs report the word above the level, not the pair
+    # (the live HSK 1 runs failed on 我用, 很快); real words stay whole
+    out = lambda t: [x["w"] for x in rh.analyse(t, 1) if x["status"] == "out"]   # noqa: E731
+    assert out("我用手机给妈妈打电话。") == ["用"] and out("我很快就来了。") == ["快"]
+    assert out("因为下雨，我很开心。") == ["因为", "开心"]
+    # HSK 1-2 may use a few more words from outside the level
+    assert rh.max_new(1) == 5 and rh.max_new(2) == 4 and rh.max_new(4) == rh.MAX_NEW == 3
+
 
 
 @test("graded reading page: words as tap-to-reveal tiles, escaped; plan step from day one")

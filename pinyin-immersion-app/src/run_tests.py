@@ -2217,6 +2217,54 @@ def db_tests():
         finally:
             audio_engine.create_audio_file, gcomp.choice_board, gcomp.memory_board = real
 
+    @test("reading: a wrong question is taken out - blind-checked stock, reported, not in the score")
+    def t_reading_flags():
+        import reading_hsk as rh
+        from streamlit.testing.v1 import AppTest
+        uid = _fresh_learner()
+        db.set_hsk_levels(uid, 1, 1, "test", grammar=1)
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM reading_passages WHERE user_id = %s", (uid,))
+        conn.commit(); conn.close()
+        q = {"question": "小朋友在饭店喝什么？", "options": ["喝茶", "喝水", "喝咖啡"], "answer": 0,
+             "question_english": "What does the child drink?", "options_english": ["tea", "water", "coffee"]}
+        words = [{"w": "哥哥", "py": "gē ge", "en": "older brother"}, {"w": "。", "punct": True}]
+        old_bad = db.reading_passage_save(uid, 1, {"title": "坏", "text": "哥哥喜欢喝茶。", "english": "x",
+                                                   "question": q, "words": words, "new_words": []})
+        old_ok = db.reading_passage_save(uid, 1, {"title": "好", "text": "哥哥喜欢喝茶。", "english": "x",
+                                                  "question": dict(q, question="哥哥喜欢喝什么？"),
+                                                  "words": words, "new_words": []})
+        unchecked = {r["id"] for r in db.reading_passages_unchecked()}
+        assert {old_bad, old_ok} <= unchecked
+        real = rh.blind_check
+        rh.blind_check = lambda p: ((["can't be answered"], True) if "小朋友" in p["question"]["question"]
+                                    else ([], True))
+        try:
+            at = AppTest.from_file("views/6_Reading.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "matt", "display_name": "M"}
+            at.run()
+            assert not at.exception, at.exception
+            # the old passage whose question fails is skipped and taken out
+            assert at.session_state["rh_cur"]["id"] == old_ok
+            assert old_bad not in {r["id"] for r in db.reading_passages_unchecked()}
+            assert any("blind check" in (w or "") for _, w in db.reading_passages_flagged())
+            assert db.reading_passage_next(uid, 1)["id"] == old_ok
+            assert db.reading_passages_unchecked() == [] or old_ok not in \
+                {r["id"] for r in db.reading_passages_unchecked()}, "checked once, marked"
+            # a wrong answer shows what you chose and the answer, apart
+            next(b for b in at.button if b.label == "喝水").click().run()
+            text = " ".join(m.value for m in at.markdown)
+            assert "You chose **喝水** — water" in text and "The answer: **喝茶** — tea" in text, text
+            assert db.reading_passage_stats(uid, 1)["read"] == 1
+            # reported: out of the score, never shown again
+            next(b for b in at.button if "question is wrong" in b.label).click().run()
+            assert not at.exception, at.exception
+            st_ = db.reading_passage_stats(uid, 1)
+            assert st_["read"] == 0 and st_["right"] == 0, st_
+            assert any("Reported" in c.value for c in at.caption)
+        finally:
+            rh.blind_check = real
+
     @test("HSK grammar: a quick check below your level - no lesson card, a few items, a week's gap when passed")
     def t_grammar_hsk_modes():
         import audio_engine
@@ -2441,6 +2489,7 @@ def db_tests():
     t_dont_know()
     t_grammar_hsk_modes()
     t_hsk_play()
+    t_reading_flags()
     t_pages_smoke()
 
 
@@ -4297,8 +4346,12 @@ def t_reading_hsk():
             "question": {"question": "谁去巴刹了？", "answer": 0,
                          "options": ["我和妈妈", "我的哥哥", "没有人"],
                          "question_english": "Who went to the market?",
-                         "options_english": ["Mum and me", "My brother", "Nobody"]}}
+                         "options_english": ["Mum and me", "My brother", "Nobody"],
+                         "answer_quote": "今天早上我和妈妈去巴刹买菜。"}}
     assert rh.check(good, 1) == [], rh.check(good, 1)
+    # the writer quotes the sentence that answers it, and it must be in the text
+    assert any("answer_quote" in p for p in rh.check(
+        dict(good, question=dict(good["question"], answer_quote="哥哥去巴刹了")), 1))
     # the question is in Chinese at the level, with its English
     assert any("question_english" in p for p in rh.check(dict(good, question={
         "question": "谁去了？", "options": ["我", "你", "他"], "answer": 0}), 1))
@@ -4335,6 +4388,49 @@ def t_reading_hsk():
     # HSK 1-2 may use a few more words from outside the level
     assert rh.max_new(1) == 5 and rh.max_new(2) == 4 and rh.max_new(4) == rh.MAX_NEW == 3
 
+    # the blind check: the live passage gave tea to the brother and asked what
+    # the child drank, keyed 喝茶. A reader without the key says the text doesn't say.
+    import grammar_drills as gdr
+    tea = {"text": "今天小朋友和哥哥去饭店吃饭。哥哥喜欢喝茶，小朋友喜欢吃饺子。",
+           "question": {"question": "小朋友在饭店喝什么？", "options": ["喝茶", "喝水", "喝咖啡"],
+                        "answer": 0}}
+    real = gdr._chat_json
+    asked = []
+    try:
+        def says(v):
+            def chat(model, prompt, t):
+                asked.append(prompt)
+                return v
+            return chat
+        gdr._chat_json = says({"answer": -1, "quote": "", "why": "only the brother drinks tea"})
+        probs, ran = rh.blind_check(tea)
+        assert ran and probs and "can't be answered" in probs[0] and "喝茶" in probs[0], probs
+        assert "key" not in asked[-1].lower() and "0. 喝茶" in asked[-1], "the key isn't given"
+        gdr._chat_json = says({"answer": 1, "quote": "哥哥喜欢喝茶", "why": "x"})
+        assert "picks 喝水" in rh.blind_check(tea)[0][0]
+        gdr._chat_json = says({"answer": 0, "quote": "小朋友喜欢喝茶", "why": "x"})
+        assert "isn't stated" in rh.blind_check(tea)[0][0], "a quote that isn't in the text"
+        gdr._chat_json = says({"answer": 0, "quote": "哥哥喜欢喝茶，", "why": "x"})
+        assert rh.blind_check(tea) == ([], True), "punctuation aside, the quote is in the text"
+
+        def broken(model, prompt, t):
+            raise RuntimeError("down")
+        gdr._chat_json = broken
+        assert rh.blind_check(tea) == ([], False)
+        # generate: a draft that fails the blind check is sent back, never stored
+        drafts = []
+
+        def writer(model, prompt, t):
+            if "answer the question using ONLY" in prompt:
+                return {"answer": -1, "quote": "", "why": "the text doesn't say"}
+            drafts.append(prompt)
+            return dict(good)
+        gdr._chat_json = writer
+        assert rh.generate(1, attempts=2) is None
+        assert len(drafts) == 2 and "can't be answered" in drafts[1]
+    finally:
+        gdr._chat_json = real
+
 
 
 @test("graded reading page: words as tap-to-reveal tiles, escaped; plan step from day one")
@@ -4352,6 +4448,14 @@ def t_reading_page():
     assert "&lt;b&gt;" in h and "<b>" not in h.split("</style>")[1]
     assert 'class="new"' in h and "bā shā" in h and 'type="checkbox"' in h
     assert "rp all" in rp.passage_html([], all_pinyin=True)
+    css = rp.CSS
+    assert "position:absolute" in css.replace(" ", "") and "padding-bottom" in css, \
+        "hidden glosses don't widen the words"
+    # punctuation stays with its word: 说：“哥哥 - the colon with 说, the quote with 哥哥
+    h = rp.passage_html([{"w": "说"}, {"w": "：“", "punct": True}, {"w": "哥哥"}, {"w": "。", "punct": True}])
+    groups = h.split("</style>")[1].split('<span class="g">')[1:]
+    assert len(groups) == 2 and "说" in groups[0] and "：" in groups[0] and "“" not in groups[0]
+    assert "“" in groups[1] and "哥哥" in groups[1] and "。" in groups[1]
     assert set(rp.MANDARIN_BEAN) == set(_hsk.LEVELS)
     csv_ = rp.anki_csv([{"hanzi": "巴刹", "pinyin": "bā shā", "english": "market"}]).decode()
     assert csv_.splitlines()[1] == "巴刹,bā shā,market"

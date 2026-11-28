@@ -39,33 +39,57 @@ MANDARIN_BEAN = {   # Mandarin Bean groups its lessons by stage, not HSK level
 CSS = """
 <style>
 .rp { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
-      font-size: 27px; line-height: 1.35; display:flex; flex-wrap:wrap; gap: 6px 2px; }
-.rp label { cursor:pointer; display:inline-flex; flex-direction:column; align-items:center; }
+      font-size: 27px; line-height: 1.35; display:flex; flex-wrap:wrap; gap: 0 5px; }
+/* the pinyin and English sit in a band under the word without widening it:
+   hidden glosses as wide as "very" spread 很 and 好 far apart */
+.rp label { cursor:pointer; position:relative; padding-bottom: 30px; }
 .rp input { display:none; }
-.rp .py, .rp .en { font-size: 12px; line-height: 1.2; visibility: hidden; white-space: nowrap; }
+.rp .w { display:block; }
+.rp .py, .rp .en { font-size: 12px; line-height: 1.2; visibility: hidden; white-space: nowrap;
+                   position:absolute; left:50%; transform:translateX(-50%); z-index:1; }
+.rp .py { top: calc(100% - 30px); }
+.rp .en { top: calc(100% - 15px); }
 .rp .py { color:#7EB6FF; }
-.rp .en { color:#90a4ae; max-width: 7em; overflow:hidden; text-overflow:ellipsis; }
+.rp .en { color:#90a4ae; max-width: 13em; overflow:hidden; text-overflow:ellipsis; }
 .rp input:checked ~ .py, .rp input:checked ~ .en { visibility: visible; }
 .rp .new .w { color:#F5C84C; }
 .rp .new .py { visibility: visible; }
-.rp.all .py { visibility: visible; }
+.rp.all .py { visibility: visible; position: static; transform: none; display:block;
+              text-align:center; }
+.rp.all label { padding-bottom: 15px; }
+.rp .g { display:inline-flex; white-space:nowrap; }
 .rp .p { align-self:flex-start; }
 </style>
 """
 
 
+OPENING = set("“‘（《「『【")
+
+
 def passage_html(words, all_pinyin=False):
-    cells = []
+    """The passage as tap-to-reveal word tiles. Punctuation stays with its
+    word - a closing mark with the word before, an opening one with the word
+    after - so a line never starts with 。 or ：“."""
+    groups, opening = [], ""
     for n, w in enumerate(words):
         if w.get("punct"):
-            cells.append(f'<span class="p">{html.escape(w["w"])}</span>')
+            for c in w["w"]:            # ：“ is a closing mark and an opening one
+                mark = f'<span class="p">{html.escape(c)}</span>'
+                if c in OPENING or not groups or opening:
+                    opening += mark
+                else:
+                    groups[-1] += mark
             continue
         cls = "new" if w.get("new") else ""
-        cells.append(f'<label class="{cls}"><input type="checkbox" id="w{n}">'
-                     f'<span class="w">{html.escape(w["w"])}</span>'
-                     f'<span class="py">{html.escape(w.get("py", ""))}</span>'
-                     f'<span class="en">{html.escape(w.get("en", ""))}</span></label>')
-    return CSS + f'<div class="rp{" all" if all_pinyin else ""}">{"".join(cells)}</div>'
+        groups.append(opening + f'<label class="{cls}"><input type="checkbox" id="w{n}">'
+                      f'<span class="w">{html.escape(w["w"])}</span>'
+                      f'<span class="py">{html.escape(w.get("py", ""))}</span>'
+                      f'<span class="en">{html.escape(w.get("en", ""))}</span></label>')
+        opening = ""
+    if opening:
+        groups.append(opening)
+    cells = "".join(f'<span class="g">{g}</span>' for g in groups)
+    return CSS + f'<div class="rp{" all" if all_pinyin else ""}">{cells}</div>'
 
 
 def anki_csv(words):
@@ -123,15 +147,34 @@ def run(user):
         st.progress(plan["read"] / plan["n"],
                     text=f"Passage {plan['read'] + 1} of {plan['n']}")
 
+    def next_checked():
+        """The next passage whose question has passed the blind check (older
+        stock is checked here, once; one that fails is taken out)."""
+        import reading_hsk as rh
+        for _ in range(6):
+            nxt = db.reading_passage_next(uid, level)
+            if nxt is None or nxt["payload"].get("checked"):
+                return nxt
+            with st.spinner("Checking the question…"):
+                problems, ran = rh.blind_check(nxt["payload"])
+            if not ran:                 # no model to ask: it was reviewed when written
+                return nxt
+            if problems:
+                db.reading_passage_flag(nxt["id"], "blind check: " + problems[0])
+                continue
+            nxt["payload"] = db.reading_passage_mark_checked(nxt["id"], nxt["payload"])
+            return nxt
+        return None
+
     cur = S.get("rh_cur")
     if cur is None or cur.get("level") != level:
-        cur = db.reading_passage_next(uid, level)
+        cur = next_checked()
         if cur is None:
             with st.spinner("Writing a passage at your level…"):
                 ahead.wait_reading(uid, level)
-                cur = db.reading_passage_next(uid, level)
+                cur = next_checked()
                 if cur is None and ahead.write_passage(uid, level):
-                    cur = db.reading_passage_next(uid, level)
+                    cur = next_checked()
         if cur is None:
             st.warning("Couldn't write a passage just now. Try again in a minute.")
             if plan:
@@ -193,9 +236,19 @@ def run(user):
                         plan["read"] += 1
                     st.rerun()
         else:
-            right = ans == q["answer"]
-            st.markdown(("✅ " if right else "❌ ") + f"**{q['options'][q['answer']]}**"
-                        + (f" — {en_opts[q['answer']]}" if len(en_opts) == 3 else ""))
+            def opt(n):
+                return f"**{q['options'][n]}**" + (f" — {en_opts[n]}" if len(en_opts) == 3 else "")
+            if ans == q["answer"]:
+                st.markdown("✅ Right: " + opt(ans))
+            else:
+                st.markdown("❌ You chose " + opt(ans))
+                st.markdown("✅ The answer: " + opt(q["answer"]))
+            if S.get("rh_flagged") == cur["id"]:
+                st.caption("🚩 Reported: this passage is out of your score and won't be shown again.")
+            elif st.button("🚩 The question is wrong", key=f"rh_flag_{cur['id']}"):
+                db.reading_passage_flag(cur["id"], f"reported (chose {q['options'][ans]})")
+                S.rh_flagged = cur["id"]
+                st.rerun()
     if ans is not None:
         with st.expander("Translation", expanded=ans != q["answer"]):
             st.write(p.get("english", ""))

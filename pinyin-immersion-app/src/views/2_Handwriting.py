@@ -17,15 +17,26 @@ Struggle-aware drilling:
 New characters are capped per day across every source (and held back while
 reviews pile up). As a step of today's plan, a review session from your
 chosen source starts straight away.
+
+On the HSK track two more (hsk_sentences, db_manager):
+  • Sentences: official HSK example sentences written from their English and
+    pinyin - the characters you can write; the rest filled in. Longer as you
+    can write more. A character missed in a sentence comes back tomorrow.
+  • Welcome-back check: after AWAY_DAYS without writing, write each started
+    character once, 20 at a time; the ones you can't are forgotten - back
+    into learning, RELEARN_PER_DAY a day - and the rest keep their progress.
 """
 
+import datetime
 import time
 import uuid
 
 import streamlit as st
 
 import clock
+import db_manager as db
 import hsk
+import hsk_sentences as hs
 import today_plan as tp
 from auth import on_hsk_track, require_login, sidebar_user_badge
 from config import HANDWRITING_NEW_PER_DAY
@@ -56,7 +67,8 @@ USER_ID = USER["id"]
 S = st.session_state
 HSK = on_hsk_track(USER)
 SESSION_KEYS = ("hw_payload", "hw_sid", "hw_processed", "hw_done", "hw_final",
-                "hw_state_seed", "hw_plan", "hw_t0", "hw_logged", "hw_plan_empty", "hw_day")
+                "hw_state_seed", "hw_plan", "hw_t0", "hw_logged", "hw_plan_empty", "hw_day",
+                "hw_kind", "hw_sentences", "hw_step")
 SOURCES = {
     "vocab": "Characters from my vocabulary",
     "frequency": "500 most common characters",
@@ -75,6 +87,7 @@ if (S.get("hw_plan") or S.get("hw_plan_empty")) and S.get("hw_day") != clock.tod
 with st.sidebar:
     sidebar_user_badge()
     tp.sidebar("handwriting", end_session)
+    tp.sidebar("write_sentences", end_session)
 
 
 # ----------------------------------------------------------------------
@@ -85,21 +98,41 @@ def process_results(value):
         return
     results = value.get("results", [])
     done_before = S.hw_processed
+    kind = S.get("hw_kind", "chars")
     for r in results[done_before:]:
-        ch = r["character"]
+        ch, grade, mistakes = r["character"], int(r["grade"]), int(r.get("mistakes", 0))
+        if kind == "sentence":
+            # writing it in a sentence doesn't move its schedule on; not
+            # managing it brings its review forward
+            if grade == 0:
+                db.handwriting_missed_in_sentence(USER_ID, ch)
+            db.log_activity(USER_ID, "write", ch, grade, mistakes)
+            continue
         # Fetch the character's *current* stored state each time so the
         # recent-grade / recent-mistake windows roll correctly even when a
         # character is drilled several times in one session.
         state = get_char_state(USER_ID, ch) or S.hw_state_seed.get(ch, {})
-        update_handwriting_progress(
-            USER_ID, ch, int(r["grade"]), state, mistakes=int(r.get("mistakes", 0)))
+        if kind == "check":
+            db.hw_recheck_result(USER_ID, ch, grade, mistakes, state)
+        else:
+            update_handwriting_progress(USER_ID, ch, grade, state, mistakes=mistakes)
     S.hw_processed = len(results)
     if value.get("done"):
         S.hw_done = True
         S.hw_final = results
+        if kind == "sentence":          # each sentence right or not, for next time
+            i = 0
+            for sent in S.get("hw_sentences") or []:
+                part = results[i:i + sent["n"]]
+                i += sent["n"]
+                sent["right"] = hs.outcome(part)
+                db.record_game_item(USER_ID, hs.FAMILY, sent["zh"], sent["right"])
 
 
-def launch(chars, mode, in_plan=False, rerun=True):
+def launch(chars, mode, in_plan=False, rerun=True, kind="chars", sentences=None, step=None):
+    S.hw_kind, S.hw_step = kind, step or ("handwriting" if in_plan else None)
+    S.hw_sentences = [{"zh": x["zh"], "en": x["en"], "py": x["py"], "n": x["n"]}
+                      for x in sentences or []]
     S.hw_payload = {"session_id": str(uuid.uuid4()), "chars": chars, "mode": mode}
     S.hw_sid = S.hw_payload["session_id"]
     S.hw_processed = 0
@@ -115,14 +148,32 @@ def launch(chars, mode, in_plan=False, rerun=True):
 # ----------------------------------------------------------------------
 # TODAY'S PLAN: start straight away
 # ----------------------------------------------------------------------
+if "hw_payload" not in S and tp.active("write_sentences") and not S.get("hw_plan_empty"):
+    entries, chosen = db.sentence_writing_session(USER_ID, tp.params("write_sentences").get("n", 2))
+    if entries:
+        launch(entries, "sentence", in_plan=True, kind="sentence", sentences=chosen,
+               step="write_sentences")
+    S.hw_plan_empty, S.hw_day = True, clock.today().isoformat()
+    tp.session_done(USER_ID, "handwriting", time.time(), step="write_sentences")
+    st.success("No sentences to write yet.")
+    tp.continue_ui(end_session)
+    st.stop()
+
 if "hw_payload" not in S and (tp.active("handwriting") or S.get("hw_plan_empty")):
     if not S.get("hw_plan_empty"):
         p_ = tp.params("handwriting")
-        due, _avail = handwriting_due_and_new(USER_ID)
-        new = min(p_.get("new", 0), handwriting_new_allowance(USER_ID, due))
-        chars = handwriting_session_for(USER_ID, new, max_reviews=p_.get("reviews"))
-        if chars:
-            launch(chars, "standard", in_plan=True)
+        if p_.get("check"):                 # back from a break: the check first
+            if not db.hsk_writing_status(USER_ID)["recheck"]:
+                db.hw_recheck_start(USER_ID)
+            chars = db.hw_recheck_session(USER_ID, p_["check"])
+            if chars:
+                launch(chars, "check", in_plan=True, kind="check")
+        else:
+            due, _avail = handwriting_due_and_new(USER_ID)
+            new = min(p_.get("new", 0), handwriting_new_allowance(USER_ID, due))
+            chars = handwriting_session_for(USER_ID, new, max_reviews=p_.get("reviews"))
+            if chars:
+                launch(chars, "standard", in_plan=True)
         S.hw_plan_empty, S.hw_day = True, clock.today().isoformat()
         tp.session_done(USER_ID, "handwriting", time.time(), step="handwriting")
     st.success("Nothing to write today.")
@@ -223,8 +274,72 @@ if "hw_payload" not in S:
         S.hw_herbs = False
         st.rerun()
 
-    tab_review, tab_weak, tab_focus, tab_mine = st.tabs(
-        ["📆 Review", "🎯 Weak characters", "🔍 A word", "📖 My characters"])
+    status = db.hsk_writing_status(USER_ID) if HSK and not HERBS else {}
+    check = status.get("recheck")
+
+    def welcome_back():
+        """The check after a break: offered, in progress, or just finished."""
+        if check:
+            left = len(check["todo"])
+            st.info(f"**Welcome-back check** — {left} of {check['total']} characters left · "
+                    f"kept {check['kept']} · forgotten {check['forgotten']}. Write each once; "
+                    "the ones you can't go back to learning.")
+            if st.button(f"✍️ Check the next {min(db.RECHECK_CHUNK, left)}", type="primary",
+                         width="stretch", key="hw_check_go"):
+                launch(db.hw_recheck_session(USER_ID), "check", kind="check")
+        elif status.get("offer"):
+            st.info(f"**You haven't written for {status['away']} days.** Check what you still "
+                    f"know: write each of the {status['started']} characters you'd started, once, "
+                    f"{db.RECHECK_CHUNK} at a time. The ones you can't write go back to learning "
+                    f"({db.RELEARN_PER_DAY} a day); the rest keep their progress.")
+            c1, c2 = st.columns(2)
+            if c1.button("✍️ Start the check", type="primary", width="stretch",
+                         key="hw_check_start"):
+                db.hw_recheck_start(USER_ID)
+                launch(db.hw_recheck_session(USER_ID), "check", kind="check")
+            if c2.button("Not now", width="stretch", key="hw_check_skip"):
+                db.hw_recheck_dismiss(USER_ID)
+                st.rerun()
+        elif status.get("last_check") and status["last_check"].get("done", "") >= \
+                (clock.today() - datetime.timedelta(days=7)).isoformat():
+            lc = status["last_check"]
+            st.caption(f"Welcome-back check done: kept {lc['kept']} of {lc['total']}, "
+                       f"{lc['forgotten']} back in learning.")
+
+    if HSK and not HERBS:
+        welcome_back()
+        tab_review, tab_sent, tab_weak, tab_focus, tab_mine = st.tabs(
+            ["📆 Review", "📝 Sentences", "🎯 Weak", "🔍 A word", "📖 Mine"])
+    else:
+        tab_sent = None
+        tab_review, tab_weak, tab_focus, tab_mine = st.tabs(
+            ["📆 Review", "🎯 Weak characters", "🔍 A word", "📖 My characters"])
+
+    if tab_sent is not None:
+        with tab_sent:
+            n = status.get("writable", 0)
+            lo, hi = hs.tier(n)
+            if n < hs.MIN_WRITABLE:
+                st.info(f"Sentences start once you can write {hs.MIN_WRITABLE} characters — "
+                        f"you can write {n}. (Can write = written at least twice.)")
+            else:
+                st.caption(f"Official HSK example sentences, written from their English and "
+                           f"pinyin. You can write {n} characters, so each sentence asks for "
+                           f"{lo}–{hi} of them; any you haven't learnt are filled in. Longer "
+                           "sentences come as you can write more. Sentences you get wrong "
+                           "come back; a character you miss comes back for review tomorrow.")
+                c1, c2 = st.columns(2)
+                for col, k in ((c1, 2), (c2, 5)):
+                    if col.button(f"✍️ Write {k} sentences", type="primary" if k == 2 else
+                                  "secondary", width="stretch", key=f"hw_sent_{k}",
+                                  disabled=bool(check)):
+                        entries, chosen = db.sentence_writing_session(USER_ID, k)
+                        if entries:
+                            launch(entries, "sentence", kind="sentence", sentences=chosen)
+                        else:
+                            st.warning("No sentences fit what you can write yet.")
+                if check:
+                    st.caption("After the welcome-back check.")
 
     # --- standard review session ---
     with tab_review:
@@ -293,8 +408,11 @@ if "hw_payload" not in S:
                     "characters run watch → trace → write; reviews go straight to writing. "
                     "Miss a character more than 3× and it comes back later in the session, "
                     "with its next review pulled to tomorrow.")
+            if check:
+                st.caption("New characters and reviews wait until the welcome-back check is "
+                           "done (above).")
             if st.button("▶️ Start", type="primary", width="stretch",
-                         disabled=(due + room == 0)):
+                         disabled=(due + room == 0) or bool(check)):
                 chars = handwriting_session_for(USER_ID, room, source=source)
                 if chars:
                     launch(chars, "standard")
@@ -392,22 +510,37 @@ if "hw_payload" not in S:
 value = hanzi_drill(session=S.hw_payload, key=f"drill_{S.hw_sid}", default=None)
 process_results(value)
 
-mode_label = "struggle loop" if S.hw_payload["mode"] == "struggle" else "review"
+mode_label = {"struggle": "struggle loop", "sentence": "sentences",
+              "check": "welcome-back check"}.get(S.hw_payload["mode"], "review")
 st.caption(f"💾 {S.hw_processed} attempts saved · {mode_label}")
 
 if S.get("hw_done"):
     counts = [0, 0, 0, 0]
     for r in S.get("hw_final", []):
         counts[int(r["grade"])] += 1
-    st.success(
-        f"Session saved — Easy {counts[3]} · Good {counts[2]} · "
-        f"Hard {counts[1]} · Again {counts[0]}")
-    if tp.active("handwriting") and not (HSK and S.get("hw_herbs")):
-        S.hw_plan = True            # a Library session counts if the plan is waiting on it
-                                    # (herb names don't stand in for the HSK characters)
+    kind = S.get("hw_kind", "chars")
+    if kind == "sentence":
+        for sent in S.get("hw_sentences") or []:
+            st.markdown(("✅ " if sent.get("right") else "❌ ") + f"**{sent['zh']}**  \n"
+                        f"{sent['py']} — {sent['en']}")
+    elif kind == "check":
+        st_ = db.hsk_writing_status(USER_ID)
+        c_ = st_["recheck"] or st_["last_check"] or {}
+        if c_:
+            left = len(c_.get("todo") or [])
+            st.success(f"Kept {c_['kept']} · forgotten {c_['forgotten']}"
+                       + (f" · {left} still to check" if left else " · check done"))
+    else:
+        st.success(
+            f"Session saved — Easy {counts[3]} · Good {counts[2]} · "
+            f"Hard {counts[1]} · Again {counts[0]}")
+    if kind == "chars" and tp.active("handwriting") and not (HSK and S.get("hw_herbs")):
+        S.hw_plan, S.hw_step = True, "handwriting"   # a Library session counts if the plan
+                                    # is waiting on it (herb names don't stand in for the HSK
+                                    # characters)
     in_plan = S.get("hw_plan")
     tp.session_done(USER_ID, "handwriting", S.get("hw_t0"), items=len(S.get("hw_final", [])),
-                    step="handwriting" if in_plan else None, once_key="hw_logged")
+                    step=S.get("hw_step") if in_plan else None, once_key="hw_logged")
     if in_plan:
         tp.continue_ui(end_session)
     elif st.button("🔄 New session", type="primary", width="stretch"):
@@ -418,6 +551,7 @@ else:
         st.caption("Progress so far is already saved.")
         if st.button("🏁 End now", width="stretch"):
             tp.session_done(USER_ID, "handwriting", S.get("hw_t0"), items=S.get("hw_processed", 0),
-                            step="handwriting" if S.get("hw_plan") else None, once_key="hw_logged")
+                            step=S.get("hw_step") if S.get("hw_plan") else None,
+                            once_key="hw_logged")
             end_session()
             st.rerun()

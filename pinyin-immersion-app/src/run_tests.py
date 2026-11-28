@@ -2265,6 +2265,125 @@ def db_tests():
         finally:
             rh.blind_check = real
 
+    @test("writing after a break: write everything once, the ones you can't go back to learning; sentences")
+    def t_writing_return():
+        import datetime as _dt
+        import hanzi_component as hc
+        import hsk_sentences as hs
+        from streamlit.testing.v1 import AppTest
+        uid = _fresh_learner()
+        conn = db.get_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM handwriting_progress WHERE user_id = %s", (uid,))
+        cur.execute("UPDATE users SET hw_recheck = NULL WHERE id = %s", (uid,))
+        order = [r["char"] for r in _hsk.write_order()][:30]
+        long_ago = (clock.today() - _dt.timedelta(days=40)).isoformat()
+        for ch in order:
+            cur.execute("""INSERT INTO handwriting_progress (character, user_id, next_review_date,
+                               interval, ease_factor, review_count, first_seen_date, last_reviewed,
+                               clean_writes) VALUES (%s, %s, %s, 5, 2.5, 3, %s, %s, 2)""",
+                        (ch, uid, long_ago, long_ago, long_ago))
+        conn.commit(); conn.close()
+        st_ = db.hsk_writing_status(uid)
+        assert st_["away"] == 40 and st_["offer"] and st_["writable"] == 30 and not st_["recheck"]
+        # the fake drill: every other character not written (Again)
+        real = hc.hanzi_drill
+        graded = {}
+        rule = {"fn": lambda n, c: 0 if n % 2 else 2}
+
+        def drill(session=None, key=None, default=None):
+            res = []
+            for n, c in enumerate(session["chars"]):
+                g = graded.setdefault(c["character"], rule["fn"](n, c))
+                res.append({"character": c["character"], "grade": g, "mistakes": 0 if g else 5,
+                            "hints": 0, "revealed": g == 0})
+            return {"session_id": session["session_id"], "results": res, "done": True}
+        hc.hanzi_drill = drill
+
+        def page():
+            at = AppTest.from_file("views/2_Handwriting.py", default_timeout=120)
+            at.session_state["user"] = {"id": uid, "username": "matt", "display_name": "M"}
+            return at
+        try:
+            at = page(); at.run()
+            assert not at.exception, at.exception
+            assert any("haven't written for 40 days" in i.value for i in at.info)
+            next(b for b in at.button if b.key == "hw_check_start").click().run()
+            assert not at.exception, at.exception
+            assert at.session_state["hw_kind"] == "check"
+            chars = at.session_state["hw_payload"]["chars"]
+            assert len(chars) == db.RECHECK_CHUNK and not any(c["is_new"] for c in chars), \
+                "straight to writing"
+            assert any("Kept 10 · forgotten 10 · 10 still to check" in x.value for x in at.success)
+            # forgotten: back into learning, spread from tomorrow; kept: progress kept
+            rows = {c: db.get_char_state(uid, c) for c in order}
+            gone = [c for c in order[:20] if graded[c] == 0]
+            kept = [c for c in order[:20] if graded[c] == 2]
+            assert all(rows[c]["relearn"] and rows[c]["review_count"] == 0 for c in gone)
+            days = sorted(rows[c]["next_review_date"] for c in gone)
+            tomorrow = (clock.today() + _dt.timedelta(days=1)).isoformat()
+            assert days[0] == tomorrow and days[-1] > tomorrow, "8 a day, from tomorrow"
+            assert all(not rows[c]["relearn"] and rows[c]["review_count"] == 4 for c in kept)
+            # while the check runs: no normal session, no sentences
+            st_ = db.hsk_writing_status(uid)
+            assert len(st_["recheck"]["todo"]) == 10 and not st_["offer"]
+            # the rest
+            at = page(); at.run()
+            assert any("Welcome-back check" in i.value for i in at.info)
+            next(b for b in at.button if b.key == "hw_check_go").click().run()
+            st_ = db.hsk_writing_status(uid)
+            assert st_["recheck"] is None and st_["last_check"]["kept"] + \
+                st_["last_check"]["forgotten"] == 30 and not st_["offer"], "done, not offered again"
+            # a forgotten character, when due, is taught again: watch -> trace -> write
+            conn = db.get_connection(); cur = conn.cursor()
+            cur.execute("UPDATE handwriting_progress SET next_review_date = %s WHERE user_id = %s "
+                        "AND character = %s", (clock.today().isoformat(), uid, gone[0]))
+            conn.commit(); conn.close()
+            entry = [e for e in db.get_hsk_writing_session(uid, 0) if e["character"] == gone[0]][0]
+            assert entry["is_new"] and entry["relearn"]
+            db.update_handwriting_progress(uid, gone[0], 2, db.get_char_state(uid, gone[0]))
+            assert not db.get_char_state(uid, gone[0])["relearn"], "written well: learning done"
+
+            # sentences from the characters still writable (15 kept)
+            writable = db.handwriting_writable(uid)
+            assert set(writable) == set(kept) | {c for c in order[20:] if graded[c] == 2}
+            for c in order[:20]:            # enough to write sentences
+                if c not in writable:
+                    db.update_handwriting_progress(uid, c, 3, db.get_char_state(uid, c))
+                    db.update_handwriting_progress(uid, c, 3, db.get_char_state(uid, c))
+            writable = db.handwriting_writable(uid)
+            assert len(writable) >= hs.MIN_WRITABLE
+            entries, chosen = db.sentence_writing_session(uid, 2)
+            assert len(chosen) == 2 and len(entries) == sum(x["n"] for x in chosen)
+            for e in entries:
+                assert e["character"] in writable and e["group_word"] == e["sentence"]
+                assert not e["is_new"] and e["group_hide_pending"]
+                sent = next(x for x in chosen if x["zh"] == e["sentence"])
+                assert all(sent["chars"][j] not in writable for j in e["group_given"])
+            # write two: the first character of the first sentence missed
+            graded.clear()
+            rule["fn"] = lambda n, c: 0 if n == 0 else 3
+            before = {c: db.get_char_state(uid, c) for c in writable}
+            at = page(); at.run()
+            next(b for b in at.button if b.key == "hw_sent_2").click().run()
+            assert not at.exception, at.exception
+            assert at.session_state["hw_kind"] == "sentence"
+            sents = at.session_state["hw_sentences"]
+            cards = at.session_state["hw_payload"]["chars"]
+            missed = cards[0]["character"]
+            assert [x["right"] for x in sents] == [False, True], sents
+            text = " ".join(m.value for m in at.markdown)
+            assert "❌ **" + sents[0]["zh"] in text and sents[0]["en"] in text
+            seen = db.game_seen(uid, hs.FAMILY)
+            assert seen[sents[0]["zh"]]["box"] == 0, "the missed sentence comes back first"
+            after = db.get_char_state(uid, missed)
+            assert after["next_review_date"] <= tomorrow and after["interval"] <= 1, \
+                "a miss comes back tomorrow"
+            for c in {x["character"] for x in cards} - {missed}:
+                assert db.get_char_state(uid, c)["interval"] == before[c]["interval"], \
+                    "no interval gained from a sentence"
+        finally:
+            hc.hanzi_drill = real
+
     @test("HSK grammar: a quick check below your level - no lesson card, a few items, a week's gap when passed")
     def t_grammar_hsk_modes():
         import audio_engine
@@ -2490,6 +2609,7 @@ def db_tests():
     t_grammar_hsk_modes()
     t_hsk_play()
     t_reading_flags()
+    t_writing_return()
     t_pages_smoke()
 
 
@@ -4694,6 +4814,50 @@ def t_scramble_pool():
         "no gluing 做+由 to fit"
 
 
+@test("sentence writing: official sentences, mostly yours to write, longer as you can write more")
+def t_sentence_writing():
+    import random as _r
+    import hsk_sentences as hs
+    pool = hs.pool()
+    assert len(pool) >= 800 and all(s["en"] and s["py"] and s["zh"][-1] in "。？！" for s in pool)
+    order = [r["char"] for r in _hsk.write_order()]
+    assert hs.pick(set(order[:hs.MIN_WRITABLE - 1])) == [], "not before 20 characters"
+    sizes = []
+    for n in (20, 60, 150, 300):
+        w = set(order[:n])
+        lo, hi = hs.tier(n)
+        cands = hs.candidates(w)
+        assert len(cands) >= 5, n
+        for c in cands:
+            mine = hs.to_write(c, w)
+            assert len(mine) <= hi and len(mine) / len(c["chars"]) >= hs.MIN_SHARE
+        picked = hs.pick(w, 3, rng=_r.Random(n))
+        assert len(picked) == 3
+        sizes.append(sum(len(hs.to_write(c, w)) for c in cands) / len(cands))
+    assert sizes == sorted(sizes) and sizes[-1] >= 2 * sizes[0], ("longer as you can write more", sizes)
+    # missed sentences come back first
+    w = set(order[:150])
+    first = hs.candidates(w)[7]["zh"]
+    again = hs.pick(w, 2, seen={first: {"box": 0, "last": "2026-01-01"}}, rng=_r.Random(1))
+    assert again[0]["zh"] == first
+    assert hs.outcome([{"grade": 2}, {"grade": 3}]) and not hs.outcome([{"grade": 2}, {"grade": 1}])
+    assert not hs.outcome([{"grade": 3, "revealed": True}]) and not hs.outcome([])
+    # the plan: a sentence step once you can write 20, none during a check
+    def evening(hsk_):
+        st_ = dict(_plan_state(), handwriting={"started": True, "due": 3, "new_room": 5,
+                                               "new_available": 50, "hsk": hsk_})
+        return [x["key"] for x in tplan.build_day(st_, hsk_track=True)[1]["steps"]]
+    assert "write_sentences" not in evening({"writable": 12})
+    assert evening({"writable": 25}) == ["pictures", "handwriting", "write_sentences", "reading"]
+    chk = tplan.build_day(dict(_plan_state(), handwriting={
+        "started": True, "due": 3, "new_room": 5, "new_available": 50,
+        "hsk": {"writable": 90, "recheck": {"todo": list("一二三"), "total": 3}}}),
+        hsk_track=True)[1]["steps"]
+    hw = [x for x in chk if x["key"] == "handwriting"][0]
+    assert hw["params"] == {"check": 20} and "welcome-back" in hw["detail"]
+    assert "write_sentences" not in [x["key"] for x in chk], "after the check"
+
+
 @test("herb game: separate from HSK - names, characters, tier-1 first")
 def t_games_herbs():
     import random as _r
@@ -4763,7 +4927,7 @@ if __name__ == "__main__":
     print("Games:")
     t_games_items(); t_games_commons(); t_games_logic()
     print("HSK 1-4:")
-    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_game_priority(); t_hsk_pictures(); t_scramble_pool(); t_games_herbs(); t_grammar_pace(); t_pinyin_context(); t_card_english(); t_gr_hsk_writer()
+    t_hsk_data(); t_hsk_write_order(); t_hsk_grammar(); t_gr_build(); t_gr_transform(); t_ahead_bank(); t_reading_hsk(); t_reading_page(); t_pl_items(); t_pl_flow(); t_pl_grammar(); t_hsk_track(); t_plan_hsk(); t_games_hsk(); t_game_priority(); t_hsk_pictures(); t_scramble_pool(); t_sentence_writing(); t_games_herbs(); t_grammar_pace(); t_pinyin_context(); t_card_english(); t_gr_hsk_writer()
     print("Frequency list:")
     t_freq_files(); t_region_tags(); t_erhua(); t_format_pinyin()
     if os.environ.get("DATABASE_URL"):

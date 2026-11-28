@@ -45,6 +45,7 @@ STEPS = {
     "handwriting": ("✍️", "Handwriting", "views/2_Handwriting.py"),
     "reading": ("📖", "Reading", "views/6_Reading.py"),
     "pictures": ("🖼️", "Picture words", "views/8_Games.py"),
+    "write_sentences": ("📝", "Sentence writing", "views/2_Handwriting.py"),
 }
 SESSIONS = {
     "morning": ("🌅", "Morning", "Learn",
@@ -186,7 +187,17 @@ def _evening(state, done):
                            f"{listen} to understand by ear · {speak} to say — "
                            "today's new words first", listen + 1.5 * speak,
                            {"listen": listen, "speak": speak}, done))
-    if writing:
+    hs_ = (h or {}).get("hsk") or {}
+    check = hs_.get("recheck")
+    if writing and (check or hs_.get("offer")):
+        # back from a break: write everything once, 20 a session, before
+        # anything new (the ones you can't go back to learning)
+        left = len(check["todo"]) if check else hs_.get("started", 0)
+        steps.append(_step("evening", "handwriting",
+                           f"welcome-back check: {min(RECHECK_CHUNK, left)} of the {left} "
+                           "characters you'd started, written once", 0.5 * min(RECHECK_CHUNK, left),
+                           {"check": RECHECK_CHUNK}, done))
+    elif writing:
         # the HSK track has 400 characters to get through: the whole daily
         # allowance in the evening, not three of it
         new = min(HANDWRITING_NEW_PER_DAY if state.get("hsk_track") else 3,
@@ -198,6 +209,13 @@ def _evening(state, done):
             steps.append(_step("evening", "handwriting", " · ".join(parts) or "nothing due",
                                0.5 * due + 1.5 * new,
                                {"reviews": PLAN_HANDWRITING_REVIEWS, "new": new}, done))
+        if state.get("hsk_track") and hs_.get("writable", 0) >= SENTENCE_WRITING_MIN:
+            # whole sentences from the characters you can write
+            steps.append(_step("evening", "write_sentences",
+                               f"{_n(PLAN_WRITE_SENTENCES, 'sentence')} to write from English "
+                               "and pinyin", 2 * PLAN_WRITE_SENTENCES,
+                               {"n": PLAN_WRITE_SENTENCES}, done))
+    if writing:
         if state.get("hsk_track"):
             # graded passages at the reading level: open from day one
             steps.append(_step("evening", "reading",
@@ -215,7 +233,10 @@ def _evening(state, done):
 BUILDERS = {"morning": _morning, "evening": _evening}
 
 
-HSK_STEPS = ("grammar", "pictures", "handwriting", "reading")
+HSK_STEPS = ("grammar", "pictures", "handwriting", "write_sentences", "reading")
+PLAN_WRITE_SENTENCES = 2
+SENTENCE_WRITING_MIN = 20         # hsk_sentences.MIN_WRITABLE
+RECHECK_CHUNK = 20                # db_manager.RECHECK_CHUNK
 PICTURE_ROTATION = ("word_pic", "listen_pic", "pic_word")
 PLAN_READING_PASSAGES = 1
 HSK_BANK_AHEAD = 6      # new structures beyond today's whose drills the app writes ahead
@@ -309,6 +330,8 @@ def gather_state(user_id, also=(), hsk_track=False):
         if started or hsk_track:    # the HSK track writes from day one
             h["due"], h["new_available"] = db.handwriting_due_and_new(user_id)
             h["new_room"] = db.handwriting_new_allowance(user_id, h["due"])
+        if hsk_track:               # writing sentences, and the check after a break
+            h["hsk"] = db.hsk_writing_status(user_id)
         return h
 
     # the HSK track's plan has no words, tones, recap or sentence steps: those

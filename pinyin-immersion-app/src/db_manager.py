@@ -425,6 +425,8 @@ def _build_schema():
     cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS hsk_levels JSONB")
     # HSK track: how many HSK words you've learnt in Anki (set on the level page)
     cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS anki_words INTEGER")
+    # the welcome-back writing check: characters still to write, kept, forgotten
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS hw_recheck JSONB")
     # Vocabulary CONTENT is shared by everyone studying on this deployment.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vocab (
@@ -724,7 +726,10 @@ def _build_schema():
                     "recent_grades TEXT DEFAULT ''",
                     "recent_mistakes TEXT DEFAULT ''",
                     "last_reviewed TEXT",
-                    "clean_writes INTEGER DEFAULT 0"):
+                    "clean_writes INTEGER DEFAULT 0",
+                    # forgotten in a welcome-back check: watch -> trace -> write
+                    # again when it comes up, until written well
+                    "relearn BOOLEAN DEFAULT FALSE"):
         cursor.execute(
             "ALTER TABLE handwriting_progress "
             "ADD COLUMN IF NOT EXISTS " + _coldef)
@@ -1973,7 +1978,8 @@ def _hw_entry(ch, is_new, personal_freq, progress, vocab_rows):
                    "english": herb.get("english") or ""}
     entry = {
         "character": ch,
-        "is_new": is_new,
+        "is_new": is_new or bool((progress or {}).get("relearn")),
+        "relearn": bool((progress or {}).get("relearn")),
         "personal_freq": personal_freq,
         "interval": (progress or {}).get("interval", 0),
         "ease_factor": float((progress or {}).get("ease_factor", 2.5)),
@@ -2513,6 +2519,9 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
             clean_writes = EXCLUDED.clean_writes
     ''', (character, user_id, next_review_date, new_interval, new_ease,
            today_str, mistakes, new_grades, new_mist, today_str, new_clean))
+    if grade >= 2:
+        cursor.execute("UPDATE handwriting_progress SET relearn = FALSE "
+                       "WHERE user_id = %s AND character = %s AND relearn", (user_id, character))
     conn.commit()
     conn.close()
     log_activity(user_id, "write", character, grade, mistakes)
@@ -2520,6 +2529,187 @@ def update_handwriting_progress(user_id, character, grade, current_state, mistak
                  f"→ next review in {new_interval}d"
                  + (" [REQUEUED this session]" if requeue else ""))
     return requeue
+
+
+# ----------------------------------------------------------------------
+# back from a break: the welcome-back check, and sentence writing
+# ----------------------------------------------------------------------
+AWAY_DAYS = 14              # this long without writing: check what's still there
+RECHECK_CHUNK = 20          # characters a check session
+RELEARN_PER_DAY = 8         # forgotten characters back into learning, a day
+
+
+def hsk_writing_status(user_id):
+    """{"away": days since anything was last written (None if never),
+    "started", "writable", "recheck": the check's state or None,
+    "offer": True if a check should be offered}."""
+    import hsk
+    chars = [r["char"] for r in hsk.write_order()]
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"""SELECT MAX(last_reviewed), COUNT(*),
+                              COUNT(*) FILTER (WHERE review_count >= 2 AND interval >= 1
+                                               AND NOT COALESCE(relearn, FALSE))
+                       FROM handwriting_progress WHERE user_id = %s
+                         AND character IN ({",".join(["%s"] * len(chars))})""",
+                   [user_id] + chars)
+    last, started, writable = cursor.fetchone()
+    cursor.execute("SELECT hw_recheck FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    state = (row[0] if row else None) or None
+    if isinstance(state, str):
+        state = json.loads(state)
+    import datetime as _dt
+    away = None
+    if last:
+        try:
+            away = (clock.today() - _dt.date.fromisoformat(str(last)[:10])).days
+        except ValueError:
+            away = None
+    active = bool(state and state.get("todo"))
+    # dismissed or finished since the last writing: not offered again until
+    # the next long break
+    handled = bool(state and (state.get("dismissed") or state.get("done") or "")
+                   >= str(last or "")[:10])
+    offer = (not active and started >= 10 and away is not None and away >= AWAY_DAYS
+             and not handled)
+    return {"away": away, "started": started, "writable": writable,
+            "recheck": state if active else None, "offer": offer,
+            "last_check": state if state and state.get("done") else None}
+
+
+def _set_recheck(user_id, state):
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET hw_recheck = %s WHERE id = %s",
+                   (json.dumps(state, ensure_ascii=False) if state is not None else None, user_id))
+    conn.commit()
+    conn.close()
+
+
+def hw_recheck_start(user_id):
+    """Every HSK character you've started (not already back in learning),
+    in teaching order, to write once."""
+    import hsk
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    progress = _hsk_hw_progress(cursor, user_id)
+    conn.close()
+    todo = [r["char"] for r in hsk.write_order()
+            if r["char"] in progress and not progress[r["char"]].get("relearn")]
+    state = {"since": clock.today().isoformat(), "todo": todo, "total": len(todo),
+             "kept": 0, "forgotten": 0}
+    _set_recheck(user_id, state)
+    return state
+
+
+def hw_recheck_dismiss(user_id):
+    _set_recheck(user_id, {"dismissed": clock.today().isoformat()})
+
+
+def hw_recheck_session(user_id, n=RECHECK_CHUNK):
+    """The next n characters of the check, straight to writing."""
+    import hsk
+    state = hsk_writing_status(user_id)["recheck"]
+    if not state:
+        return []
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    progress = _hsk_hw_progress(cursor, user_id)
+    conn.close()
+    rows = {r["char"]: r for r in hsk.write_order()}
+    out = []
+    for ch in state["todo"][:n]:
+        if ch in rows:
+            e = _hsk_hw_entry(rows[ch], False, progress.get(ch))
+            e["is_new"] = False
+            out.append(e)
+    return out
+
+
+def hw_recheck_result(user_id, character, grade, mistakes, current_state):
+    """One character of the check. Written (even with a struggle): kept, and
+    scheduled as a normal review. Not written (Again): forgotten - back into
+    learning, RELEARN_PER_DAY a day from tomorrow."""
+    import datetime as _dt
+    status = hsk_writing_status(user_id)
+    state = status["recheck"]
+    if not state or character not in state["todo"]:
+        return update_handwriting_progress(user_id, character, grade, current_state, mistakes)
+    if int(grade) >= 1:
+        update_handwriting_progress(user_id, character, grade, current_state, mistakes)
+        state["kept"] += 1
+    else:
+        day = clock.today() + _dt.timedelta(days=1 + state["forgotten"] // RELEARN_PER_DAY)
+        conn = get_connection(one_shot=True)
+        cursor = conn.cursor()
+        cursor.execute("""UPDATE handwriting_progress SET relearn = TRUE, interval = 0,
+                              review_count = 0, clean_writes = 0, next_review_date = %s,
+                              ease_factor = GREATEST(1.3, ease_factor - 0.2),
+                              total_mistakes = total_mistakes + %s,
+                              recent_grades = '', recent_mistakes = '', last_reviewed = %s
+                          WHERE user_id = %s AND character = %s""",
+                       (day.isoformat(), int(mistakes), clock.today().isoformat(),
+                        user_id, character))
+        conn.commit()
+        conn.close()
+        log_activity(user_id, "write", character, 0, mistakes)
+        state["forgotten"] += 1
+    state["todo"] = [c for c in state["todo"] if c != character]
+    if not state["todo"]:
+        state["done"] = clock.today().isoformat()
+    _set_recheck(user_id, state)
+    return False
+
+
+def handwriting_writable(user_id):
+    """{character: progress row} for the HSK characters you can write: written
+    at least twice, not back in learning."""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    progress = _hsk_hw_progress(cursor, user_id)
+    conn.close()
+    return {c: p for c, p in progress.items()
+            if (p.get("review_count") or 0) >= 2 and (p.get("interval") or 0) >= 1
+            and not p.get("relearn")}
+
+
+def sentence_writing_session(user_id, n=2, rng=None):
+    """Drill entries for n sentences: one card per character you write, each
+    carrying the whole sentence as its cue (characters given shown, ones to
+    come hidden). Also returns the sentences, for marking them after."""
+    import hsk_sentences as hs
+    writable = handwriting_writable(user_id)
+    chosen = hs.pick(set(writable), n, seen=game_seen(user_id, hs.FAMILY), rng=rng)
+    entries, out = [], []
+    for s in chosen:
+        mine = hs.to_write(s, writable)
+        out.append({**s, "n": len(mine)})
+        for step, i in enumerate(mine):
+            ch = s["chars"][i]
+            e = _hw_entry(ch, False, 1, writable[ch], [])
+            e.update({"is_new": False, "word": s["zh"], "word_pinyin": s["py"],
+                      "word_english": s["en"], "group_word": s["zh"], "group_index": i,
+                      "group_total": len(mine), "group_step": step,
+                      "group_given": [j for j in range(len(s["chars"])) if j not in mine],
+                      "group_hide_pending": True, "sentence": s["zh"]})
+            entries.append(e)
+    return entries, out
+
+
+def handwriting_missed_in_sentence(user_id, character):
+    """A character you couldn't write in a sentence: its review comes
+    forward to tomorrow (no interval gained or lost for writing it right)."""
+    import datetime as _dt
+    tomorrow = (clock.today() + _dt.timedelta(days=1)).isoformat()
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("""UPDATE handwriting_progress SET interval = LEAST(interval, 1),
+                          next_review_date = LEAST(next_review_date, %s)
+                      WHERE user_id = %s AND character = %s""", (tomorrow, user_id, character))
+    conn.commit()
+    conn.close()
 
 
 @_cached(ttl=20)

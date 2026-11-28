@@ -77,6 +77,22 @@ def main(max_sets=12):
                 if failed_in_row >= 4:
                     logging.warning("grammar: four failures in a row - stopping grammar")
                     break
+        # passages written before the blind check, still unread or answered
+        # wrong: checked now, the wrong ones taken out (and out of the score)
+        import reading_hsk as rh
+        for old in db.reading_passages_unchecked():
+            if old["user_id"] != uid:
+                continue
+            problems, ran = rh.blind_check(old["payload"])
+            if not ran:
+                break
+            if problems:
+                db.reading_passage_flag(old["id"], "blind check: " + problems[0])
+                logging.warning(f"  passage {old['payload'].get('title')}: taken out - {problems[0]}")
+            else:
+                db.reading_passage_mark_checked(old["id"], old["payload"])
+        for title, why in db.reading_passages_flagged():
+            logging.info(f"  flagged this week: {title} - {why}")
         # graded reading at the reading level: keep a stock of unread passages
         # (whatever happened with grammar)
         level = (db.get_hsk_levels(uid) or {}).get("read") or 1

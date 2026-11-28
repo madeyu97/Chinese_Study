@@ -628,6 +628,9 @@ def _build_schema():
     ''')
     cursor.execute("CREATE INDEX IF NOT EXISTS reading_passages_unread "
                    "ON reading_passages (user_id, level, read_at)")
+    # a passage whose question turned out wrong (reported, or failed the
+    # blind check): never shown again, not in the score
+    cursor.execute("ALTER TABLE reading_passages ADD COLUMN IF NOT EXISTS flagged TEXT")
     # every level test taken, for the history on the level-test page
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS placement_results (
@@ -976,8 +979,8 @@ def reading_passage_next(user_id, level):
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute("SELECT id, level, payload FROM reading_passages WHERE user_id = %s "
-                   "AND level = %s AND read_at IS NULL ORDER BY created_at LIMIT 1",
-                   (user_id, int(level)))
+                   "AND level = %s AND read_at IS NULL AND flagged IS NULL "
+                   "ORDER BY created_at LIMIT 1", (user_id, int(level)))
     row = cursor.fetchone()
     conn.close()
     if not row:
@@ -997,6 +1000,60 @@ def reading_passage_done(passage_id, correct):
     conn.close()
 
 
+def reading_passage_flag(passage_id, reason):
+    """Take a passage out: not shown again, its answer not counted."""
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE reading_passages SET flagged = %s, correct = NULL WHERE id = %s",
+                   (str(reason)[:500] or "flagged", passage_id))
+    conn.commit()
+    conn.close()
+
+
+def reading_passage_mark_checked(passage_id, payload):
+    payload = {**payload, "checked": True}
+    conn = get_connection(one_shot=True)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE reading_passages SET payload = %s WHERE id = %s",
+                   (json.dumps(payload, ensure_ascii=False), passage_id))
+    conn.commit()
+    conn.close()
+    return payload
+
+
+def reading_passages_unchecked(limit=40):
+    """Passages written before the blind check (payload has no "checked")
+    that still matter: unread, or answered wrong (a wrong question may be
+    why). [{"id", "user_id", "level", "payload", "read"}]"""
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""SELECT id, user_id, level, payload, read_at IS NOT NULL AS read
+                      FROM reading_passages
+                      WHERE flagged IS NULL AND NOT (payload ? 'checked')
+                        AND (read_at IS NULL OR correct = FALSE)
+                      ORDER BY created_at LIMIT %s""", (limit,))
+    out = []
+    for row in cursor.fetchall():
+        r = dict(row)
+        if isinstance(r["payload"], str):
+            r["payload"] = json.loads(r["payload"])
+        out.append(r)
+    conn.close()
+    return out
+
+
+def reading_passages_flagged(days=7):
+    """Recently flagged passages: (title, reason) - for the nightly log."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""SELECT payload->>'title', flagged FROM reading_passages
+                      WHERE flagged IS NOT NULL AND created_at > NOW() - (%s || ' days')::interval
+                      ORDER BY created_at DESC""", (str(int(days)),))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 def reading_passage_stats(user_id, level):
     """{"unread": at this level, "read": all levels, "right": answered right,
     "titles": the last 30 titles (so new ones differ)}"""
@@ -1005,7 +1062,8 @@ def reading_passage_stats(user_id, level):
     cursor.execute("""SELECT COUNT(*) FILTER (WHERE read_at IS NULL AND level = %s),
                              COUNT(*) FILTER (WHERE read_at IS NOT NULL),
                              COUNT(*) FILTER (WHERE correct)
-                      FROM reading_passages WHERE user_id = %s""", (int(level), user_id))
+                      FROM reading_passages WHERE user_id = %s AND flagged IS NULL""",
+                   (int(level), user_id))
     unread, read, right = cursor.fetchone()
     cursor.execute("SELECT payload->>'title' FROM reading_passages WHERE user_id = %s "
                    "ORDER BY created_at DESC LIMIT 30", (user_id,))

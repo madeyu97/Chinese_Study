@@ -204,6 +204,9 @@ def check(payload, level):
     elif not (q.get("question_english") and isinstance(q.get("options_english"), list)
               and len(q["options_english"]) == 3):
         p.append("question needs question_english and three options_english")
+    elif not _quoted(q.get("answer_quote"), text):
+        p.append("answer_quote must copy, character for character, the sentence of the text "
+                 "that answers the question - and the question must be answered by the text")
     else:
         # the question is in Chinese, like the exam's: it must be at the level too
         qa = analyse(q["question"] + "。" + "。".join(map(str, q["options"])), level,
@@ -212,6 +215,66 @@ def check(payload, level):
         if hard:
             p.append("the question uses words above HSK " + str(level) + ": " + "、".join(hard))
     return p
+
+
+def _bare(text):
+    return re.sub(r"[\s" + re.escape(_PUNCT) + r"\"'.,!?:;]", "", str(text or ""))
+
+
+def _quoted(quote, text):
+    """Is the quote (punctuation aside) a real stretch of the text, of a few
+    characters at least?"""
+    q = _bare(quote)
+    return len(q) >= 3 and q in _bare(text)
+
+
+def blind_check(payload):
+    """A second reading of the question with the key hidden: a model answers
+    from the text alone and quotes the sentence that proves it. Problems if
+    it can't (the text doesn't say), picks another option, or quotes
+    something that isn't in the text - the live run's passage gave tea to
+    the brother and asked what the child drank, keyed 喝茶.
+
+    Returns (problems, ran): ran is False if no model could be asked."""
+    from config import REVIEW_MODEL, GRADING_MODEL
+    from grammar_drills import _chat_json
+    q = payload["question"]
+    opts = "\n".join(f"{n}. {o}" for n, o in enumerate(q["options"]))
+    prompt = f"""
+Read this Chinese passage and answer the question using ONLY what the text
+says - not what is likely, not what fits the scene. Watch who does what.
+
+TEXT: {payload['text']}
+
+QUESTION: {q['question']}
+{opts}
+
+If the text doesn't say, or more than one option fits, answer -1.
+Return ONLY JSON: {{"answer": 0, 1, 2 or -1,
+ "quote": "<the sentence of the text that gives the answer, copied exactly; empty if -1>",
+ "why": "<one short sentence in English>"}}
+""".strip()
+    for model in (GRADING_MODEL, REVIEW_MODEL):
+        try:
+            v = _chat_json(model, prompt, 0)
+            got = int(v.get("answer"))
+        except Exception as e:
+            logging.warning(f"[READ HSK] blind check {model} failed: {e}")
+            continue
+        why = str(v.get("why") or "").strip()
+        key = q["options"][q["answer"]]
+        if got == -1:
+            return [f"answering from the text alone, the question can't be answered ({why}) - "
+                    f"the key says {key}. Ask about something the text states, about the "
+                    "right person, with exactly one option right"], True
+        if got != q["answer"]:
+            return [f"answering from the text alone, a reader picks "
+                    f"{q['options'][got] if 0 <= got < 3 else got} ({why}), but the key says "
+                    f"{key} - make exactly one option right by the text"], True
+        if not _quoted(v.get("quote"), payload["text"]):
+            return [f"the answer {key} isn't stated in the text - ask about something it says"], True
+        return [], True
+    return [], False
 
 
 def build_prompt(level, grammar=(), topic="", avoid=(), feedback=""):
@@ -242,13 +305,17 @@ fine setting.
 Then ONE comprehension question about the passage, in Chinese like the HSK
 exam's, using only words from the list, with three short Chinese options,
 exactly one right - answerable only by understanding the passage, not by
-guessing. Give the English of the question and of each option too.
+guessing. Ask about something the text states, about the right person (if
+the brother drinks tea, don't ask what the child drinks). In "answer_quote"
+copy, character for character, the sentence of the text that gives the
+answer. Give the English of the question and of each option too.
 {("YOUR LAST DRAFT WAS REJECTED. Fix:\n" + feedback) if feedback else ""}
 Return ONLY JSON:
 {{"title": "<short Chinese title>", "text": "<the passage>", "english": "<translation>",
  "new_words": [{{"hanzi": "…", "pinyin": "…", "english": "…"}}],
  "question": {{"question": "<in Chinese>", "options": ["…", "…", "…"], "answer": 0,
-              "question_english": "…", "options_english": ["…", "…", "…"]}}}}
+              "question_english": "…", "options_english": ["…", "…", "…"],
+              "answer_quote": "<the sentence of the text that answers it>"}}}}
 """.strip()
 
 
@@ -266,8 +333,11 @@ QUESTION: {payload['question']['question']} | options: {payload['question']['opt
 | key: {payload['question']['answer']}
 
 Check: the Chinese is natural and correct; the sentences connect into a
-passage; the English matches; exactly one option is right, the key points to
-it, and it can't be answered without understanding the text.
+passage; the English is natural English with the right sense (小朋友 is "the
+child", not "the little friend"); exactly one option is right BY THE TEXT -
+check who does what (if the brother drinks tea, "what does the child drink?"
+has no answer) - the key points to it, and it can't be answered without
+understanding the text.
 At HSK {level} the vocabulary is small on purpose: short, plain sentences, a
 word used twice, and simple statements (很好, 很好看) are expected - don't
 reject for those. Reject for Chinese a native speaker wouldn't say, a scene
@@ -364,9 +434,13 @@ def generate(level, grammar=(), topic="", avoid=(), attempts=None):
             continue
         problems = check(auto_declare(draft, level), level)
         if not problems:
+            problems, ran = blind_check(draft)
+            if not ran:
+                problems = ["the question couldn't be checked - no model answered"]
+        if not problems:
             ok, review_problems, reviewed = _review(draft, level)
             if ok:
-                draft["level"], draft["reviewed"] = level, reviewed
+                draft["level"], draft["reviewed"], draft["checked"] = level, reviewed, True
                 draft["grammar"] = [g.id for g in grammar]
                 draft["words"] = annotate(draft, level)
                 return draft
